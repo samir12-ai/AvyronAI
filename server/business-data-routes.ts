@@ -4,15 +4,18 @@ import { db } from "./db";
 import { businessDataLayer, businessDataRevisions, campaignSelections } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 
+import { deriveAnchorFromProductDna } from "./shared/strategic-doctrine";
+import { writeProductAnchorAudited } from "./shared/product-anchor-writer";
+
 import { resolveAccountId } from "./auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
+
 const VALID_FUNNEL_OBJECTIVES = ["AWARENESS", "LEADS", "SALES", "AUTHORITY"] as const;
 const VALID_CONVERSION_CHANNELS = ["WHATSAPP", "WEBSITE", "DM", "FORM"] as const;
 
 const REQUIRED_FIELDS = [
   "businessLocation",
   "businessType",
-  "coreOffer",
   "priceRange",
   "targetAudienceAge",
   "targetAudienceSegment",
@@ -27,7 +30,18 @@ const REQUIRED_FIELDS = [
 const baseBusinessSchema = z.object({
   businessLocation: z.string().trim().min(1),
   businessType: z.string().trim().min(1),
-  coreOffer: z.string().trim().min(1).optional(), // Made optional for Product mode
+  // Service-specific independent fields
+  coreOffer: z.string().optional(),
+  uniqueMechanism: z.string().optional(),
+  coreProblemSolved: z.string().optional(),
+  strategicAdvantage: z.string().optional(),
+  // Product-specific independent fields
+  businessModel: z.enum(["service", "product", "mixed"]).optional(),
+  heroProduct: z.string().optional(),
+  productSpecs: z.string().optional(),
+  endConsumerUseCase: z.string().optional(),
+  replacedCompetitor: z.string().optional(),
+  // Shared fields
   priceRange: z.string().trim().min(1),
   targetAudienceAge: z.string().trim().min(1),
   targetAudienceSegment: z.string().trim().min(1),
@@ -35,24 +49,13 @@ const baseBusinessSchema = z.object({
   funnelObjective: z.enum(VALID_FUNNEL_OBJECTIVES),
   primaryConversionChannel: z.enum(VALID_CONVERSION_CHANNELS),
   productCategory: z.string().optional(),
-  coreProblemSolved: z.string().optional(),
-  uniqueMechanism: z.string().optional(),
-  strategicAdvantage: z.string().optional(),
   targetDecisionMaker: z.string().optional(),
   goalTarget: z.string().optional(),
   goalTimeline: z.string().optional(),
   goalDescription: z.string().optional(),
 });
 
-const businessDataPutSchema = baseBusinessSchema.and(
-  z.object({
-    businessModel: z.enum(["service", "product"]).default("service"),
-    heroProduct: z.string().optional(),
-    productSpecs: z.string().optional(),
-    endConsumerUseCase: z.string().optional(),
-    replacedCompetitor: z.string().optional(),
-  })
-).superRefine((data, ctx) => {
+const businessDataPutSchema = baseBusinessSchema.superRefine((data, ctx) => {
   if (data.businessModel === 'product') {
     if (!data.heroProduct || data.heroProduct.trim().length === 0) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Hero Product is required for Product models", path: ["heroProduct"] });
@@ -103,7 +106,7 @@ export function registerBusinessDataRoutes(app: Express) {
     }
   });
 
-  app.put("/api/business-data/:campaignId", async (req: Request, res: Response) => {
+  const handlePutBusinessData = async (req: Request, res: Response) => {
     try {
       const { campaignId } = req.params;
       // Doctrine W5 (architect-#9 LOW): canonical helper at boundary.
@@ -130,6 +133,8 @@ export function registerBusinessDataRoutes(app: Express) {
         });
       }
       const body = parsed.data;
+
+      // Persist all fields independently without cross-field overwriting or semantic flattening
       const dataValues: Record<string, any> = {
         ...body,
         updatedAt: new Date(),
@@ -179,13 +184,41 @@ export function registerBusinessDataRoutes(app: Express) {
         result = inserted[0];
       }
 
+      // Auto-derive and persist the Product Anchor with distinct typed semantics and provenance
+      const derivedAnchor = deriveAnchorFromProductDna(result as any);
+      if (derivedAnchor) {
+        await writeProductAnchorAudited({
+          campaignId,
+          accountId: String(accountId),
+          writer: "PUT /api/business-data/:id",
+          source: "user_edit",
+          reason: "Auto-derived from Business Profile update with semantic separation",
+          newAnchor: derivedAnchor,
+          validationDecision: "SCHEMA_VALID"
+        });
+      } else {
+        // If they cleared enough fields that it's no longer a valid anchor, clear it.
+        await writeProductAnchorAudited({
+          campaignId,
+          accountId: String(accountId),
+          writer: "PUT /api/business-data/:id",
+          source: "user_clear",
+          reason: "Business Profile update no longer satisfies Product Anchor requirements",
+          newAnchor: null,
+          validationDecision: "CLEARED"
+        });
+      }
+
       console.log(`[BusinessData] Saved for campaign ${campaignId}, account ${accountId}`);
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error("[BusinessData] PUT error:", error);
       res.status(500).json({ error: "Failed to save business data" });
     }
-  });
+  };
+
+  app.put("/api/business-data/:campaignId", handlePutBusinessData);
+  app.put("/api/campaigns/:campaignId/business-data", handlePutBusinessData);
 }
 
 /**

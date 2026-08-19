@@ -34,6 +34,7 @@ export interface GenerationContext<TInput> {
 
 export interface ReliabilityConfig {
   maxRepairs?: number;
+  failClosed?: boolean;
 }
 
 import { z } from "zod";

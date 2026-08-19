@@ -5,6 +5,7 @@ export const STATUS = {
   FAILED: "FAILED",
   INSUFFICIENT_INPUT: "INSUFFICIENT_INPUT",
   AXIS_REJECTED: "AXIS_REJECTED",
+  NO_DISTINCT_MECHANISM_ESTABLISHED: "NO_DISTINCT_MECHANISM_ESTABLISHED",
 } as const;
 
 export const AXIS_MECHANISM_GUIDANCE: Record<string, { emphasis: string[]; banned: string[] }> = {

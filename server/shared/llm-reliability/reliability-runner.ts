@@ -109,6 +109,10 @@ export async function generateWithRepair<TInput, TOutput>(
         telemetry.repairLog[telemetry.repairLog.length - 1].repairOutcome = "FAIL";
       }
 
+      if (args.config?.failClosed) {
+        throw new LLMReliabilityError(`Exhausted ${maxAttempts} attempts without a valid result`, "GENERATION_QUALITY_FAILURE", rejections, telemetry);
+      }
+
       const flag = {
         passed: false,
         reason: `${failureClass}: ${rejections.map(r => r.reason).join(" | ")}`,

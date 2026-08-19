@@ -954,6 +954,30 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
                 </View>
               )}
 
+              {sections.brandSpine && (
+                <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: cardBorder }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: C.mint, marginBottom: 4 }}>Brand Spine (Umbrella Strategy)</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: textPrimary, marginBottom: 4 }}>{sections.brandSpine.umbrellaPositionName || sections.brandSpine.title}</Text>
+                  {sections.brandSpine.contrastAxis && (
+                    <Text style={{ fontSize: 11, color: textSecondary, lineHeight: 16, marginTop: 4 }}>Contrast Axis: {sections.brandSpine.contrastAxis}</Text>
+                  )}
+                </View>
+              )}
+
+              {Array.isArray(sections.approvedLanes) && sections.approvedLanes.length > 0 && (
+                <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: cardBorder }}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: C.mint, marginBottom: 6 }}>Strategic Lanes ({sections.approvedLanes.length})</Text>
+                  {sections.approvedLanes.map((lane: any, lIdx: number) => (
+                    <View key={lIdx} style={{ marginBottom: lIdx < sections.approvedLanes.length - 1 ? 8 : 0, paddingBottom: lIdx < sections.approvedLanes.length - 1 ? 8 : 0, borderBottomWidth: lIdx < sections.approvedLanes.length - 1 ? 1 : 0, borderBottomColor: cardBorder }}>
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: textPrimary }}>{lIdx + 1}. {lane.title || lane.laneName || `Lane ${lIdx + 1}`}</Text>
+                      {lane.messagingDirection && (
+                        <Text style={{ fontSize: 11, color: textSecondary, lineHeight: 16, marginTop: 2 }}>{lane.messagingDirection}</Text>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+
               {plan.lockedDecisionLabels && plan.lockedDecisionLabels.length > 0 && (
                 <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: cardBorder }}>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: textPrimary, marginBottom: 6 }}>Locked Core Strategic Parameters</Text>

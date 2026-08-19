@@ -393,7 +393,28 @@ export function checkSnapshotFreshness(
   );
 }
 
+export function hasTargetAudienceEvidenceGap(results: Map<EngineId, EngineStepResult>): boolean {
+  const positioningResult = results.get("positioning");
+  if (positioningResult) {
+    if (positioningResult.status === "BLOCKED" && positioningResult.blockReason?.includes("TARGET_AUDIENCE_EVIDENCE_GAP")) {
+      return true;
+    }
+    if ((positioningResult.output as any)?.statusMessage?.includes("TARGET_AUDIENCE_EVIDENCE_GAP")) {
+      return true;
+    }
+  }
+  for (const [_, r] of results) {
+    if (r.blockReason?.includes("TARGET_AUDIENCE_EVIDENCE_GAP")) return true;
+    if ((r.output as any)?.statusMessage?.includes("TARGET_AUDIENCE_EVIDENCE_GAP")) return true;
+  }
+  return false;
+}
+
 export function checkPipelineCompleteness(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  if (hasTargetAudienceEvidenceGap(results)) {
+    return pass("pipeline_completeness", "Pipeline intentionally halted at Positioning due to verified TARGET_AUDIENCE_EVIDENCE_GAP");
+  }
+
   const missing: string[] = [];
   const timedOut: string[] = [];
   const errored: string[] = [];
@@ -412,7 +433,11 @@ export function checkPipelineCompleteness(results: Map<EngineId, EngineStepResul
       case "DEPTH_BLOCKED":
       case "BLOCKED_BY_INTEGRITY":
       case "NEEDS_INPUT":
-        blocked.push(`${engineId}:${result.status}`);
+        if (result.blockReason?.includes("TARGET_AUDIENCE_EVIDENCE_GAP")) {
+          // This is a verified halt, not an incomplete pipeline
+        } else {
+          blocked.push(`${engineId}:${result.status}`);
+        }
         break;
     }
   }
@@ -850,6 +875,21 @@ export function checkBudgetOverrideZeroConfidence(ssc: SharedStrategicContext | 
   );
 }
 
+export function checkTargetAudienceEvidenceGap(results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const positioningResult = results.get("positioning");
+  if (
+    positioningResult?.status === "BLOCKED" &&
+    (positioningResult.blockReason?.includes("TARGET_AUDIENCE_EVIDENCE_GAP") ||
+     (positioningResult.output as any)?.statusMessage?.includes("TARGET_AUDIENCE_EVIDENCE_GAP"))
+  ) {
+    return fail(
+      "target_audience_evidence_gap",
+      positioningResult.blockReason || (positioningResult.output as any)?.statusMessage || "TARGET_AUDIENCE_EVIDENCE_GAP"
+    );
+  }
+  return pass("target_audience_evidence_gap", "No target audience evidence gap detected");
+}
+
 // -----------------------------------------------------------------------------
 // Block reason collection
 // -----------------------------------------------------------------------------
@@ -882,7 +922,8 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
   // Phase R: emit a single PIPELINE_INCOMPLETE block summarising every check
   // that could not be verified. This guarantees an unverified pipeline can
   // never produce a PASS verdict.
-  const unverifiedChecks = checks.filter(isUnverified);
+  const hasTargetGap = hasTargetAudienceEvidenceGap(results);
+  const unverifiedChecks = checks.filter(c => isUnverified(c) && !hasTargetGap);
   if (unverifiedChecks.length > 0) {
     const timeoutCount = unverifiedChecks.filter(c => c.status === "TIMEOUT").length;
     const staleCount = unverifiedChecks.filter(c => c.status === "STALE").length;
@@ -947,6 +988,9 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
         break;
       case "positioning_hard_gate":
         blocks.push({ code: "POSITIONING_HARD_GATE", description: check.details, source: "ssc_confidence_chain", severity: "critical" });
+        break;
+      case "target_audience_evidence_gap":
+        blocks.push({ code: "TARGET_AUDIENCE_EVIDENCE_GAP", description: check.details, source: "positioning", severity: "critical" });
         break;
       case "budget_override_zero_confidence":
         blocks.push({ code: "BUDGET_OVERRIDE_ZERO_CONFIDENCE", description: check.details, source: "ssc_budget_guard", severity: "critical" });

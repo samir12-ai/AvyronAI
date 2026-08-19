@@ -1180,6 +1180,33 @@ export function runChannelSelectionEngine(
     }
   }
 
+  if (!offer || !offer.offerName) {
+    console.log(`[ChannelSelectionEngine] Insufficient upstream data — offer is missing — blocking channel selection`);
+    return {
+      status: "INCOMPLETE",
+      statusMessage: "Offer data insufficient to orchestrate channels — upstream INCOMPLETE propagated",
+      primaryChannel: buildFallbackChannel("primary"),
+      secondaryChannel: buildFallbackChannel("secondary"),
+      rejectedChannels: [],
+      channelFitScore: 0,
+      channelRiskNotes: ["Offer data insufficient (INCOMPLETE)"],
+      layerResults: [],
+      structuralWarnings: ["Offer data insufficient (INCOMPLETE)"],
+      boundaryCheck: { passed: true, violations: [] },
+      dataReliability: assessDataReliability(audience, awareness, persuasion, offer, budget, validation),
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      funnelReconstruction: null,
+      conversionChannelAssigned: false,
+      channelMode,
+      channelModeReasoning: "No data available",
+      decisionGateScoring: null,
+      structurallyRepaired: false,
+      correctionAuditTrail: [],
+    };
+  }
+
   const reliability = assessDataReliability(audience, awareness, persuasion, offer, budget, validation);
 
   const allChannelKeys = Object.keys(CHANNEL_DEFINITIONS);

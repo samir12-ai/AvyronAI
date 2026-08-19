@@ -78,9 +78,9 @@ import {
   manualCampaignMetrics,
   retentionGateInputs,
   manualRetentionMetrics,
+  brandConfig,
 } from "@shared/schema";
-import { eq, desc, and } from "drizzle-orm";
-import { sql } from "drizzle-orm";
+import { eq, desc, and, sql, isNotNull } from "drizzle-orm";
 import {
   ENGINE_PRIORITY_ORDER,
   checkPriorityViolation,
@@ -1733,13 +1733,50 @@ async function executeEngine(
               (ctx.audience as any)?.audienceSegments ?? [],
             );
             const anchorForFit = runStrategicContextOf(ctx)?.doctrine?.productAnchor ?? null;
-            const productCapabilities = anchorForFit
-              ? `Product: ${anchorForFit.name} (${anchorForFit.type}). Solves: ${anchorForFit.coreProblemSolved}. Differentiator: ${anchorForFit.differentiatingFeature}. Attributes: ${(anchorForFit.keyAttributes || []).join(", ")}`
-              : null;
+            let productCapabilities: string | null = null;
+            if (anchorForFit) {
+              const capLines: string[] = [
+                `Product/Offering: ${anchorForFit.name} (Type: ${anchorForFit.type}${anchorForFit.offeringType ? `, Model: ${anchorForFit.offeringType}` : ""})`,
+              ];
+              if (anchorForFit.productSpecs && anchorForFit.productSpecs.length > 0) {
+                capLines.push(`Product Specs: ${anchorForFit.productSpecs.join("; ")}`);
+              }
+              if (anchorForFit.customerUseCases && anchorForFit.customerUseCases.length > 0) {
+                capLines.push(`Customer Use Cases: ${anchorForFit.customerUseCases.join("; ")}`);
+              }
+              if (anchorForFit.problemSolved) {
+                capLines.push(`Problem Solved: ${anchorForFit.problemSolved}`);
+              }
+              if (anchorForFit.uniqueMechanism) {
+                capLines.push(`Delivery Mechanism: ${anchorForFit.uniqueMechanism}`);
+              }
+              if (anchorForFit.strategicAdvantage) {
+                capLines.push(`Strategic Advantage: ${anchorForFit.strategicAdvantage}`);
+              }
+              if (anchorForFit.alternativeReplaced) {
+                capLines.push(`Alternatives Replaced: ${anchorForFit.alternativeReplaced}`);
+              }
+              if (anchorForFit.keyAttributes && anchorForFit.keyAttributes.length > 0) {
+                capLines.push(`Key Attributes: ${anchorForFit.keyAttributes.join("; ")}`);
+              }
+              if (!anchorForFit.problemSolved && anchorForFit.coreProblemSolved) {
+                capLines.push(`Core Problem: ${anchorForFit.coreProblemSolved}`);
+              }
+              if (!anchorForFit.uniqueMechanism && !anchorForFit.strategicAdvantage && anchorForFit.differentiatingFeature) {
+                capLines.push(`Differentiator: ${anchorForFit.differentiatingFeature}`);
+              }
+              productCapabilities = capLines.join(" | ");
+            }
+            
+            const [bc] = await db.select().from(brandConfig).where(eq(brandConfig.accountId, config.accountId)).limit(1);
+            const businessProfile = bc ? `Brand: ${bc.brandName || "Unknown"}. Industry: ${bc.targetIndustry || "Unknown"}. Tone: ${bc.tone || "Unknown"}.` : null;
+
             const refined = await refineAudiencePainRegistry(deterministicRegistry, {
               accountId: config.accountId,
               campaignId: config.campaignId,
               productCapabilities,
+              businessProfile,
+              audienceSegments: (ctx.audience as any)?.audienceSegments ?? [],
               llmEnabled: process.env.SYNTHETIC_AUDIT_MODE !== "1",
             });
             ctx.painRegistry = refined.registry;
@@ -1751,6 +1788,9 @@ async function executeEngine(
               console.warn(`[Orchestrator] PAIN_EVIDENCE_ISSUES | ${refined.evidenceIssues.join(", ")}`);
             }
 
+            // Task 163 / Positioning Correction 3: 
+            // Rebuild Lanes purely from the newly qualified pain portfolio.
+            // DO NOT feed any existing contaminated lanes to the groupers.
             const lanes = await runLaneGrouper(
               (ctx.audience as any)?.audienceSegments ?? [],
               ctx.painRegistry || [],
@@ -1764,7 +1804,17 @@ async function executeEngine(
             console.log(`[Orchestrator] STRATEGIC_LANES_BUILT | lanes=${lanes.length}`);
           }
         } catch (painErr: any) {
-          console.warn(`[Orchestrator] PAIN_REGISTRY_BUILD_FAILED | ${painErr.message} — downstream engines fall back to legacy pain handling`);
+          console.error(`[Orchestrator] PAIN_REGISTRY_BUILD_FAILED | ${painErr.message} — halting pipeline to prevent deterministic pain bypassing`);
+          return {
+            step: "audience",
+            status: "INCOMPLETE",
+            error: {
+              code: "PAIN_REGISTRY_BUILD_FAILED",
+              message: `Pain Registry failed to build — pipeline halted to prevent deterministic pain bypassing. Underlying error: ${painErr.message}`,
+            },
+            snapshotId,
+            durationMs: Date.now() - startTime,
+          } as any;
         }
 
         // ── COMMERCIAL SIGNAL EMISSION: buyerPsychology (Phase 4 marketing-logic upgrade) ──
@@ -2909,7 +2959,7 @@ async function executeEngine(
         const persuasionLineage = buildUpstreamLineage(ctx);
         const __persStart = Date.now();
         const result = await runPersuasionEngine(
-          miInput, { ...audInput, painRegistry: ctx.painRegistry }, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
+          miInput, { ...audInput, painRegistry: ctx.painRegistry, approvedLanes: ctx.approvedLanes }, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
           config.accountId, persuasionLineage,
           ctx.analyticalEnrichment,
           runStrategicContextOf(ctx),

@@ -32,17 +32,33 @@ export const DOCTRINE_VERSION = "doctrine-v1";
 export interface ProductAnchor {
   name: string;
   type: string;
+  offeringType?: string;
   keyAttributes: string[];
   coreProblemSolved: string;
   differentiatingFeature: string;
+  productSpecs?: string[];
+  customerUseCases?: string[];
+  problemSolved?: string;
+  uniqueMechanism?: string;
+  strategicAdvantage?: string;
+  alternativeReplaced?: string;
+  sourceFacts?: any[];
 }
 
 export const ProductAnchorSchema = z.object({
   name: z.string().min(1),
   type: z.string().min(1),
+  offeringType: z.string().optional(),
   keyAttributes: z.array(z.string()).default([]),
   coreProblemSolved: z.string().min(1),
   differentiatingFeature: z.string().min(1),
+  productSpecs: z.array(z.string()).optional(),
+  customerUseCases: z.array(z.string()).optional(),
+  problemSolved: z.string().optional(),
+  uniqueMechanism: z.string().optional(),
+  strategicAdvantage: z.string().optional(),
+  alternativeReplaced: z.string().optional(),
+  sourceFacts: z.array(z.any()).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -182,44 +198,191 @@ export function resolveDoctrine(input: {
 }
 
 // ---------------------------------------------------------------------------
-// F5a — DNA-fallback anchor derivation (shared by offer / channel batteries;
-// mirrors the inline logic shipped in positioning + audience engines).
-// Guard: only when a genuine differentiator + core problem + name + type ALL
-// exist — an anchor fabricated from empty strings would flip the judge to the
-// strict test with hollow context (worse than the weak anchor-free test).
+// deriveAnchorFromProductDna — helper for DNA enrichment / seed phase.
 // Explicit if/else selection — no semantic-fallback chains (D1). Returns null
 // when the DNA cannot honestly supply an anchor (D5 — never fabricate).
 // ---------------------------------------------------------------------------
 
 export interface ProductDnaLike {
+  businessModel?: string | null;
   productCategory?: string | null;
   coreProblemSolved?: string | null;
   uniqueMechanism?: string | null;
   strategicAdvantage?: string | null;
   businessType?: string | null;
   coreOffer?: string | null;
+  heroProduct?: string | null;
+  productSpecs?: string | null;
+  endConsumerUseCase?: string | null;
+  replacedCompetitor?: string | null;
+  targetAudienceSegment?: string | null;
 }
 
 export function deriveAnchorFromProductDna(dna: ProductDnaLike | null | undefined): ProductAnchor | null {
   if (!dna) return null;
-  let dnaDifferentiator = "";
-  if (dna.strategicAdvantage && dna.strategicAdvantage.trim().length > 0) {
-    dnaDifferentiator = dna.strategicAdvantage.trim();
-  } else if (dna.uniqueMechanism && dna.uniqueMechanism.trim().length > 0) {
-    dnaDifferentiator = dna.uniqueMechanism.trim();
+
+  const sourceFacts: any[] = [];
+
+  // Determine offering model
+  let offeringType = dna.businessModel || "unknown";
+  if (dna.heroProduct && dna.heroProduct.trim().length > 0) {
+    offeringType = dna.coreOffer && dna.coreOffer.trim().length > 0 ? "mixed" : "product";
   }
-  const dnaProblem = dna.coreProblemSolved ? dna.coreProblemSolved.trim() : "";
-  const dnaName = dna.coreOffer ? String(dna.coreOffer).trim() : "";
-  const dnaType = dna.businessType ? String(dna.businessType).trim() : "";
+
+  // Name
+  let dnaName = "";
+  if (dna.heroProduct && dna.heroProduct.trim().length > 0) {
+    dnaName = dna.heroProduct.trim();
+    sourceFacts.push({
+      fact: dnaName,
+      type: "GENERAL",
+      source: "business_data_layer.heroProduct",
+      provenance: "USER_PROVIDED",
+    });
+  } else if (dna.coreOffer && dna.coreOffer.trim().length > 0) {
+    dnaName = String(dna.coreOffer).trim();
+    sourceFacts.push({
+      fact: dnaName,
+      type: "GENERAL",
+      source: "business_data_layer.coreOffer",
+      provenance: "USER_PROVIDED",
+    });
+  }
+
+  // Type
+  const dnaType = dna.businessType ? String(dna.businessType).trim() : (dna.productCategory ? String(dna.productCategory).trim() : "");
+
+  // Key attributes
+  const keyAttrs: string[] = [];
+  if (dna.productCategory && dna.productCategory.trim().length > 0) {
+    keyAttrs.push(dna.productCategory.trim());
+    sourceFacts.push({
+      fact: dna.productCategory.trim(),
+      type: "PRODUCT_ATTRIBUTE",
+      source: "business_data_layer.productCategory",
+      provenance: "USER_PROVIDED",
+    });
+  }
+
+  // Structured fields with provenance
+  const productSpecsList: string[] = [];
+  if (dna.productSpecs && dna.productSpecs.trim().length > 0) {
+    productSpecsList.push(dna.productSpecs.trim());
+    sourceFacts.push({
+      fact: dna.productSpecs.trim(),
+      type: "PRODUCT_SPEC",
+      source: "business_data_layer.productSpecs",
+      provenance: "USER_PROVIDED",
+    });
+  }
+
+  const useCasesList: string[] = [];
+  if (dna.endConsumerUseCase && dna.endConsumerUseCase.trim().length > 0) {
+    useCasesList.push(dna.endConsumerUseCase.trim());
+    sourceFacts.push({
+      fact: dna.endConsumerUseCase.trim(),
+      type: "CUSTOMER_USE_CASE",
+      source: "business_data_layer.endConsumerUseCase",
+      provenance: "USER_PROVIDED",
+    });
+  }
+
+  let problemSolvedVal = "";
+  if (dna.coreProblemSolved && dna.coreProblemSolved.trim().length > 0) {
+    problemSolvedVal = dna.coreProblemSolved.trim();
+    sourceFacts.push({
+      fact: problemSolvedVal,
+      type: "PROBLEM_SOLVED",
+      source: "business_data_layer.coreProblemSolved",
+      provenance: "USER_PROVIDED",
+    });
+  }
+
+  const audienceSegmentRaw = (dna as any).targetAudienceSegment ? String((dna as any).targetAudienceSegment).trim().toLowerCase() : "";
+  const decisionMakerRaw = (dna as any).targetDecisionMaker ? String((dna as any).targetDecisionMaker).trim().toLowerCase() : "";
+
+  let mechanismVal = "";
+  if (dna.uniqueMechanism && dna.uniqueMechanism.trim().length > 0) {
+    const mechLC = dna.uniqueMechanism.trim().toLowerCase();
+    // If semantic origin is ambiguous and it mirrors the audience segment or decision maker, it's a legacy data contamination
+    if (
+      (audienceSegmentRaw.length > 0 && (mechLC === audienceSegmentRaw || mechLC.includes(audienceSegmentRaw))) ||
+      (decisionMakerRaw.length > 0 && (mechLC === decisionMakerRaw || mechLC.includes(decisionMakerRaw)))
+    ) {
+      // mark it unresolved and exclude it
+    } else {
+      mechanismVal = dna.uniqueMechanism.trim();
+      sourceFacts.push({
+        fact: mechanismVal,
+        type: "DELIVERY_MECHANISM",
+        source: "business_data_layer.uniqueMechanism",
+        provenance: "USER_PROVIDED",
+      });
+    }
+  }
+
+  let advantageVal = "";
+  if (dna.strategicAdvantage && dna.strategicAdvantage.trim().length > 0) {
+    const advLC = dna.strategicAdvantage.trim().toLowerCase();
+    if (
+      (audienceSegmentRaw.length > 0 && (advLC === audienceSegmentRaw || advLC.includes(audienceSegmentRaw))) ||
+      (decisionMakerRaw.length > 0 && (advLC === decisionMakerRaw || advLC.includes(decisionMakerRaw)))
+    ) {
+      // mark it unresolved and exclude it
+    } else {
+      advantageVal = dna.strategicAdvantage.trim();
+      sourceFacts.push({
+        fact: advantageVal,
+        type: "STRATEGIC_ADVANTAGE",
+        source: "business_data_layer.strategicAdvantage",
+        provenance: "USER_PROVIDED",
+      });
+    }
+  }
+
+  let replacedVal = "";
+  if (dna.replacedCompetitor && dna.replacedCompetitor.trim().length > 0) {
+    replacedVal = dna.replacedCompetitor.trim();
+    sourceFacts.push({
+      fact: replacedVal,
+      type: "ALTERNATIVE_REPLACED",
+      source: "business_data_layer.replacedCompetitor",
+      provenance: "USER_PROVIDED",
+    });
+  }
+
+  // Canonical base differentiator & problem
+  let dnaDifferentiator = "";
+  if (advantageVal.length > 0) {
+    dnaDifferentiator = advantageVal;
+  } else if (mechanismVal.length > 0) {
+    dnaDifferentiator = mechanismVal;
+  } else if (productSpecsList.length > 0) {
+    dnaDifferentiator = productSpecsList.join("; ");
+  } else if (replacedVal.length > 0) {
+    dnaDifferentiator = `Replaces: ${replacedVal}`;
+  }
+
+  const dnaProblem = problemSolvedVal.length > 0 ? problemSolvedVal : (useCasesList.length > 0 ? useCasesList.join("; ") : "");
+
   if (dnaDifferentiator.length === 0 || dnaProblem.length === 0 || dnaName.length === 0 || dnaType.length === 0) {
     return null;
   }
+
   return {
     name: dnaName,
     type: dnaType,
-    keyAttributes: dna.productCategory ? [dna.productCategory] : [],
+    offeringType,
+    keyAttributes: keyAttrs,
     coreProblemSolved: dnaProblem,
     differentiatingFeature: dnaDifferentiator,
+    productSpecs: productSpecsList.length > 0 ? productSpecsList : undefined,
+    customerUseCases: useCasesList.length > 0 ? useCasesList : undefined,
+    problemSolved: problemSolvedVal.length > 0 ? problemSolvedVal : undefined,
+    uniqueMechanism: mechanismVal.length > 0 ? mechanismVal : undefined,
+    strategicAdvantage: advantageVal.length > 0 ? advantageVal : undefined,
+    alternativeReplaced: replacedVal.length > 0 ? replacedVal : undefined,
+    sourceFacts: sourceFacts.length > 0 ? sourceFacts : undefined,
   };
 }
 
@@ -229,9 +392,17 @@ export function computeAnchorHash(anchor: ProductAnchor | null): string {
   const canonical = JSON.stringify({
     name: anchor.name,
     type: anchor.type,
+    offeringType: anchor.offeringType ?? "",
     keyAttributes: [...(anchor.keyAttributes ?? [])].sort(),
     coreProblemSolved: anchor.coreProblemSolved,
     differentiatingFeature: anchor.differentiatingFeature,
+    productSpecs: [...(anchor.productSpecs ?? [])].sort(),
+    customerUseCases: [...(anchor.customerUseCases ?? [])].sort(),
+    problemSolved: anchor.problemSolved ?? "",
+    uniqueMechanism: anchor.uniqueMechanism ?? "",
+    strategicAdvantage: anchor.strategicAdvantage ?? "",
+    alternativeReplaced: anchor.alternativeReplaced ?? "",
+    sourceFacts: anchor.sourceFacts ?? [],
   });
   return crypto.createHash("sha256").update(canonical).digest("hex").slice(0, 16);
 }
@@ -262,6 +433,17 @@ export function buildDoctrineBlock(ctx: RunStrategicContext): string {
     lines.push("=== PRODUCT ANCHOR (resolve every answer to THIS product) ===");
     lines.push(`Product name: ${a.name}`);
     lines.push(`Product type: ${a.type}`);
+    if (a.offeringType) lines.push(`Offering model: ${a.offeringType}`);
+    if (a.productSpecs && a.productSpecs.length > 0) {
+      lines.push(`Product specifications: ${a.productSpecs.join("; ")}`);
+    }
+    if (a.customerUseCases && a.customerUseCases.length > 0) {
+      lines.push(`Customer use cases: ${a.customerUseCases.join("; ")}`);
+    }
+    if (a.problemSolved) lines.push(`Problem solved: ${a.problemSolved}`);
+    if (a.uniqueMechanism) lines.push(`Delivery mechanism: ${a.uniqueMechanism}`);
+    if (a.strategicAdvantage) lines.push(`Strategic advantage: ${a.strategicAdvantage}`);
+    if (a.alternativeReplaced) lines.push(`Alternatives replaced: ${a.alternativeReplaced}`);
     if (a.keyAttributes.length > 0) {
       lines.push(`Key attributes: ${a.keyAttributes.join("; ")}`);
     }
@@ -410,3 +592,41 @@ Differentiating feature: ${anchor.differentiatingFeature}
   }
   return { doctrineBlock: null, anchorSource };
 }
+
+// ---------------------------------------------------------------------------
+// LaneStrategicResponse — Structured integration contract composed from
+// canonical upstream engine decisions (Positioning, Differentiation,
+// Mechanism, Offer, Funnel, Channel). Not an independent authority.
+// ---------------------------------------------------------------------------
+
+export const LaneStrategicResponseSchema = z.object({
+  laneId: z.string().min(1),
+  audienceContext: z.string().min(1),
+  observedProblem: z.string().min(1),
+  evidenceSummary: z.array(z.string()).default([]),
+  commercialMeaning: z.string().min(1),
+  strategicDecision: z.string().min(1),
+  strategicResponse: z.string().min(1),
+  positioningImplication: z.string().min(1),
+  messagingImplication: z.string().min(1),
+  offerImplication: z.string().min(1),
+  proofRequirement: z.object({
+    claimToProve: z.string().min(1),
+    proofTypeNeeded: z.string().min(1),
+    existingProofAsset: z.string().optional(),
+    proofGap: z.string().optional(),
+  }),
+  funnelImplication: z.string().min(1),
+  contentImplication: z.object({
+    strategicTheme: z.string().min(1),
+    desiredPerceptionShift: z.string().min(1),
+    funnelRole: z.string().min(1),
+  }),
+  tradeoff: z.string().min(1),
+  whatNotToDo: z.string().min(1),
+  confidence: z.number().default(0.85),
+  lineage: z.array(z.string()).default([]),
+});
+
+export type LaneStrategicResponse = z.infer<typeof LaneStrategicResponseSchema>;
+

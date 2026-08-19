@@ -269,7 +269,7 @@ export function verifyAdminToken(token: string): string | null {
 // Seal #2 (Task #20): F9.2 — sign access tokens with aud/iss. Note legacy
 // 14d-no-aud/iss tokens already issued before deploy will continue to verify
 // during the grace window via verifyToken().
-function generateAccessToken(userId: string, email: string, accountId: string): string {
+export function generateAccessToken(userId: string, email: string, accountId: string): string {
   return jwt.sign(
     { userId, email, accountId } as JwtPayload,
     JWT_SECRET,

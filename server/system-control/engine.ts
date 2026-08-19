@@ -42,6 +42,7 @@ import { composeValidationVerdict } from "./validation-verdict";
 import { auditCv05DegradedPropagation } from "./cv05-degraded-propagation";
 import { detectContradictions } from "./contradiction-detector";
 import { assessRepairability, executeRepairActions } from "./repair-actions";
+import { checkTargetAudienceEvidenceGap } from "./structural-checks";
 import { CONTROL_VERSION, INTEGRITY_RESTRICT_THRESHOLD } from "./constants";
 import { isUnverified, isVerifiedPass, isVerifiedFail } from "./types";
 
@@ -88,6 +89,7 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   // hard gates, and DEGRADED states — not heterogeneous numeric comparisons.
   structuralChecks.push(checkPositioningHardGate(input.ssc));
   structuralChecks.push(checkBudgetOverrideZeroConfidence(input.ssc, input.results));
+  structuralChecks.push(checkTargetAudienceEvidenceGap(input.results));
   // Runtime Truth Track (May 2026):
   //   T3.B — AEL partial-build gate (analytical-enrichment integrity)
   //   T1.A — signal-lineage unknown-dominance gate

@@ -849,7 +849,7 @@ export function registerPerceptionRoutes(app: Express) {
           .where(and(
             eq(miFetchJobs.accountId, accountId),
             eq(miFetchJobs.campaignId, campaignId),
-            eq(miFetchJobs.status, "COMPLETE"),
+            inArray(miFetchJobs.status, ["COMPLETE", "COMPLETE_WITH_COOLDOWN", "PARTIAL_COMPLETE", "DONE"]),
           ))
           .orderBy(desc(miFetchJobs.completedAt))
           .limit(1),
@@ -1230,7 +1230,7 @@ export function registerPerceptionRoutes(app: Express) {
       const lastScanResult = await db.execute(sql`
         SELECT completed_at
         FROM mi_fetch_jobs
-        WHERE campaign_id = ${campaignId} AND status = 'COMPLETE'
+        WHERE campaign_id = ${campaignId} AND status IN ('COMPLETE', 'COMPLETE_WITH_COOLDOWN', 'PARTIAL_COMPLETE', 'DONE')
         ORDER BY completed_at DESC NULLS LAST
         LIMIT 1
       `);

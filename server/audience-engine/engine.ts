@@ -39,12 +39,16 @@ import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability
 import { aiChat } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
+import { CanonicalAudienceSegment, generateAudienceSignatures, generateCrossAudienceStrategy } from "./sophistication-llm";
+import { selectEvidence, AudienceEvidenceUnit, formatEvidenceUnits } from "./evidence-selector";
 import { scoreAudienceSophistication, type AudienceSophisticationOutput } from "./sophistication-llm";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
 import { emissionFromBattery, type BatteryAttemptLike, type EngineAiPathEmission } from "../shared/ai-path-telemetry";
 import { safeJsonParse, buildDoctrineBlock, type RunStrategicContext } from "../shared/strategic-doctrine";
 import { buildGroundingContract, checkGroundingContract, groundingRefsSchema } from "../shared/grounding-contract";
+import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
 import { z } from "zod";
+import { evaluateTargetCoverage, type TargetCoverageResult } from "./target-coverage";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -101,14 +105,41 @@ interface IntentDistribution extends EvidenceMeta {
   totalClassified: number;
 }
 
+export interface ClaimItem {
+  claimId: string;
+  claim: string;
+  evidenceIds: string[];
+}
+
+export interface RoleClaim {
+  claimId: string;
+  value: "END_CONSUMER" | "BUYER" | "PRACTITIONER" | "BUSINESS_OWNER" | "PROCUREMENT" | "RESELLER" | "SUPPLIER" | "UNKNOWN";
+  evidenceIds: string[];
+}
+
+export interface SegmentDefinitionClaim {
+  claimId: string;
+  claim: string;
+  evidenceIds: string[];
+}
+
 interface AudienceSegment extends EvidenceMeta {
   name: string;
+  role: "END_CONSUMER" | "BUYER" | "PRACTITIONER" | "BUSINESS_OWNER" | "PROCUREMENT" | "RESELLER" | "SUPPLIER" | "UNKNOWN";
+  roleClaim?: RoleClaim;
+  segmentDefinition?: SegmentDefinitionClaim;
   description: string;
+  pains?: ClaimItem[];
+  desires?: ClaimItem[];
+  objections?: ClaimItem[];
+  motivations?: ClaimItem[];
+  outcomes?: ClaimItem[];
   painProfile: string[];
   desireProfile: string[];
   objectionProfile: string[];
   motivationProfile: string[];
   estimatedPercentage: number;
+  groundingRefs?: string[];
 }
 
 interface SegmentDensityItem extends EvidenceMeta {
@@ -156,7 +187,7 @@ export interface StructuredSignals {
 // INSUFFICIENT_SIGNALS (no usable output) and DEFENSIVE_MODE (low-trust).
 // Downstream consumers (System Control, snapshot reuse) treat PARTIAL as
 // "use with caution" — never as COMPLETE.
-export type EngineStatus = "COMPLETE" | "PARTIAL" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY";
+export type EngineStatus = "COMPLETE" | "PARTIAL" | "DATASET_TOO_SMALL" | "INSUFFICIENT_SIGNALS" | "DEFENSIVE_MODE" | "MISSING_DEPENDENCY" | "TARGET_AUDIENCE_EVIDENCE_GAP" | "INCOMPLETE";
 
 export interface AudienceEngineV3Result {
   status: EngineStatus;
@@ -177,6 +208,7 @@ export interface AudienceEngineV3Result {
   intentDistribution: IntentDistribution;
   adsTargetingHints: AdsTargetingHint[];
   structuredSignals: StructuredSignals;
+  targetCoverage?: TargetCoverageResult;
   inputSummary: {
     postsAnalyzed: number;
     commentsAnalyzed: number;
@@ -589,25 +621,7 @@ function mergeNarrativeObjectionsIntoMap(
 }
 
 function applyEvidenceIntegrityFilter(signals: SignalItem[]): SignalItem[] {
-  return signals.map(s => {
-    if (s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL) {
-      return s;
-    }
-    if (s.evidenceCount >= 1 || s.frequency >= 1) {
-      const evidenceRatio = Math.min(s.evidenceCount, s.frequency) / MIN_EVIDENCE_PER_SIGNAL;
-      // no synthetic confidence floor. If the
-      // raw signal already carries 0 confidence, the downgrade emits 0 — we
-      // never invent a 0.05 minimum. Honest zero is better than a fabricated
-      // pulse that downstream gates can clear.
-      const downgradedConfidence = s.confidenceScore * evidenceRatio * 0.6;
-      return {
-        ...s,
-        confidenceScore: downgradedConfidence,
-        sourceSignals: [...s.sourceSignals, "evidence_downgraded"],
-      };
-    }
-    return null;
-  }).filter((s): s is SignalItem => s !== null);
+  return signals.filter(s => s.evidenceCount >= MIN_EVIDENCE_PER_SIGNAL && s.frequency >= MIN_EVIDENCE_PER_SIGNAL);
 }
 
 function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: string | null): SignalItem[] {
@@ -771,9 +785,21 @@ function canonicalizeSegments(segments: AudienceSegment[]): AudienceSegment[] {
       const allMotivations = [...new Set(mergeGroup.flatMap(s => s.motivationProfile || []))];
       const allSourceSignals = [...new Set(mergeGroup.flatMap(s => s.sourceSignals || []))];
       const totalEvidence = mergeGroup.reduce((s, seg) => s + (seg.evidenceCount || 0), 0);
+      const allClaimPains = mergeGroup.flatMap(s => s.pains || []);
+      const allClaimDesires = mergeGroup.flatMap(s => s.desires || []);
+      const allClaimObjections = mergeGroup.flatMap(s => s.objections || []);
+      const allClaimMotivations = mergeGroup.flatMap(s => s.motivations || []);
+      const allClaimOutcomes = mergeGroup.flatMap(s => s.outcomes || []);
 
       canonical = {
         ...best,
+        pains: allClaimPains.length > 0 ? allClaimPains : best.pains,
+        desires: allClaimDesires.length > 0 ? allClaimDesires : best.desires,
+        objections: allClaimObjections.length > 0 ? allClaimObjections : best.objections,
+        motivations: allClaimMotivations.length > 0 ? allClaimMotivations : best.motivations,
+        outcomes: allClaimOutcomes.length > 0 ? allClaimOutcomes : best.outcomes,
+        roleClaim: best.roleClaim,
+        segmentDefinition: best.segmentDefinition,
         estimatedPercentage: combinedPercentage,
         painProfile: allPains,
         desireProfile: allDesires,
@@ -1380,20 +1406,127 @@ function computeSegmentDensity(
   }));
 }
 
-// T8 (item 6, constraint "all LLM outputs through safeJsonParse + Zod"): schema
-// shapes for the audience LLM candidates. Data-field defaults (never decision/
-// verdict/outcome fields) keep parsing resilient without a semantic fallback.
+const ClaimWithIdSchema = z.object({
+  claimId: z.string().min(1),
+  claim: z.string().min(1),
+  evidenceIds: z.array(z.string()).default([]),
+});
+
+const RoleClaimSchema = z.object({
+  claimId: z.string().default("role_claim"),
+  value: z.enum(["END_CONSUMER", "BUYER", "PRACTITIONER", "BUSINESS_OWNER", "PROCUREMENT", "RESELLER", "SUPPLIER", "UNKNOWN"]).default("UNKNOWN"),
+  evidenceIds: z.array(z.string()).default([]),
+});
+
+const SegmentDefinitionSchema = z.object({
+  claimId: z.string().default("segment_def"),
+  claim: z.string().min(1),
+  evidenceIds: z.array(z.string()).default([]),
+});
+
 const SegmentCandidateSchema = z.object({
   name: z.string().min(1),
+  segmentDefinition: SegmentDefinitionSchema.optional(),
+  role: z.union([
+    RoleClaimSchema,
+    z.enum(["END_CONSUMER", "BUYER", "PRACTITIONER", "BUSINESS_OWNER", "PROCUREMENT", "RESELLER", "SUPPLIER", "UNKNOWN"])
+  ]),
   description: z.string().min(1),
-  painProfile: z.array(z.string()).default([]),
-  desireProfile: z.array(z.string()).default([]),
-  objectionProfile: z.array(z.string()).default([]),
-  motivationProfile: z.array(z.string()).default([]),
+  pains: z.array(z.union([ClaimWithIdSchema, z.string()])).default([]),
+  desires: z.array(z.union([ClaimWithIdSchema, z.string()])).optional().default([]),
+  objections: z.array(z.union([ClaimWithIdSchema, z.string()])).optional().default([]),
+  motivations: z.array(z.union([ClaimWithIdSchema, z.string()])).optional().default([]),
+  outcomes: z.array(z.union([ClaimWithIdSchema, z.string()])).optional().default([]),
+  painProfile: z.array(z.string()).optional().default([]),
+  desireProfile: z.array(z.string()).optional().default([]),
+  objectionProfile: z.array(z.string()).optional().default([]),
+  motivationProfile: z.array(z.string()).optional().default([]),
   estimatedPercentage: z.coerce.number().catch(0),
   groundingRefs: groundingRefsSchema,
 });
 const SegmentArraySchema = z.array(SegmentCandidateSchema);
+
+function normalizeSegmentCandidate(seg: any, segIndex: number) {
+  const segPrefix = `seg_${segIndex + 1}`;
+  
+  const segmentDef: SegmentDefinitionClaim = seg.segmentDefinition && typeof seg.segmentDefinition === "object"
+    ? {
+        claimId: seg.segmentDefinition.claimId || `${segPrefix}_def`,
+        claim: seg.segmentDefinition.claim || seg.description || seg.name,
+        evidenceIds: Array.isArray(seg.segmentDefinition.evidenceIds) && seg.segmentDefinition.evidenceIds.length > 0 ? seg.segmentDefinition.evidenceIds : (Array.isArray(seg.groundingRefs) ? seg.groundingRefs : []),
+      }
+    : {
+        claimId: `${segPrefix}_def`,
+        claim: seg.description || seg.name,
+        evidenceIds: Array.isArray(seg.groundingRefs) ? seg.groundingRefs : [],
+      };
+
+  const roleObj: RoleClaim = typeof seg.role === "object" && seg.role !== null
+    ? {
+        claimId: seg.role.claimId || `${segPrefix}_role`,
+        value: seg.role.value || "UNKNOWN",
+        evidenceIds: Array.isArray(seg.role.evidenceIds) && seg.role.evidenceIds.length > 0 ? seg.role.evidenceIds : (Array.isArray(seg.groundingRefs) ? seg.groundingRefs : []),
+      }
+    : {
+        claimId: `${segPrefix}_role`,
+        value: typeof seg.role === "string" ? seg.role : "UNKNOWN",
+        evidenceIds: Array.isArray(seg.groundingRefs) ? seg.groundingRefs : [],
+      };
+
+  const normalizeClaimList = (list: any[], fieldName: string): ClaimItem[] => {
+    if (!Array.isArray(list)) return [];
+    return list.map((item, idx) => {
+      if (typeof item === "object" && item !== null && item.claim) {
+        return {
+          claimId: item.claimId || `${segPrefix}_${fieldName}_${idx + 1}`,
+          claim: item.claim,
+          evidenceIds: Array.isArray(item.evidenceIds) ? item.evidenceIds : (Array.isArray(seg.groundingRefs) ? seg.groundingRefs : []),
+        };
+      }
+      return {
+        claimId: `${segPrefix}_${fieldName}_${idx + 1}`,
+        claim: String(item),
+        evidenceIds: Array.isArray(seg.groundingRefs) ? seg.groundingRefs : [],
+      };
+    });
+  };
+
+  const pains = normalizeClaimList(seg.pains && seg.pains.length > 0 ? seg.pains : (seg.painProfile || []), "pain");
+  const desires = normalizeClaimList(seg.desires && seg.desires.length > 0 ? seg.desires : (seg.desireProfile || []), "desire");
+  const objections = normalizeClaimList(seg.objections && seg.objections.length > 0 ? seg.objections : (seg.objectionProfile || []), "objection");
+  const motivations = normalizeClaimList(seg.motivations && seg.motivations.length > 0 ? seg.motivations : (seg.motivationProfile || []), "motivation");
+  const outcomes = normalizeClaimList(seg.outcomes || [], "outcome");
+
+  const allRefs = Array.from(new Set([
+    ...segmentDef.evidenceIds,
+    ...roleObj.evidenceIds,
+    ...pains.flatMap(p => p.evidenceIds),
+    ...desires.flatMap(d => d.evidenceIds),
+    ...objections.flatMap(o => o.evidenceIds),
+    ...motivations.flatMap(m => m.evidenceIds),
+    ...outcomes.flatMap(oc => oc.evidenceIds),
+    ...(Array.isArray(seg.groundingRefs) ? seg.groundingRefs : []),
+  ])).filter(Boolean);
+
+  return {
+    name: seg.name,
+    segmentDefinition: segmentDef,
+    role: roleObj.value,
+    roleClaim: roleObj,
+    description: seg.description || segmentDef.claim,
+    pains,
+    desires,
+    objections,
+    motivations,
+    outcomes,
+    painProfile: pains.map(p => p.claim),
+    desireProfile: desires.map(d => d.claim),
+    objectionProfile: objections.map(o => o.claim),
+    motivationProfile: motivations.map(m => m.claim),
+    estimatedPercentage: seg.estimatedPercentage || 0,
+    groundingRefs: allRefs,
+  };
+}
 
 const AdsTargetingCandidateSchema = z.object({
   suggestedInterests: z.array(z.string()).default([]),
@@ -1415,313 +1548,355 @@ async function constructSegments(
   maturity: MaturityResult,
   awareness: AwarenessResult,
   businessContext: { industry: string; coreOffer: string; targetAudience: string },
-  commentSamples: string[],
+  evidenceItems: AudienceEvidenceUnit[],
   accountId: string,
   inputSnapshotId: string | null,
   strategic?: RunStrategicContext,
   aiPathSink?: { emission: EngineAiPathEmission | null },
 ): Promise<AudienceSegment[]> {
-  // Deterministic last-resort segment — shared by the retry-exhaustion path and
-  // the outer catch so a failure is NEVER silent (mode=fallback, always logged).
-  const deterministicFallback = (): AudienceSegment[] => [{
-    name: "Primary Audience",
-    description: "Main audience segment based on available data",
-    painProfile: painMap.slice(0, 3).map(p => p.canonical),
-    desireProfile: desireMap.slice(0, 3).map(d => d.canonical),
-    objectionProfile: objectionMap.slice(0, 2).map(o => o.canonical),
-    motivationProfile: emotionalDrivers.slice(0, 2).map(e => e.canonical),
-    estimatedPercentage: 100,
-    evidenceCount: painMap.length + desireMap.length,
-    confidenceScore: 0.3,
-    sourceSignals: ["painMap", "desireMap"],
-    inputSnapshotId,
-  }];
-  // Phase 4: one battery attempt recorded per generation that reached the
-  // doctrine battery (the structural pre-gate is NOT part of the battery).
-  // Declared before the try so the catch fallback can emit telemetry too.
   const segmentBatteryAttempts: BatteryAttemptLike[] = [];
+
+  let multiSourceSection = "";
   try {
-    let multiSourceSection = "";
-    try {
-      const { loadMultiSourceContext, buildMultiSourcePromptSection, buildSourceFallbackContext } = await import("../shared/multi-source-loader");
-      if (inputSnapshotId) {
-        const msCtx = await loadMultiSourceContext(inputSnapshotId);
-        if (msCtx && (msCtx.hasMeaningfulWebData || msCtx.hasMeaningfulBlogData)) {
-          multiSourceSection = buildMultiSourcePromptSection(msCtx);
-          multiSourceSection += "\n\nIMPORTANT: Use website headlines and blog titles to infer audience pains even when comments are absent. Website copy reveals what the market responds to. Blog topics reveal what questions the audience asks repeatedly.";
-        } else {
-          multiSourceSection = buildSourceFallbackContext(msCtx);
-        }
-      }
-    } catch {}
-
-    const productDnaBlock = (businessContext as any).productDna ? formatProductDNAForPrompt((businessContext as any).productDna) : "";
-
-    // T11: inject the strategic doctrine (product anchor + prior validated
-    // decisions) so the AI proposes segments grounded in THIS product. Omitted
-    // cleanly when no strategic context was threaded — never a fake doctrine (D5).
-    let doctrineBlock = "";
-    if (strategic) {
-      doctrineBlock = buildDoctrineBlock(strategic);
-    } else {
-      console.log("[AudienceEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
-    }
-    // F5a (parity with positioning engine): when strategic doctrine is absent,
-    // derive the judge's product anchor from Product DNA so the
-    // interchangeability judge tests segments against THIS product's real
-    // differentiator instead of the weaker anchor-free test. Guard: only when
-    // a genuine differentiator + core problem exist — an anchor fabricated
-    // from empty strings would flip the judge to the strict test with hollow
-    // context (worse than the weak test). Explicit if/else selection — no
-    // semantic-fallback chains (D1).
-    let productAnchor = strategic ? strategic.doctrine.productAnchor : null;
-    const dnaForAnchor = (businessContext as any).productDna;
-    if (!productAnchor && dnaForAnchor) {
-      let dnaDifferentiator = "";
-      if (dnaForAnchor.strategicAdvantage && String(dnaForAnchor.strategicAdvantage).trim().length > 0) {
-        dnaDifferentiator = String(dnaForAnchor.strategicAdvantage).trim();
-      } else if (dnaForAnchor.uniqueMechanism && String(dnaForAnchor.uniqueMechanism).trim().length > 0) {
-        dnaDifferentiator = String(dnaForAnchor.uniqueMechanism).trim();
-      }
-      const dnaProblem = dnaForAnchor.coreProblemSolved ? String(dnaForAnchor.coreProblemSolved).trim() : "";
-      const dnaName = dnaForAnchor.coreOffer ? String(dnaForAnchor.coreOffer).trim() : "";
-      const dnaType = dnaForAnchor.businessType ? String(dnaForAnchor.businessType).trim() : "";
-      if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
-        productAnchor = {
-          name: dnaName,
-          type: dnaType,
-          keyAttributes: dnaForAnchor.productCategory ? [dnaForAnchor.productCategory] : [],
-          coreProblemSolved: dnaProblem,
-          differentiatingFeature: dnaDifferentiator,
-        };
-        console.log(`[AudienceEngine-V3] SEGMENT_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from business context`);
+    const { loadMultiSourceContext, buildMultiSourcePromptSection, buildSourceFallbackContext } = await import("../shared/multi-source-loader");
+    if (inputSnapshotId) {
+      const msCtx = await loadMultiSourceContext(inputSnapshotId);
+      if (msCtx && (msCtx.hasMeaningfulWebData || msCtx.hasMeaningfulBlogData)) {
+        multiSourceSection = buildMultiSourcePromptSection(msCtx);
+        multiSourceSection += "\n\nIMPORTANT: Use website headlines and blog titles to infer audience pains even when comments are absent. Website copy reveals what the market responds to. Blog topics reveal what questions the audience asks repeatedly.";
+      } else {
+        multiSourceSection = buildSourceFallbackContext(msCtx);
       }
     }
-    const priorDecisions = strategic ? strategic.priorDecisions : [];
-    // T003: anchor-usage evidence (audit trail — engine × site × attempt × source).
-    let audienceAnchorSource: "doctrine" | "dna" | "none" = "none";
-    if (strategic && strategic.doctrine.productAnchor) {
-      audienceAnchorSource = "doctrine";
-    } else if (productAnchor) {
-      audienceAnchorSource = "dna";
+  } catch {}
+
+  const productDnaBlock = (businessContext as any).productDna ? formatProductDNAForPrompt((businessContext as any).productDna) : "";
+
+  let doctrineBlock = "";
+  if (strategic) {
+    doctrineBlock = buildDoctrineBlock(strategic);
+  } else {
+    console.log("[AudienceEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
+  }
+
+  let productAnchor = strategic ? strategic.doctrine.productAnchor : null;
+  const dnaForAnchor = (businessContext as any).productDna;
+  if (!productAnchor && dnaForAnchor) {
+    let dnaDifferentiator = "";
+    if (dnaForAnchor.strategicAdvantage && String(dnaForAnchor.strategicAdvantage).trim().length > 0) {
+      dnaDifferentiator = String(dnaForAnchor.strategicAdvantage).trim();
+    } else if (dnaForAnchor.uniqueMechanism && String(dnaForAnchor.uniqueMechanism).trim().length > 0) {
+      dnaDifferentiator = String(dnaForAnchor.uniqueMechanism).trim();
     }
-    console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=first_prompt | attempt=1 | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
+    const dnaProblem = dnaForAnchor.coreProblemSolved ? String(dnaForAnchor.coreProblemSolved).trim() : "";
+    const dnaName = dnaForAnchor.coreOffer ? String(dnaForAnchor.coreOffer).trim() : "";
+    const dnaType = dnaForAnchor.businessType ? String(dnaForAnchor.businessType).trim() : "";
+    if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
+      productAnchor = {
+        name: dnaName,
+        type: dnaType,
+        keyAttributes: dnaForAnchor.productCategory ? [dnaForAnchor.productCategory] : [],
+        coreProblemSolved: dnaProblem,
+        differentiatingFeature: dnaDifferentiator,
+      };
+      console.log(`[AudienceEngine-V3] SEGMENT_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from business context`);
+    }
+  }
+  const priorDecisions = strategic ? strategic.priorDecisions : [];
+  let audienceAnchorSource: "doctrine" | "dna" | "none" = "none";
+  if (strategic && strategic.doctrine.productAnchor) {
+    audienceAnchorSource = "doctrine";
+  } else if (productAnchor) {
+    audienceAnchorSource = "dna";
+  }
+  console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=first_prompt | attempt=1 | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
 
-    // Grounding contract (RULES 1-3). Audience has NO AEL in scope, so RULE 2
-    // renders the "no AEL available" branch (groundingRefs: []) truthfully;
-    // RULE 1 (name the differentiating feature) and RULE 3 (interchangeability
-    // self-check) still reinforce the existing gate battery. Additive only.
-    const audEffectiveAnchor = (strategic && strategic.doctrine.productAnchor) ? strategic.doctrine.productAnchor : (productAnchor || null);
-    const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null, { capabilities: deriveValidatedCapabilities((audEffectiveAnchor ?? null) as any, ((businessContext as any).productDna ?? null)) });
+  const audEffectiveAnchor = (strategic && strategic.doctrine.productAnchor) ? strategic.doctrine.productAnchor : (productAnchor || null);
+  const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null, { capabilities: deriveValidatedCapabilities((audEffectiveAnchor ?? null) as any, ((businessContext as any).productDna ?? null)) });
 
-    const prompt = `You are an audience research analyst. Based on market evidence, construct 2-4 distinct audience segments.
-${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${audGroundingContract ? `\n${audGroundingContract}\n` : ""}
-BUSINESS: ${businessContext.industry} — ${businessContext.coreOffer}
-${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
+  const basePrompt = `You are the Audience Analysis Engine deriving audience intelligence strictly from Judge-approved evidence.
 
-PAIN MAP (from real audience data):
-${painMap.slice(0, 8).map(p => `- ${p.canonical}: frequency=${p.frequency}, confidence=${(p.confidenceScore * 100).toFixed(0)}%`).join("\n")}
+PERMANENT PRINCIPLE: EVIDENCE DECIDES WHICH FIELDS EXIST.
+Do NOT complete a persona template. Report ONLY audience facts supported by evidence.
+- A valid segment may contain a role and pains, and ZERO desires, motivations, outcomes, or objections if those secondary fields are not directly supported.
+- Empty or omitted optional fields are completely valid. Unsupported completion is strictly prohibited.
+- Every claim MUST carry its own stable claimId and specific evidence IDs (e.g. claimId: "seg_1_pain_1", evidenceIds: ["EV-2", "EV-3"]).
+- Do NOT use evidence supporting one claim to justify a different claim (e.g., pain evidence cannot prove a desire or outcome).
+- Fewer fully supported claims are far better than a complete-looking persona containing speculation.
+- MARKET_NARRATIVE_CONTEXT may provide market context but must NOT be used as direct buyer pain testimony.
+- Respect the safeUses and prohibitedUses listed on each evidence item.
 
-DESIRE MAP:
-${desireMap.slice(0, 8).map(d => `- ${d.canonical}: frequency=${d.frequency}`).join("\n")}
-
-OBJECTION MAP:
-${objectionMap.slice(0, 6).map(o => `- ${o.canonical}: frequency=${o.frequency}`).join("\n")}
-
-EMOTIONAL DRIVERS:
-${emotionalDrivers.slice(0, 6).map(e => `- ${e.canonical}: frequency=${e.frequency}`).join("\n")}
+BUSINESS TARGET CONTEXT (for reference only, NOT evidence):
+Industry: ${businessContext.industry}
+Core Offer: ${businessContext.coreOffer}
+Target Audience: ${businessContext.targetAudience}
 
 MARKET MATURITY: ${maturity.level}
 AWARENESS LEVEL: ${awareness.level}
 ${multiSourceSection}
 
-SAMPLE COMMENTS (real audience language):
-${commentSamples.slice(0, 12).map(c => `"${c.slice(0, 100)}"`).join("\n")}
+SAMPLE EVIDENCE (raw market data with source actor attribution, authority class, and safe/prohibited uses):
+${formatEvidenceUnits(evidenceItems)}
 
-Return a JSON array of 2-4 segments. Each segment:
+Return a JSON array of 1-3 distinct segments actually supported by the evidence. Each segment format:
 {
-  "name": "segment name",
-  "description": "brief description",
-  "painProfile": ["pain1", "pain2"],
-  "desireProfile": ["desire1", "desire2"],
-  "objectionProfile": ["objection1"],
-  "motivationProfile": ["motivation1", "motivation2"],
-  "estimatedPercentage": number (must total ~100),
-  "groundingRefs": []
+  "name": "concise label for this group",
+  "segmentDefinition": {
+    "claimId": "seg_1_def",
+    "claim": "concrete definition of who this audience group is",
+    "evidenceIds": ["EV-1", "EV-2"]
+  },
+  "role": {
+    "claimId": "seg_1_role",
+    "value": "END_CONSUMER" | "BUYER" | "PRACTITIONER" | "BUSINESS_OWNER" | "PROCUREMENT" | "RESELLER" | "SUPPLIER" | "UNKNOWN",
+    "evidenceIds": ["EV-1"]
+  },
+  "description": "concrete description of their operational/usage context",
+  "pains": [
+    { "claimId": "seg_1_pain_1", "claim": "specific problem directly stated in evidence", "evidenceIds": ["EV-2", "EV-3"] }
+  ],
+  "desires": [
+    // Include ONLY if evidence directly expresses a desire/goal. Otherwise OMIT or leave empty [].
+    { "claimId": "seg_1_desire_1", "claim": "specific desire directly stated in evidence", "evidenceIds": ["EV-4"] }
+  ],
+  "objections": [
+    // Include ONLY if evidence directly expresses an objection/skepticism. Otherwise OMIT or leave empty [].
+    { "claimId": "seg_1_objection_1", "claim": "specific objection directly stated in evidence", "evidenceIds": ["EV-5"] }
+  ],
+  "motivations": [], // OMIT if unsupported
+  "outcomes": [], // OMIT if unsupported
+  "estimatedPercentage": number,
+  "groundingRefs": ["EV-1", "EV-2", "EV-3"]
 }
 
 Return ONLY the JSON array, no markdown.`;
 
-    // T8 (item 6): retry loop built from scratch around the segment call —
-    // 3 total attempts, temperature escalation 0.3 → 0.4 → 0.5, structured
-    // rejection feedback injected each pass. Gates: Zod structural + breadth
-    // gate (item 9) on name+description. Code is the sole judge; the AI proposes.
-    const SEGMENT_TEMPERATURE_LADDER = [0.3, 0.4, 0.5];
-    const SEGMENT_MAX_ATTEMPTS = 3;
-    let acceptedSegments: z.infer<typeof SegmentArraySchema> | null = null;
-    let segmentRejectionFeedback = "";
-    for (let attempt = 0; attempt < SEGMENT_MAX_ATTEMPTS; attempt++) {
-      const attemptTemp = SEGMENT_TEMPERATURE_LADDER[Math.min(attempt, SEGMENT_TEMPERATURE_LADDER.length - 1)];
-      const attemptPrompt = segmentRejectionFeedback
-        ? `${prompt}\n\n--- RETRY DIRECTIVE ---\n${segmentRejectionFeedback}`
-        : prompt;
+  const { result: rawSegments } = await generateWithRepair<string, string>({
+    engineName: "AudienceEngine-V3",
+    touchpointName: "segment_generation",
+    authoritativeInput: basePrompt,
+    config: { maxRepairs: 3, failClosed: true },
+    generate: async (input) => {
+      const response = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: input }],
+        temperature: 0.2,
+        max_tokens: 2500,
+        endpoint: "audience-engine-v3-segments",
+        accountId,
+      });
+      return response.choices[0]?.message?.content?.trim() || "[]";
+    },
+    judge: async (input, candidate) => {
+      const parsed = safeJsonParse<z.infer<typeof SegmentArraySchema>>(candidate, SegmentArraySchema);
+      if (!parsed || parsed.length === 0) {
+        return {
+          valid: false,
+          failureClass: "GENERATION_QUALITY_FAILURE",
+          rejections: [{ rule: "Structural Integrity", reason: "output was not valid JSON or returned 0 segments" }]
+        };
+      }
+
+      const normalizedCandidates = parsed.map((seg, idx) => normalizeSegmentCandidate(seg, idx));
+
+      // SEMANTIC AUDIENCE JUDGE (Single-pass claim-level evaluation)
+      const judgePrompt = `You are the Semantic Audience Judge evaluating proposed audience segments against RAW EVIDENCE.
+Your job is to inspect EVERY claim individually across all segments and determine which claims are SUPPORTED vs REJECTED.
+
+RAW EVIDENCE:
+${formatEvidenceUnits(evidenceItems)}
+
+PROPOSED SEGMENTS:
+${JSON.stringify(normalizedCandidates, null, 2)}
+
+BUSINESS TARGET CONTEXT (Reference only):
+Industry: ${businessContext.industry}
+Core Offer: ${businessContext.coreOffer}
+
+EVALUATION RULES (Evaluate claim-by-claim):
+1. EVIDENCE SUPPORT: Does the cited evidenceIds directly and genuinely support this specific claim?
+   - If a pain claim is unsupported: rejectionCode = "UNSUPPORTED_PAIN"
+   - If a desire claim is unsupported: rejectionCode = "UNSUPPORTED_DESIRE"
+   - If an objection claim is unsupported: rejectionCode = "UNSUPPORTED_OBJECTION"
+   - If a motivation claim is unsupported: rejectionCode = "UNSUPPORTED_MOTIVATION"
+   - If an outcome claim is unsupported: rejectionCode = "UNSUPPORTED_OUTCOME"
+   - If citations do not match the claim text: rejectionCode = "CLAIM_CITATION_MISMATCH"
+2. SOURCE ROLE PRESERVATION: Does the role match who the cited evidence is actually about? (Code: "ROLE_TRANSFER")
+3. PROHIBITED EVIDENCE USE: Is competitor marketing copy (COMPETITOR_BRAND / MARKET_NARRATIVE_CONTEXT) being used as direct buyer pain testimony or violating prohibitedUses? (Code: "PROHIBITED_EVIDENCE_USE")
+4. SEMANTIC PRESERVATION: Did the model preserve original meaning without inventing unstated facts? (Code: "SEMANTIC_REWRITE" / "EVIDENCE_MISMATCH")
+5. OPTIONAL FIELDS ARE VALID WHEN OMITTED: A segment with only supported role and pains (and empty desires/objections/motivations) is 100% VALID. Do NOT reject for omitting optional fields.
+
+INSTRUCTIONS:
+Evaluate ALL claims across all segments in ONE single pass.
+Return a JSON object:
+{
+  "valid": boolean,
+  "acceptedClaimIds": ["seg_1_def", "seg_1_role", "seg_1_pain_1"],
+  "rejectedClaims": [
+    {
+      "claimId": "seg_1_desire_1",
+      "field": "desires",
+      "rejectionCode": "UNSUPPORTED_DESIRE" | "UNSUPPORTED_PAIN" | "UNSUPPORTED_OBJECTION" | "UNSUPPORTED_MOTIVATION" | "UNSUPPORTED_OUTCOME" | "ROLE_TRANSFER" | "PROHIBITED_EVIDENCE_USE" | "CLAIM_CITATION_MISMATCH" | "SEMANTIC_REWRITE" | "EVIDENCE_MISMATCH",
+      "reason": "Detailed reason why this specific claim failed.",
+      "repairDirective": "E.g. Omit this desire completely; keep accepted claims unchanged."
+    }
+  ]
+}
+
+If ALL claims are valid, return { "valid": true, "acceptedClaimIds": [...], "rejectedClaims": [] }.`;
+
       try {
-        const response = await aiChat({
-          model: "gpt-4.1-mini",
-          messages: [{ role: "user", content: attemptPrompt }],
-          temperature: attemptTemp,
-          max_tokens: 2000,
-          endpoint: "audience-engine-v3-segments",
+        const judgeRes = await aiChat({
+          model: "gpt-4o-mini",
+          messages: [{ role: "user", content: judgePrompt }],
+          temperature: 0.0,
+          max_tokens: 1500,
+          response_format: { type: "json_object" },
+          endpoint: "audience-engine-v3-judge",
           accountId,
         });
-        const content = response.choices[0]?.message?.content?.trim() || "[]";
-        const candidate = safeJsonParse<z.infer<typeof SegmentArraySchema>>(content, SegmentArraySchema);
-        if (!candidate || candidate.length < 2) {
-          segmentRejectionFeedback = `Rejected by structural gate: ${!candidate ? "output was not valid JSON or failed schema validation" : `only ${candidate.length} segment(s) returned`}. Return a JSON array of 2-4 well-formed segments. Fix exactly this.`;
-          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: STRUCTURAL_REJECT`);
-          continue;
+
+        const judgeContent = judgeRes.choices[0]?.message?.content?.trim() || "{}";
+        const judgeParsed = JSON.parse(judgeContent);
+        const rejectedClaims = Array.isArray(judgeParsed.rejectedClaims) ? judgeParsed.rejectedClaims : [];
+        const isJudgeValid = judgeParsed.valid === true || rejectedClaims.length === 0;
+
+        if (!isJudgeValid) {
+          const firstRejection = rejectedClaims[0];
+          return {
+            valid: false,
+            failureClass: firstRejection?.rejectionCode || "UNSUPPORTED_PAIN",
+            rejections: rejectedClaims.map((r: any) => ({
+              rule: r.rejectionCode || "CLAIM_FAILURE",
+              reason: `[Claim ${r.claimId || "unknown"} (${r.field || "field"})]: ${r.reason || "unsupported"}${r.repairDirective ? ` -> Directive: ${r.repairDirective}` : ""}`
+            })),
+            recoveredValue: JSON.stringify({
+              judgeReport: judgeParsed,
+              candidateSegments: normalizedCandidates
+            })
+          };
         }
-        // FULL GATE BATTERY (T12): structural Zod already held above; each
-        // segment must now clear breadth + interchangeability + contradiction.
-        // A single failing segment rejects the whole batch and retries with
-        // focused feedback. Short-circuiting at the first failing segment caps
-        // judge-call fan-out (bounded by SEGMENT_MAX_ATTEMPTS). The judges log
-        // every verdict — including NOT_RUN abstentions — so nothing is silent.
-        let batteryFeedback = "";
-        let failedSegName = "";
-        let failedGate = "";
-        // Partial-keep (B1/B3): on the FINAL attempt only, judge ALL segments
-        // instead of short-circuiting at the first failure (bounded fan-out:
-        // ≤4 segments). A segment that individually passed the FULL battery is
-        // strictly more truthful than the deterministic template — on
-        // exhaustion we keep passed segments and discard rejected ones,
-        // visibly. Earlier attempts keep the short-circuit to cap judge calls.
-        const isFinalAttempt = attempt === SEGMENT_MAX_ATTEMPTS - 1;
-        const passedSegments: typeof candidate = [];
-        const discardedInfo: string[] = [];
-        console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=judge | attempt=${attempt + 1} | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
-        for (const seg of candidate) {
-          const battery = await runCandidateGateBattery({
-            kind: "segment",
-            candidateText: `${seg.name}: ${seg.description}`,
-            productAnchor,
-            priorDecisions,
-            accountId,
-          });
-          if (!battery.passed) {
-            if (batteryFeedback.length === 0) {
-              failedSegName = seg.name;
-              failedGate = battery.failedGate ? battery.failedGate : "";
-              batteryFeedback = `segment "${seg.name}" — ${battery.rejectionFeedback}`;
-            }
-            discardedInfo.push(`"${seg.name}" gate=${battery.failedGate ? battery.failedGate : "unknown"}`);
-            if (!isFinalAttempt) break;
-          } else {
-            passedSegments.push(seg);
+      } catch (err) {
+        console.error("[AudienceEngine-V3] Semantic Judge error:", err);
+      }
+
+      return { valid: true, recoveredValue: JSON.stringify(normalizedCandidates) };
+    },
+    repair: async (input, failedCandidate, rejections) => {
+      let acceptedIds: string[] = [];
+      let rejectedList: any[] = rejections;
+
+      try {
+        const rawObj = JSON.parse(failedCandidate);
+        if (rawObj.judgeReport) {
+          acceptedIds = rawObj.judgeReport.acceptedClaimIds || [];
+          if (Array.isArray(rawObj.judgeReport.rejectedClaims) && rawObj.judgeReport.rejectedClaims.length > 0) {
+            rejectedList = rawObj.judgeReport.rejectedClaims;
           }
         }
-        segmentBatteryAttempts.push({
-          passed: batteryFeedback.length === 0,
-          failedGate: failedGate,
-          rejectionFeedback: batteryFeedback,
-        });
-        if (batteryFeedback && isFinalAttempt && passedSegments.length >= 1) {
-          // Renormalize estimatedPercentage: the prompt demands ~100 across
-          // the batch; discarding siblings breaks the share-of-market
-          // semantic that canonicalizeSegments and display consumers assume.
-          const totalPct = passedSegments.reduce((s, seg) => s + (Number(seg.estimatedPercentage) || 0), 0);
-          acceptedSegments = passedSegments.map(seg => ({
-            ...seg,
-            estimatedPercentage: totalPct > 0
-              ? Math.round(((Number(seg.estimatedPercentage) || 0) / totalPct) * 100)
-              : Math.round(100 / passedSegments.length),
-          }));
-          console.log(`[AudienceEngine-V3] SEGMENT_GATE_PARTIAL_KEEP | kept=${passedSegments.length} discarded=${discardedInfo.length} | discarded: ${discardedInfo.join(", ")} | first rejection: ${batteryFeedback.slice(0, 300)}`);
-          break;
-        }
-        if (batteryFeedback) {
-          segmentRejectionFeedback = `Rejected by gate battery:\n${batteryFeedback}\nFix exactly this and return a fresh JSON array of 2-4 segments, each a specific group defined by a shared, verifiable, situation-specific problem tied to the product.`;
-          console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: BATTERY_REJECT | gate=${failedGate} | segment="${failedSegName}"`);
-          continue;
-        }
-        acceptedSegments = candidate;
-        console.log(`[AudienceEngine-V3] SEGMENT_GATE: PASSED | attempt=${attempt + 1}/${SEGMENT_MAX_ATTEMPTS} | segments=${candidate.length} | temp=${attemptTemp} | gates=breadth+interchangeability+contradiction`);
-        break;
-      } catch (attemptErr: any) {
-        segmentRejectionFeedback = `Rejected by parser: previous output could not be processed (${attemptErr.message}). Return ONLY a valid JSON array. Fix exactly this.`;
-        console.error(`[AudienceEngine-V3] SEGMENT_GATE attempt ${attempt + 1}/${SEGMENT_MAX_ATTEMPTS}: AI_ERROR | ${attemptErr.message}`);
-      }
+      } catch {}
+
+      const repairDirectives = rejectedList.map((r: any) => {
+        const code = r.rejectionCode || r.rule || "CLAIM_ERROR";
+        const reason = r.reason || "";
+        const directive = r.repairDirective ? ` -> Directive: ${r.repairDirective}` : "";
+        return `[Claim ${r.claimId || "unknown"} (${r.field || "field"}) - ${code}]: ${reason}${directive}`;
+      }).join("\n");
+
+      const attemptPrompt = `${input}
+
+--- RETRY DIRECTIVE (CLAIM-LEVEL REPAIR) ---
+The Semantic Judge evaluated your previous generation:
+
+LOCKED / ACCEPTED CLAIM IDs (MUST BE PRESERVED UNCHANGED):
+${acceptedIds.length > 0 ? acceptedIds.join(", ") : "None"}
+
+REJECTED CLAIMS TO REPAIR / REMOVE:
+${repairDirectives}
+
+MANDATORY REPAIR RULES:
+1. LOCK ACCEPTED CLAIMS: Every claim ID in the ACCEPTED list must be preserved verbatim (same claimId, same text, same evidenceIds). Do NOT rewrite accepted claims!
+2. REMOVE OR FIX REJECTED CLAIMS: For every claim in the REJECTED list, either fix its evidenceIds to exact supporting evidence or OMIT the optional claim completely. (If a desire, objection, outcome, or motivation lacks direct proof, REMOVE IT).
+3. Return a complete, valid JSON array.`;
+
+      const response = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: attemptPrompt }],
+        temperature: 0.2,
+        max_tokens: 2500,
+        endpoint: "audience-engine-v3-segments-repair",
+        accountId,
+      });
+      return response.choices[0]?.message?.content?.trim() || "[]";
     }
+  });
 
-    if (!acceptedSegments) {
-      console.error(`[AudienceEngine-V3] SEGMENT_GATE: EXHAUSTED after ${SEGMENT_MAX_ATTEMPTS} attempts — using deterministic fallback (mode=fallback, never silent)`);
-      if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
-      return deterministicFallback();
-    }
+  const rawParsed = safeJsonParse<any>(rawSegments, z.any());
+  const segsList = Array.isArray(rawParsed) ? rawParsed : (rawParsed?.candidateSegments || []);
+  const acceptedSegments = segsList.map((s: any, idx: number) => normalizeSegmentCandidate(s, idx));
 
-    const audGroundingRefs = acceptedSegments.flatMap((s: any) => Array.isArray(s.groundingRefs) ? s.groundingRefs.map(String) : []);
-    checkGroundingContract({
-      engine: "audience_segments",
-      site: "segment_generation",
-      groundingRefs: audGroundingRefs,
-      ael: null,
-      accountId,
-    });
-
-    const finalSegments = acceptedSegments;
-    if (aiPathSink) aiPathSink.emission = emissionFromBattery(true, segmentBatteryAttempts);
-    return finalSegments.map(seg => {
-      const segPains = (seg.painProfile || []) as string[];
-      const segDesires = (seg.desireProfile || []) as string[];
-      const segObjections = (seg.objectionProfile || []) as string[];
-
-      let painDesireMatchCount = 0;
-      for (const p of segPains) {
-        if (painMap.some(pm => pm.canonical.toLowerCase().includes(p.toLowerCase()))) painDesireMatchCount++;
-      }
-      for (const d of segDesires) {
-        if (desireMap.some(dm => dm.canonical.toLowerCase().includes(d.toLowerCase()))) painDesireMatchCount++;
-      }
-      const totalProfileItems = segPains.length + segDesires.length;
-      const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
-      const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
-
-      const allOtherSegments = finalSegments.filter((s: any) => s.name !== seg.name);
-      let avgSim = 0;
-      if (allOtherSegments.length > 0) {
-        let simSum = 0;
-        for (const other of allOtherSegments) {
-          const overlap = [...segPains, ...segDesires].filter(
-            t => [...(other.painProfile || []), ...(other.desireProfile || [])].some(
-              (o: string) => o.toLowerCase() === t.toLowerCase()
-            )
-          ).length;
-          const totalTokens = new Set([...segPains, ...segDesires, ...(other.painProfile || []), ...(other.desireProfile || [])]).size;
-          simSum += totalTokens > 0 ? overlap / totalTokens : 0;
-        }
-        avgSim = simSum / allOtherSegments.length;
-      }
-      const segmentDistinctiveness = 1 - avgSim;
-
-      const evidenceSupport = Math.min(1, (segObjections.length > 0 ? 0.5 : 0) + (segPains.length >= 2 ? 0.3 : 0.1) + (segDesires.length >= 2 ? 0.2 : 0.1));
-
-      const segmentConfidence = Math.round(Math.min(0.95, Math.max(0.05,
-        signalCoverage * 0.40 + painDesireDensity * 0.30 + segmentDistinctiveness * 0.20 + evidenceSupport * 0.10
-      )) * 1000) / 1000;
-
-      return {
-        ...seg,
-        evidenceCount: painMap.length + desireMap.length + objectionMap.length,
-        confidenceScore: segmentConfidence,
-        sourceSignals: ["painMap", "desireMap", "objectionMap", "emotionalDrivers"],
-        inputSnapshotId,
-      };
-    });
-  } catch (err: any) {
-    console.error("[AudienceEngine-V3] Segment construction failed:", err.message);
-    if (aiPathSink) aiPathSink.emission = emissionFromBattery(false, segmentBatteryAttempts);
-    return deterministicFallback();
+  if (!acceptedSegments || acceptedSegments.length === 0) {
+     throw new LLMReliabilityError("Could not parse accepted segments JSON", "TECHNICAL_FAILURE");
   }
+
+  const audGroundingRefs = acceptedSegments.flatMap((s: any) => Array.isArray(s.groundingRefs) ? s.groundingRefs.map(String) : []);
+  checkGroundingContract({
+    engine: "audience_segments",
+    site: "segment_generation",
+    groundingRefs: audGroundingRefs,
+    ael: null,
+    accountId,
+  });
+
+  if (aiPathSink) aiPathSink.emission = emissionFromBattery(true, segmentBatteryAttempts);
+  
+  return acceptedSegments.map(seg => {
+    const segPains = (seg.painProfile || []) as string[];
+    const segDesires = (seg.desireProfile || []) as string[];
+    const segObjections = (seg.objectionProfile || []) as string[];
+
+    let painDesireMatchCount = 0;
+    for (const p of segPains) {
+      if (painMap.some(pm => pm.canonical.toLowerCase().includes(p.toLowerCase()))) painDesireMatchCount++;
+    }
+    for (const d of segDesires) {
+      if (desireMap.some(dm => dm.canonical.toLowerCase().includes(d.toLowerCase()))) painDesireMatchCount++;
+    }
+    const totalProfileItems = segPains.length + segDesires.length;
+    const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
+    const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
+
+    const allOtherSegments = acceptedSegments.filter((s: any) => s.name !== seg.name);
+    let avgSim = 0;
+    if (allOtherSegments.length > 0) {
+      let simSum = 0;
+      for (const other of allOtherSegments) {
+        const overlap = [...segPains, ...segDesires].filter(
+          t => [...(other.painProfile || []), ...(other.desireProfile || [])].some(
+            (o: string) => o.toLowerCase() === t.toLowerCase()
+          )
+        ).length;
+        const totalTokens = new Set([...segPains, ...segDesires, ...(other.painProfile || []), ...(other.desireProfile || [])]).size;
+        simSum += totalTokens > 0 ? overlap / totalTokens : 0;
+      }
+      avgSim = simSum / allOtherSegments.length;
+    }
+    const segmentDistinctiveness = 1 - avgSim;
+
+    const evidenceSupport = Math.min(1, (segObjections.length > 0 ? 0.5 : 0) + (segPains.length >= 2 ? 0.3 : 0.1) + (segDesires.length >= 2 ? 0.2 : 0.1));
+
+    const segmentConfidence = Math.round(Math.min(0.95, Math.max(0.05,
+      signalCoverage * 0.40 + painDesireDensity * 0.30 + segmentDistinctiveness * 0.20 + evidenceSupport * 0.10
+    )) * 1000) / 1000;
+
+    return {
+      ...seg,
+      evidenceCount: painMap.length + desireMap.length + objectionMap.length,
+      confidenceScore: segmentConfidence,
+      sourceSignals: ["painMap", "desireMap", "objectionMap", "emotionalDrivers"],
+      inputSnapshotId,
+    };
+  });
 }
 
 const ADS_PRESCRIPTIVE_PATTERNS = [
@@ -2380,19 +2555,84 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   } else if (isDefensiveMode) {
     console.log(`[AudienceEngine-V3] DEFENSIVE MODE — signal density too low (${totalSignalFrequency} total frequency), skipping AI layers`);
   } else {
-    const rawSegments = await constructSegments(
-      painMap, desireMap, objectionMap, emotionalDrivers,
-      maturityIndex, awarenessLevel,
-      businessContext, commentTexts, accountId, miSnapshotId, strategic,
-      audienceAiPathSink,
-    );
+    try {
+      const allRawEvidence = [
+        ...captionSanitized.clean.map(i => ({ text: i.text, sourceActor: "COMPETITOR_BRAND" })),
+        ...commentSanitized.clean.map(i => ({ text: i.text, sourceActor: "CUSTOMER_COMMENTER" })),
+        ...rawReviewItems.map(i => ({ text: i.text, sourceActor: "REVIEWER" }))
+      ];
 
-    audienceSegments = canonicalizeSegments(rawSegments);
-    console.log(`[AudienceEngine-V3] Canonicalization: ${rawSegments.length} raw → ${audienceSegments.length} canonical segments`);
+      const selectionResult = await selectEvidence(
+        allRawEvidence,
+        "AUDIENCE_DISCOVERY",
+        JSON.stringify(businessContext),
+        "gpt-4.1-mini", // Generator model
+        "gpt-4o-mini" // Judge model
+      );
 
-    adsTargetingHints = await translateToAdsTargeting(
-      audienceSegments, maturityIndex, businessContext, accountId, miSnapshotId,
-    );
+      if (!selectionResult.valid) {
+        console.error(`[AudienceEngine-V3] EVIDENCE_SELECTION_INCOMPLETE — Selection Judge rejected evidence payload after maximum retries. Reasons: ${selectionResult.rejectionReasons?.join("; ")}`);
+        return {
+          status: "INCOMPLETE",
+          statusMessage: "EVIDENCE_SELECTION_INCOMPLETE: Selection Judge rejected evidence payload after maximum retries. " + (selectionResult.rejectionReasons?.join("; ") || ""),
+          defensiveMode: isDefensiveMode,
+          languageSignals, painMap, desireMap, objectionMap, transformationMap, emotionalDrivers,
+          audienceSegments: [], segmentDensity: [], awarenessLevel, maturityIndex, intentDistribution,
+          adsTargetingHints: [], structuredSignals: EMPTY_STRUCTURED_SIGNALS,
+          targetCoverage: {
+            status: "NOT_EVALUATED",
+            supportedTargetRoles: [],
+            unsupportedTargetRoles: [],
+            evidenceGap: false,
+            reason: "Target coverage not evaluated due to incomplete audience evidence selection."
+          },
+          inputSummary: baseInputSummary,
+          engineVersion: AUDIENCE_ENGINE_VERSION,
+          executionTimeMs: Date.now() - startTime,
+          snapshotId: miSnapshotId,
+        };
+      }
+      
+      const evidenceItems = selectionResult.selectedUnits;
+
+      const rawSegments = await constructSegments(
+        painMap, desireMap, objectionMap, emotionalDrivers,
+        maturityIndex, awarenessLevel,
+        businessContext, evidenceItems, accountId, miSnapshotId, strategic,
+        audienceAiPathSink,
+      );
+
+      audienceSegments = canonicalizeSegments(rawSegments);
+      console.log(`[AudienceEngine-V3] Canonicalization: ${rawSegments.length} raw → ${audienceSegments.length} canonical segments`);
+
+      adsTargetingHints = await translateToAdsTargeting(
+        audienceSegments, maturityIndex, businessContext, accountId, miSnapshotId,
+      );
+    } catch (err: any) {
+      if (err instanceof LLMReliabilityError) {
+        console.error(`[AudienceEngine-V3] Segments exhausted retries: ${err.message}. Returning INCOMPLETE state.`);
+        return {
+          status: "INCOMPLETE",
+          statusMessage: "Audience segmentation failed after maximum retries. " + err.message,
+          defensiveMode: isDefensiveMode,
+          languageSignals, painMap, desireMap, objectionMap, transformationMap, emotionalDrivers,
+          audienceSegments: [], segmentDensity: [], awarenessLevel, maturityIndex, intentDistribution,
+          adsTargetingHints: [], structuredSignals: EMPTY_STRUCTURED_SIGNALS,
+          targetCoverage: {
+            status: "NOT_EVALUATED",
+            supportedTargetRoles: [],
+            unsupportedTargetRoles: [],
+            evidenceGap: false,
+            reason: "Target coverage not evaluated due to incomplete audience status."
+          },
+          inputSummary: baseInputSummary,
+          engineVersion: AUDIENCE_ENGINE_VERSION,
+          executionTimeMs: Date.now() - startTime,
+          snapshotId: miSnapshotId,
+        };
+      }
+      throw err;
+    }
   }
 
   // ── INTELLIGENCE UPGRADE: Sophistication Tier Scoring (Schwartz tradition) ──
@@ -2502,7 +2742,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
 
   const segmentDensity = computeSegmentDensity(painMap, desireMap, audienceSegments, miSnapshotId);
 
-  const executionTimeMs = Date.now() - startTime;
+  let executionTimeMs = Date.now() - startTime;
 
   let status: EngineStatus = "COMPLETE";
   let statusMessage: string | null = null;
@@ -2582,6 +2822,15 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   );
   console.log(`[AudienceEngine-V3] STRUCTURED_SIGNALS | pains=${structuredSignals.pain_clusters.length} | desires=${structuredSignals.desire_clusters.length} | patterns=${structuredSignals.pattern_clusters.length} | rootCauses=${structuredSignals.root_causes.length} | psychDrivers=${structuredSignals.psychological_drivers.length}`);
 
+  const targetCoverage = await evaluateTargetCoverage(
+    campaignId,
+    accountId,
+    audienceSegments,
+    status,
+    { campaignId, accountId }
+  );
+
+  executionTimeMs = Date.now() - startTime;
   const [inserted] = await db.insert(audienceSnapshots).values({
     accountId, campaignId, jobId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
@@ -2600,6 +2849,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     inputSummary: JSON.stringify(inputSummary),
     signalLineage: JSON.stringify(audienceLineage),
     structuredSignals: JSON.stringify(structuredSignals),
+    targetCoverage: JSON.stringify(targetCoverage),
     executionTimeMs,
   }).returning({ id: audienceSnapshots.id });
 
@@ -2615,7 +2865,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     console.error(`[AudienceEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);
   }
 
-  console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode}`);
+  console.log(`[AudienceEngine-V3] ${status} in ${executionTimeMs}ms | snapshot=${inserted.id} | signals=${totalSignalMatches} | freq=${totalSignalFrequency} | segments=${audienceSegments.length} | defensive=${isDefensiveMode} | coverage=${targetCoverage?.status}`);
 
   return {
     status,
@@ -2637,16 +2887,12 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     intentDistribution,
     adsTargetingHints,
     structuredSignals,
+    targetCoverage,
     inputSummary,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     executionTimeMs,
     snapshotId: inserted.id,
     freshnessMetadata: miFreshnessMetadata,
-    productDna: productDna || null,
-    dataReliability,
-    confidenceScore: dataReliability.overallReliability,
-    audienceSophistication,
-    buyerPsychologyProfile,
   };
 }
 

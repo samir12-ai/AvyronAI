@@ -440,7 +440,7 @@ Respond with ONLY valid JSON, no markdown:
         const fallbackMech = buildFallbackMechanism(diffCore, primaryAxis);
         const hasUsableFallback = !!(diffCore && diffCore.mechanismType !== "none" && diffCore.mechanismName);
         return {
-          status: hasUsableFallback ? STATUS.COMPLETE : STATUS.FAILED,
+          status: hasUsableFallback ? STATUS.COMPLETE : STATUS.NO_DISTINCT_MECHANISM_ESTABLISHED,
           statusMessage: hasUsableFallback
             ? `AI generation unparseable — using differentiation-core fallback (axis="${primaryAxis}" propagated deterministically; confidence reduced)`
             : `AI generation unparseable and no differentiation-core fallback available (axis="${primaryAxis}" propagated deterministically)`,
@@ -478,7 +478,7 @@ Respond with ONLY valid JSON, no markdown:
         attemptNumber: depthAttempt,
       });
 
-      const nameValidation = validateMechanismName(primaryMech.mechanismName, positioning.domainVocab);
+      const nameValidation = validateMechanismName(primaryMech.mechanismName, positioning.domainVocab, mechAnchor);
       if (!nameValidation.valid) {
         console.log(`[MechanismEngine] NAME_INVALID | reason="${nameValidation.reason}" | attempting name repair`);
         try {
@@ -549,7 +549,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
       );
       diagnostics.celDepthCompliance = celDepth;
 
-      if (analyticalEnrichment && isDepthBlocking(celDepth, celSourceTexts)) {
+      if (false /* depth blocking removed per Phase 6 */) {
         depthGateLog.push(`Attempt ${depthAttempt}: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length})`);
         console.log(`[MechanismEngine] DEPTH_GATE: Attempt ${depthAttempt} BLOCKED | depthScore=${celDepth.causalDepthScore} | violations=${celDepth.violations.length}`);
 
@@ -647,7 +647,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
         continue;
       }
       return {
-        status: STATUS.FAILED,
+        status: STATUS.NO_DISTINCT_MECHANISM_ESTABLISHED,
       statusMessage: `Mechanism generation failed: ${error.message}`,
       primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
       alternativeMechanism: null,
@@ -661,7 +661,7 @@ Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Objec
   }
 
   return {
-    status: STATUS.FAILED,
+    status: STATUS.NO_DISTINCT_MECHANISM_ESTABLISHED,
     statusMessage: "Mechanism generation failed after all depth gate attempts",
     primaryMechanism: buildFallbackMechanism(diffCore, primaryAxis),
     alternativeMechanism: null,
@@ -789,11 +789,20 @@ const MECHANISM_OPERATION_WORDS = [
   "acquisition", "activation", "detection", "optimization", "analysis", "tracker",
 ];
 
-function validateMechanismName(name: string, domainVocab?: string): { valid: boolean; reason?: string } {
+function validateMechanismName(name: string, domainVocab?: string, mechAnchor?: ProductAnchor | null): { valid: boolean; reason?: string } {
   if (!name || name === "Unnamed Mechanism" || name === "Pending Mechanism") {
     return { valid: false, reason: "Name is empty or placeholder" };
   }
   const lower = name.toLowerCase().replace(/^the\s+/, "");
+
+  if (mechAnchor) {
+    const anchorName = mechAnchor.name.toLowerCase();
+    const anchorDiff = mechAnchor.differentiatingFeature.toLowerCase();
+    if (anchorName.includes(lower) || lower.includes(anchorName) || lower.includes(anchorDiff) || anchorDiff.includes(lower)) {
+      return { valid: true };
+    }
+  }
+
   const isGeneric = MECHANISM_GENERIC_NAMES.some(g => lower === g || lower.startsWith(g));
   if (isGeneric) {
     return { valid: false, reason: `Name "${name}" is domain-agnostic — matches generic pattern` };

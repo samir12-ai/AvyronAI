@@ -164,7 +164,9 @@ export function shouldBlockDownstream(result: EngineStepResult): boolean {
     result.status === "SIGNAL_BLOCKED" ||
     result.status === "DEPTH_BLOCKED" ||
     result.status === "BLOCKED_BY_INTEGRITY" ||
-    result.status === "CONTRACT_INCOMPLETE"
+    result.status === "CONTRACT_INCOMPLETE" ||
+    result.status === "INCOMPLETE" ||
+    result.status === "NO_DISTINCT_MECHANISM_ESTABLISHED"
   );
 }
 

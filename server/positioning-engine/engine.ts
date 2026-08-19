@@ -21,7 +21,7 @@ import { buildDoctrineBlock, deriveAnchorFromProductDna, type ProductAnchor, typ
 import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
-import { selectPainForUse } from "../shared/audience-pain-registry";
+import { selectPainsForUse } from "../shared/audience-pain-registry";
 import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
@@ -2480,16 +2480,27 @@ export async function runPositioningEngine(
   // `positioning` use, so it is structurally excluded from the core role.
   // Wrapping the entry point attaches the selected role on EVERY return
   // path (early empties, degraded results, and the final result alike).
-  if (Array.isArray(painRegistry) && painRegistry.length > 0) {
-    const corePain = selectPainForUse(painRegistry, "positioning");
-    if (corePain) {
-      console.log(`[PositioningEngine-V3] POSITIONING_PAIN_SELECTED | painId=${corePain.painId} | class=${corePain.classification} | rank=${corePain.rank}`);
+  if (result.status === "SUCCESS" && Array.isArray(painRegistry) && painRegistry.length > 0) {
+    try {
+      const corePains = selectPainsForUse(painRegistry, "positioning");
+      const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && p.eligible && p.productFit === "ELIGIBLE");
+      const allPositioningPains = [...corePains, ...eligibleObjections];
+      
+      let finalPains = allPositioningPains;
+      if (Array.isArray(strategicLanes) && strategicLanes.length > 0) {
+        const lanePainIds = new Set(strategicLanes.flatMap(l => l.painIds || []));
+        finalPains = allPositioningPains.filter(p => lanePainIds.has(p.painId));
+      }
+
+      if (finalPains.length > 0) {
+        console.log(`[PositioningEngine-V3] POSITIONING_PAIN_PORTFOLIO_SELECTED | pains=${finalPains.length} | top_rank=${finalPains[0].rank}`);
+        (result as any).selectedPainRoles = {
+          portfolio: finalPains.map(p => ({ painId: p.painId, canonical: p.canonical, rank: p.rank, role: "purchase_motivation", classification: p.classification })),
+        };
+      }
+    } catch (e) {
+      // Should not be reached if Internal engine fails closed correctly
     }
-    (result as any).selectedPainRoles = {
-      core: corePain
-        ? { painId: corePain.painId, canonical: corePain.canonical, rank: corePain.rank, role: "purchase_motivation" as const, classification: corePain.classification }
-        : null,
-    };
   }
   return result;
 }
@@ -2506,6 +2517,31 @@ async function runPositioningEngineInternal(
   strategicLanes?: any[],
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
+
+  if (!Array.isArray(painRegistry) || painRegistry.length === 0) {
+    console.log(`[PositioningEngine-V3] PAIN_REGISTRY_MISSING — failing closed`);
+    return buildEmptyResult("MISSING_DEPENDENCY", `Positioning engine requires a valid pain registry. Run Audience Engine first.`, Date.now() - startTime, miSnapshotId, audienceSnapshotId);
+  }
+
+  const corePains = selectPainsForUse(painRegistry, "positioning");
+  const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && p.eligible && p.productFit === "ELIGIBLE");
+  let positioningPains = [...corePains, ...eligibleObjections];
+  if (Array.isArray(strategicLanes) && strategicLanes.length > 0) {
+    const lanePainIds = new Set(strategicLanes.flatMap(l => l.painIds || []));
+    positioningPains = positioningPains.filter(p => lanePainIds.has(p.painId));
+  }
+
+  if (!positioningPains || positioningPains.length === 0) {
+    const hasAnyValidPains = painRegistry.some(p => p.eligible);
+    if (hasAnyValidPains) {
+       console.log(`[PositioningEngine-V3] TARGET_AUDIENCE_EVIDENCE_GAP — valid pains exist, but none eligible for target buyer/lane`);
+       return buildEmptyResult("MISSING_DEPENDENCY", `TARGET_AUDIENCE_EVIDENCE_GAP: Positioning engine requires at least one authoritative pain suitable for positioning. Valid pains exist for other roles, but not the target.`, Date.now() - startTime, miSnapshotId, audienceSnapshotId);
+    } else {
+       console.log(`[PositioningEngine-V3] PRODUCT_FIT_EVALUATION_FAILED — no eligible pains in registry`);
+       return buildEmptyResult("MISSING_DEPENDENCY", `PRODUCT_FIT_EVALUATION_FAILED: Positioning engine requires at least one authoritative pain. None are eligible.`, Date.now() - startTime, miSnapshotId, audienceSnapshotId);
+    }
+  }
+
   const aelAck = acknowledgeAelInput("PositioningEngine-V3", analyticalEnrichment, accountId);
 
   const stateRefresh = await enforceGlobalStateRefresh(accountId, campaignId);
@@ -2592,6 +2628,37 @@ async function runPositioningEngineInternal(
 
   const competitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+
+  const targetCoverage = safeJsonParse(audienceSnapshot.targetCoverage, null);
+  if (targetCoverage) {
+    if (targetCoverage.status === "NOT_EVALUATED") {
+      const msg = targetCoverage.reason === "TARGET_AUTHORITY_MISSING"
+        ? "BLOCKED — TARGET_AUTHORITY_MISSING: Campaign has no explicit Business Target Authority configured."
+        : `BLOCKED — AUDIENCE_AUTHORITY_INCOMPLETE: Audience could not produce Judge-approved authority (${targetCoverage.reason || "incomplete"}).`;
+      console.log(`[PositioningEngine-V3] ${msg}`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildEmptyResult("MISSING_DEPENDENCY", msg, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    }
+    if (Array.isArray(strategicLanes) && strategicLanes.length > 0) {
+      const targetRoles = Array.from(new Set(strategicLanes.map(l => l.role).filter(Boolean)));
+      if (targetRoles.length > 0) {
+        const supportedLanes = strategicLanes.filter(l => l.role && targetCoverage.supportedTargetRoles?.includes(l.role));
+        if (supportedLanes.length === 0) {
+          console.log(`[PositioningEngine-V3] TARGET_AUDIENCE_EVIDENCE_GAP — no evidence for specific lanes: ${targetRoles.join(",")}`);
+          const executionTimeMs = Date.now() - startTime;
+          return buildEmptyResult("MISSING_DEPENDENCY", `TARGET_AUDIENCE_EVIDENCE_GAP: No material evidence found for the specific target role(s): ${targetRoles.join(", ")}. Positioning requires evidence for the lane it serves.`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+        }
+      } else if (targetCoverage.evidenceGap) {
+        console.log(`[PositioningEngine-V3] TARGET_AUDIENCE_EVIDENCE_GAP — global gap (lanes lacked role metadata)`);
+        const executionTimeMs = Date.now() - startTime;
+        return buildEmptyResult("MISSING_DEPENDENCY", `TARGET_AUDIENCE_EVIDENCE_GAP: No material evidence found for target roles.`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+      }
+    } else if (targetCoverage.evidenceGap) {
+      console.log(`[PositioningEngine-V3] TARGET_AUDIENCE_EVIDENCE_GAP — global gap`);
+      const executionTimeMs = Date.now() - startTime;
+      return buildEmptyResult("MISSING_DEPENDENCY", `TARGET_AUDIENCE_EVIDENCE_GAP: No material evidence found for target roles.`, executionTimeMs, miSnapshotId, audienceSnapshotId);
+    }
+  }
 
   const enrichedCount = competitors.filter(c => c.enrichmentStatus === "ENRICHED").length;
   if (competitors.length > 0) {
@@ -2983,11 +3050,8 @@ async function runPositioningEngineInternal(
             }
           });
         }
-        if (posSelectedPains.length === 0 && Array.isArray(painRegistry) && painRegistry.length > 0) {
-          const corePain = selectPainForUse(painRegistry, "positioning");
-          if (corePain) {
-            posSelectedPains.push({ painId: corePain.painId, canonical: corePain.canonical });
-          }
+        if (posSelectedPains.length === 0) {
+          posSelectedPains.push({ painId: corePain.painId, canonical: corePain.canonical });
         }
         const posAuthority = posSelectedPains.length > 0
           ? {

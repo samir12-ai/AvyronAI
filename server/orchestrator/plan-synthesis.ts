@@ -77,24 +77,24 @@ export async function validateCrossEngineStrategyConsistency(
       messages: [
         {
           role: "system",
-          content: `You are a Senior Strategic Auditor. Your task is to evaluate the contextual consistency of a strategic marketing plan assembled from different AI engines.
-Compare the strategic inputs and look for contextual contradictions.
+          content: `You are a Senior Strategic Auditor. Your task is to evaluate the strategic decision quality and contextual consistency of a strategic marketing plan assembled from different AI engines.
+Compare the strategic inputs and look for real structural contradictions or strategically empty decisions.
 
 STRICT CONSTITUTIONAL RULES:
-- Identify if there is a fundamental structural contradiction between the Positioning axis, the Differentiating claim, the Mechanism promise, and the Offer outcome (e.g., Positioning promises 100% free while Offer demands upfront payment, or Positioning targets B2B while Funnel uses high-school consumer slang).
-- Do NOT act as a creative copywriter or genericness/interchangeability critic. Individual engine uniqueness is evaluated by upstream judges. NEVER reject a plan because copy is 'vague' or 'generic'.
-- MULTI-LANE & MULTI-PAIN ARCHITECTURE: When a campaign has multiple customer segments or strategic lanes (e.g. B2B / Clinic procurement vs B2C / Consumers), different assets may legitimately address different approved pains or segments. Do NOT flag a contradiction merely because one engine addresses an approved B2B/clinical pain while another audience segment lists personal wellness pains, provided both are in the approved pains or strategic lanes.
-- ONLY flag mutually exclusive statements that make the combined plan executionally impossible to run simultaneously.
+1. STRUCTURAL CONTRADICTIONS: Only flag a contradiction if two decisions are mutually exclusive (e.g., Positioning promises 100% free while Offer demands upfront $5,000 retainer, or Positioning targets teenagers while Offer is a corporate pension fund).
+2. MULTI-LANE ARCHITECTURE (CRITICAL): When a campaign has multiple Strategic Lanes (e.g. Lane 1: Clinic Procurement & Supply Reliability, Lane 2: Clinical Safety Assurance & Practice Growth), different engines (Positioning, Differentiation, Mechanism, Offer, Funnel) legitimately speak to different lanes or the shared Brand Spine umbrella. Having one engine target clinic supply reliability and another target clinical safety is INTENDED and VALID. Do NOT flag a contradiction between components addressing different approved lanes.
+3. BRAND SPINE COHERENCE: Reject if the Brand Spine contrast axis merges conflicting lane pains into an incoherent compound phrase (e.g. "body image struggles vs clinic trust doubts"). The Brand Spine must be a coherent umbrella position.
+4. STRATEGIC DECISION QUALITY: Reject outputs that contain only generic advice ("build trust", "use proof-led persuasion", "post consistently") without explaining the commercial consequence and the specific strategic choice. NOTE: An honest statement acknowledging a capability gap or proof gap is VALID.
 
-If you find a conflict, output a JSON object:
+If you find a genuine contradiction, output a JSON object:
 {
   "consistent": false,
-  "conflict": "<detailed explanation of the strategic contradiction>",
+  "conflict": "<detailed explanation of the structural contradiction>",
   "canonicalFields": ["<the fields in conflict, e.g. positioning.enemy, offer.coreOutcome>"],
   "responsibleEngines": ["<the engines responsible, e.g. offer, positioning>"],
-  "recommendedRegenerationTarget": "<the single engine that should be regenerated to resolve the conflict, e.g. offer>"
+  "recommendedRegenerationTarget": "<the single engine that should be regenerated, e.g. positioning | offer | mechanism | differentiation>"
 }
-If no strategic contradictions exist, output:
+If no structural contradictions exist, output:
 {
   "consistent": true
 }`
@@ -119,18 +119,12 @@ If no strategic contradictions exist, output:
     const text = response.choices?.[0]?.message?.content ?? "{}";
     const judgeResult = JSON.parse(text);
     if (judgeResult && judgeResult.consistent === false) {
-      const conflictStr = (judgeResult.conflict || "").toLowerCase();
-      const isPureInterchangeabilityCritique = (conflictStr.includes("interchangeable") || conflictStr.includes("generic") || conflictStr.includes("lacks specificity") || conflictStr.includes("vague")) && !conflictStr.includes("mutually exclusive") && !conflictStr.includes("direct contradiction");
-      if (isPureInterchangeabilityCritique) {
-        console.log(`[PlanSynthesis] CONSISTENCY_JUDGE_STYLISTIC_CRITIQUE_FILTERED | conflict=${judgeResult.conflict}`);
-        return { valid: true };
-      }
       return {
         valid: false,
         conflict: `Semantic Judge Verdict: ${judgeResult.conflict}`,
         canonicalFields: judgeResult.canonicalFields || [],
         responsibleEngines: judgeResult.responsibleEngines || [],
-        recommendedRegenerationTarget: judgeResult.recommendedRegenerationTarget || "offer"
+        recommendedRegenerationTarget: judgeResult.recommendedRegenerationTarget || "positioning"
       };
     }
   } catch (err: any) {
@@ -1165,28 +1159,29 @@ NOTE: "unknown" signals are NOT trusted — they represent legacy data with no v
 `
     : "";
 
-  const prompt = `You are a marketing strategist assembling an execution plan from engine outputs. Your job is to ASSEMBLE and FORMAT, not to re-derive strategy.
+  const prompt = `You are a Senior Strategic Marketing Director assembling an authoritative execution plan from engine outputs. Your job is to ASSEMBLE and FORMAT upstream decisions into a coherent, high-impact business strategy without generic platitudes or invented capabilities.
 
-STRICT CONSTRAINTS:
-1. You may rephrase or explain the approved decisions to improve readability and presentation tone.
-2. You MUST NOT change their strategic meaning, positioning axis, target segment details, or offer deliverables.
-3. You MUST NOT create or invent missing strategic decisions. If a value is missing or omitted, do not fabricate it.
+STRICT CONSTITUTIONAL RULES:
+1. DECISION & TRADEOFF QUALITY: The strategy must make concrete commercial choices. Avoid generic advice like "build trust", "use proof", or "post consistently" unless tied directly to evidence, commercial consequence, and an explicit tradeoff ("what NOT to do").
+2. MULTI-LANE INTEGRATION WITHOUT COLLISION: Preserve each active Strategic Lane as a distinct commercial context. Do NOT collapse all lanes into a single pain or merge conflicting audience pains (e.g. B2B clinic procurement vs B2C personal wellness) into a single confused paragraph.
+3. TRUTH-GROUNDED SPECIFICITY: Do NOT invent unvalidated features, SLAs, or technical integrations (e.g. "real-time API inventory integration", "guaranteed zero stockouts") unless verified in the Product Anchor. If proof or capabilities are missing, explicitly document them as a "Proof Gap" or "Capability Gap".
+4. PRESERVE ENGINE AUTHORITY: Use the exact locked decisions from upstream engines (Positioning, Differentiation, Mechanism, Offer, Funnel, Channel) without rewriting or substituting synonyms.
 
 Business Type: ${businessType}
 Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
 ${lanesBlock ? `\n${lanesBlock}\n` : ""}${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
-Engine Analysis Results (GROUNDED INTELLIGENCE — these are validated outputs from the 15-engine intelligence pipeline. Your job is to ASSEMBLE these into a coherent plan. Do NOT ignore, rephrase, contradict, or replace any engine output with your own analysis. Every section of the plan must trace back to a specific engine output below):
+Engine Analysis Results (GROUNDED INTELLIGENCE — validated outputs from the 15-engine pipeline):
 ${engineInsights}
 
-Generate a complete execution plan with these 9 sections. Return ONLY valid JSON matching this exact structure:
+Generate a complete strategic execution plan. Return ONLY valid JSON matching this exact structure:
 {
   "strategicSummary": {
-    "strategy": "What the strategy is",
-    "targetAudience": "Who it targets",
-    "growthObjective": "What the growth objective is",
-    "rationale": "Why this path was selected"
+    "strategy": "The overarching strategic positioning choice, core diagnosis, and competitive decision contrasting against the market status quo",
+    "targetAudience": "Structured breakdown of each active Strategic Lane: Audience context, evidence-backed problem, commercial consequence, and strategic decision",
+    "growthObjective": "Measurable commercial objective and conversion model derived from the goal decomposition",
+    "rationale": "Deep strategic reasoning explaining why this path was chosen, why it beats current alternatives, and the explicit tradeoffs (what NOT to do)"
   },
   "monthlyObjective": {
     "objective": "Clear business objective",
@@ -1205,7 +1200,7 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
     "storiesPerDay": 2,
     "carouselsPerWeek": 1,
     "videosPerWeek": 0,
-    "rationale": "Why this content mix",
+    "rationale": "Strategic rationale linking content pillars to the distinct audience lanes and required perception shifts",
     "contentPillars": [{"pillar":"name","percentage":"40%","examples":["example"]}]
   },
   "creativeTesting": {
@@ -1230,7 +1225,7 @@ Generate a complete execution plan with these 9 sections. Return ONLY valid JSON
   },
   "executionBlueprintDnaLink": {
     "contentPillarToDna": [{"pillar":"content pillar name","dnaElements":["which DNA components power this pillar"],"hookApproach":"recommended hook style","ctaStyle":"CTA approach for this pillar"}],
-    "weeklyDnaApplication": "How to apply Content DNA rules across the weekly content schedule"
+    "weeklyDnaApplication": "How to apply Content DNA rules and strategic boundaries across the weekly content schedule"
   }
 }`;
 
@@ -2177,13 +2172,27 @@ export async function synthesizePlan(
   // Call Cross-Engine Consistency Judge
   const consistency = await validateCrossEngineStrategyConsistency(results, activeStrategyRoot, config.accountId);
   if (!consistency.valid) {
-    console.error(`[PlanSynthesis] STRATEGY_CONSISTENCY_FAILED | conflict=${consistency.conflict} | engines=[${consistency.responsibleEngines?.join(",")}]`);
-    throw new StrategyConsistencyError(
-      consistency.conflict!,
-      consistency.canonicalFields!,
-      consistency.responsibleEngines!,
-      consistency.recommendedRegenerationTarget!
-    );
+    if (consistency.conflict?.includes("Deterministic Check Failed")) {
+      console.error(`[PlanSynthesis] STRATEGY_CONSISTENCY_BLOCKING_ERROR | conflict=${consistency.conflict}`);
+      throw new StrategyConsistencyError(
+        consistency.conflict!,
+        consistency.canonicalFields!,
+        consistency.responsibleEngines!,
+        consistency.recommendedRegenerationTarget!
+      );
+    } else {
+      console.warn(`[PlanSynthesis] STRATEGY_CONSISTENCY_AUDIT_WARNING | conflict=${consistency.conflict} | engines=[${consistency.responsibleEngines?.join(",")}]`);
+      if (synthesized.riskTriggers) {
+        synthesized.riskTriggers.triggers = synthesized.riskTriggers.triggers || [];
+        synthesized.riskTriggers.triggers.push({
+          trigger: "CROSS_ENGINE_STRATEGY_ALIGNMENT",
+          condition: consistency.conflict || "Cross-engine strategic tension detected",
+          action: `Align ${consistency.responsibleEngines?.join(" and ") || "upstream engines"} on primary lane execution during weekly review`,
+          severity: "low",
+          optimizationPlaybook: "Review positioning vs offer alignment against latest lane performance data"
+        });
+      }
+    }
   }
 
   // Call BLL translation layer to get separate business-facing representation

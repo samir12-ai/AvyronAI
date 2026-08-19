@@ -1575,12 +1575,12 @@ async function runFunnelEngineInternal(
   }
 
   if (!offer.offerName && pillars.length === 0) {
-    console.log(`[FunnelEngine-V3] Insufficient data — no offer or differentiation — returning red-grade adaptive fallback`);
+    console.log(`[FunnelEngine-V3] Insufficient data — no offer or differentiation — blocking funnel generation`);
     const emptyFunnel = buildEmptyFunnel();
-    const acceptability = assessStrategyAcceptability(0, 0, 8, false, ["Offer and differentiation data insufficient"]);
+    const acceptability = assessStrategyAcceptability(0, 0, 8, false, ["Offer and differentiation data insufficient (INCOMPLETE)"]);
     return {
-      status: STATUS.INSUFFICIENT_SIGNALS,
-      statusMessage: "Offer and differentiation data insufficient to construct funnel",
+      status: STATUS.INCOMPLETE,
+      statusMessage: "Offer and differentiation data insufficient to construct funnel — upstream INCOMPLETE propagated",
       primaryFunnel: emptyFunnel,
       alternativeFunnel: emptyFunnel,
       rejectedFunnel: { funnel: emptyFunnel, rejectionReason: "No data to construct funnel" },

@@ -20,6 +20,8 @@ export type PainUse =
 
 export const DETERMINISTIC_CLASSIFIER_VERSION = "deterministic_v1";
 
+export type ProductFitType = "DIRECT_FIT" | "STRATEGIC_FIT" | "NOT_FIT" | "UNKNOWN";
+
 export interface AuthoritativeAudiencePain {
   painId: string;
   canonical: string;
@@ -30,6 +32,16 @@ export interface AuthoritativeAudiencePain {
   classification: AudiencePainClass;
   rank: number;
   productFit: "ELIGIBLE" | "INELIGIBLE" | "UNKNOWN";
+  /** Granular Product Fit Taxonomy distinguishing direct vs strategic fit */
+  fitType?: ProductFitType;
+  /** Explains how existing Product Truth addresses an upstream strategic cause of the pain */
+  strategicBridge?: string;
+  /** Explicit statement of what the product does NOT solve (boundary enforcement) */
+  boundary?: string;
+  /** Exact Product Truth fact IDs cited to justify fit */
+  productTruthFactIds?: string[];
+  /** Whether the associated role is covered by Target Authority */
+  targetCovered?: boolean;
   eligible: boolean;
   allowedUses: PainUse[];
   prohibitedUses: PainUse[];
@@ -50,6 +62,27 @@ export interface AuthoritativeAudiencePain {
   /** Human-auditable reason for the classification decision. */
   classificationReason: string;
   lineage: { accountId: string; audienceSnapshotId: string };
+}
+
+export interface MarketPainPortfolio {
+  campaignId: string;
+  accountId: string;
+  audienceSnapshotId: string;
+  pains: AuthoritativeAudiencePain[];
+}
+
+export interface PainPortfolioViews {
+  marketPortfolio: MarketPainPortfolio;
+  productAligned: AuthoritativeAudiencePain[];
+  generalMarket: AuthoritativeAudiencePain[];
+  reconciliation: {
+    total: number;
+    directFit: number;
+    strategicFit: number;
+    notFit: number;
+    unknown: number;
+    sumMatchesTotal: boolean;
+  };
 }
 
 export interface PainRegistryValidation {
@@ -95,7 +128,7 @@ function stableId(snapshotId: string, text: string): string {
  * pain statements. */
 export function classifyAudiencePainDetailed(text: string): { classification: AudiencePainClass; reason: string } {
   const value = text.toLowerCase();
-  const postPurchase = value.match(/\b(refund|return|cancel|churn|onboard|support|access|delivery|shipping|bug|billing error)\b/);
+  const postPurchase = value.match(/\b(refund|refunds|return|returns|cancel|cancels|canceled|cancelled|canceling|cancelling|cancellation|cancellations|churn|onboard|onboarding|support|access|delivery|shipping|bug|bugs|billing|unauthorized)\b/);
   if (postPurchase) {
     return { classification: "POST_PURCHASE_FRICTION", reason: `post-purchase keyword "${postPurchase[0]}" in supplied wording` };
   }
@@ -128,18 +161,21 @@ export function buildAudiencePainRegistry(
   segments?: any[],
 ): AuthoritativeAudiencePain[] {
   const segmentIdByName = new Map<string, string>();
+  const segmentNameById = new Map<string, string>();
   if (Array.isArray(segments)) {
     segments.forEach((seg: any) => {
       if (seg?.name) {
         const cleanName = seg.name.trim();
-        const derivedId = `seg_${crypto.createHash("sha256").update(cleanName).digest("hex").slice(0, 16)}`;
+        const derivedId = seg.id || `seg_${crypto.createHash("sha256").update(cleanName).digest("hex").slice(0, 16)}`;
         segmentIdByName.set(cleanName.toLowerCase(), derivedId);
-        seg.id = seg.id || derivedId;
+        segmentNameById.set(derivedId, cleanName);
+        segmentNameById.set(cleanName, cleanName);
+        seg.id = derivedId;
       }
     });
   }
 
-  return pains.map((raw, index) => {
+  const result = pains.flatMap((raw, index) => {
     const canonical = painText(raw);
     const suppliedClass = raw?.classification && Object.hasOwn(USES_BY_CLASS, raw.classification)
       ? raw.classification as AudiencePainClass
@@ -188,55 +224,83 @@ export function buildAudiencePainRegistry(
         }
       });
     }
-    if (segmentIds.length === 0 && Array.isArray(segments) && segments.length > 0) {
-      const firstSeg = segments[0];
-      if (firstSeg?.name) {
-        const segId = segmentIdByName.get(firstSeg.name.toLowerCase().trim());
-        if (segId) segmentIds.push(segId);
+    if (segmentIds.length === 0) {
+      if (Array.isArray(segments) && segments.length > 0) {
+        segmentIds.push("UNMATCHED");
       }
     }
     const strategicRole = typeof raw?.strategicRole === "string" ? raw.strategicRole : undefined;
     const evidenceStrength = Number.isFinite(raw?.evidenceStrength)
       ? Math.max(0, Math.min(1, raw.evidenceStrength))
       : Math.min(1, (evidenceUids.length + sourceSignalIds.length) / 4);
-    const productFit = raw?.productFit === "INELIGIBLE" || raw?.productFit === "UNKNOWN"
-      ? raw.productFit
-      : "ELIGIBLE";
+
     const allowedUses = Array.isArray(raw?.allowedUses)
       ? raw.allowedUses.filter((use: unknown): use is PainUse => typeof use === "string" && (USES_BY_CLASS[classification] as string[]).includes(use))
       : USES_BY_CLASS[classification];
-    return {
-      painId: typeof raw?.painId === "string" ? raw.painId : stableId(lineage.audienceSnapshotId, canonical),
-      canonical,
-      originalStatement: typeof raw?.originalStatement === "string" && raw.originalStatement.length > 0
-        ? raw.originalStatement
-        : canonical,
-      normalizedStatement: normalizeStatement(canonical),
-      classification,
-      rank: Number.isFinite(raw?.rank) ? raw.rank : index + 1,
-      productFit,
-      eligible: raw?.eligible === false ? false : productFit === "ELIGIBLE" && canonical.length > 0,
-      allowedUses,
-      prohibitedUses: (Object.keys(USES_BY_CLASS) as AudiencePainClass[])
-        .flatMap((kind) => USES_BY_CLASS[kind])
-        .filter((use, position, all) => all.indexOf(use) === position && !allowedUses.includes(use)),
-      evidenceUids,
-      sourceSignalIds,
-      sourceTypes,
-      evidenceStrength,
-      rootCauseIds,
-      segmentIds,
-      strategicRole,
-      classifierVersion,
-      classificationReason,
-      lineage,
+
+    const makeRecordForSegment = (targetSegmentId: string | null, suffixId?: string) => {
+      const segList = targetSegmentId ? [targetSegmentId] : segmentIds;
+      let defaultFit: "ELIGIBLE" | "INELIGIBLE" | "UNKNOWN" = "ELIGIBLE";
+      if (segList.includes("UNMATCHED")) {
+        defaultFit = "UNKNOWN";
+      }
+
+      const productFit = raw?.productFit === "INELIGIBLE" || raw?.productFit === "UNKNOWN"
+        ? raw.productFit
+        : (segList.includes("UNMATCHED")
+            ? "UNKNOWN"
+            : (raw?.productFit === "ELIGIBLE" ? "ELIGIBLE" : defaultFit));
+
+      const pid = suffixId 
+        ? `${typeof raw?.painId === "string" ? raw.painId : stableId(lineage.audienceSnapshotId, canonical)}_${suffixId}`
+        : (typeof raw?.painId === "string" ? raw.painId : stableId(lineage.audienceSnapshotId, canonical));
+
+      return {
+        painId: pid,
+        canonical,
+        originalStatement: typeof raw?.originalStatement === "string" && raw.originalStatement.length > 0
+          ? raw.originalStatement
+          : canonical,
+        normalizedStatement: normalizeStatement(canonical),
+        classification,
+        rank: Number.isFinite(raw?.rank) ? raw.rank : index + 1,
+        productFit,
+        eligible: raw?.eligible === false ? false : productFit === "ELIGIBLE" && canonical.length > 0,
+        allowedUses,
+        prohibitedUses: (Object.keys(USES_BY_CLASS) as AudiencePainClass[])
+          .flatMap((kind) => USES_BY_CLASS[kind])
+          .filter((use, position, all) => all.indexOf(use) === position && !allowedUses.includes(use)),
+        evidenceUids,
+        sourceSignalIds,
+        sourceTypes,
+        evidenceStrength,
+        rootCauseIds,
+        segmentIds: segList,
+        strategicRole,
+        classifierVersion,
+        classificationReason,
+        lineage,
+      };
     };
-  }).sort((a, b) => a.rank - b.rank);
+
+    if (segmentIds.length > 1) {
+      return segmentIds.map((segId, i) => makeRecordForSegment(segId, `seg${i}`));
+    }
+    return [makeRecordForSegment(segmentIds[0] || null)];
+  });
+  
+  // Sort primarily by upstream rank (or appearance order) and reassign a strict sequential rank
+  result.sort((a, b) => a.rank - b.rank);
+  return result.map((r, i) => ({ ...r, rank: i + 1 }));
 }
 
-export function selectPainForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain | null {
+export function selectPainForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain {
   const registry = pains as AuthoritativeAudiencePain[];
-  return registry.find((pain) => pain.eligible && pain.allowedUses.includes(use)) ?? null;
+  const pain = registry.find((pain) => pain.eligible && pain.allowedUses.includes(use));
+  if (!pain) {
+    throw new Error(`NO_ELIGIBLE_PAIN: No authoritative pain found for use '${use}'`);
+  }
+  return pain;
 }
 
 export function selectPainsForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain[] {
@@ -351,3 +415,113 @@ export function validateAudiencePainRegistry(
   }
   return { valid: issues.length === 0, issues };
 }
+
+export function buildMarketPainPortfolio(
+  pains: AuthoritativeAudiencePain[],
+  context: { campaignId: string; accountId: string; audienceSnapshotId: string }
+): MarketPainPortfolio {
+  return {
+    campaignId: context.campaignId,
+    accountId: context.accountId,
+    audienceSnapshotId: context.audienceSnapshotId,
+    pains: [...pains],
+  };
+}
+
+export function splitMarketPainPortfolio(
+  portfolio: MarketPainPortfolio | AuthoritativeAudiencePain[],
+  context?: { campaignId: string; accountId: string; audienceSnapshotId: string }
+): PainPortfolioViews {
+  const pains: AuthoritativeAudiencePain[] = Array.isArray(portfolio) ? portfolio : portfolio.pains;
+  const ctx = Array.isArray(portfolio)
+    ? (context || {
+        campaignId: pains[0]?.lineage?.accountId || "",
+        accountId: pains[0]?.lineage?.accountId || "",
+        audienceSnapshotId: pains[0]?.lineage?.audienceSnapshotId || "",
+      })
+    : {
+        campaignId: portfolio.campaignId,
+        accountId: portfolio.accountId,
+        audienceSnapshotId: portfolio.audienceSnapshotId,
+      };
+
+  const productAligned = pains.filter((p) => p.fitType === "DIRECT_FIT" || p.fitType === "STRATEGIC_FIT" || (!p.fitType && p.productFit === "ELIGIBLE"));
+  const generalMarket = pains.filter((p) => p.fitType === "NOT_FIT" || p.fitType === "UNKNOWN" || (!p.fitType && p.productFit !== "ELIGIBLE"));
+
+  let directFit = 0;
+  let strategicFit = 0;
+  let notFit = 0;
+  let unknown = 0;
+
+  for (const p of pains) {
+    if (p.fitType === "DIRECT_FIT") directFit++;
+    else if (p.fitType === "STRATEGIC_FIT") strategicFit++;
+    else if (p.fitType === "NOT_FIT") notFit++;
+    else if (p.fitType === "UNKNOWN") unknown++;
+    else {
+      if (p.productFit === "ELIGIBLE") directFit++;
+      else if (p.productFit === "INELIGIBLE") notFit++;
+      else unknown++;
+    }
+  }
+
+  return {
+    marketPortfolio: {
+      campaignId: ctx.campaignId,
+      accountId: ctx.accountId,
+      audienceSnapshotId: ctx.audienceSnapshotId,
+      pains,
+    },
+    productAligned,
+    generalMarket,
+    reconciliation: {
+      total: pains.length,
+      directFit,
+      strategicFit,
+      notFit,
+      unknown,
+      sumMatchesTotal: directFit + strategicFit + notFit + unknown === pains.length,
+    },
+  };
+}
+
+/**
+ * Attaches frozen Target Coverage authority to the audience pain registry.
+ * Strictly consumes previously evaluated Target Coverage matches — does NOT
+ * recompute, infer, or guess target relevance from role enums or keywords.
+ */
+export function attachTargetCoverageToPainRegistry(
+  registry: AuthoritativeAudiencePain[],
+  targetCoverage: {
+    status: "FULL" | "PARTIAL" | "GAP" | "NOT_EVALUATED";
+    matches?: Array<{
+      isCovered: boolean;
+      matchedSegmentNames?: string[];
+    }>;
+  },
+  audienceSegments?: Array<{ name: string; id?: string }>
+): AuthoritativeAudiencePain[] {
+  if (targetCoverage.status === "GAP" || targetCoverage.status === "NOT_EVALUATED") {
+    return registry.map((p) => ({ ...p, targetCovered: false }));
+  }
+
+  const coveredSegmentNames = new Set(
+    (targetCoverage.matches || [])
+      .filter((m) => m.isCovered)
+      .flatMap((m) => m.matchedSegmentNames || [])
+  );
+
+  return registry.map((pain) => {
+    const isCovered = pain.segmentIds.some((segId) => {
+      if (coveredSegmentNames.has(segId)) return true;
+      const seg = audienceSegments?.find((s) => s.id === segId || s.name === segId);
+      return seg ? coveredSegmentNames.has(seg.name) : false;
+    });
+
+    return {
+      ...pain,
+      targetCovered: isCovered,
+    };
+  });
+}
+

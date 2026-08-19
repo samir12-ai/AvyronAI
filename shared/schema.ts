@@ -1781,7 +1781,18 @@ export const businessDataLayer = pgTable("business_data_layer", {
   accountId: varchar("account_id").notNull().default("default"),
   businessLocation: text("business_location").notNull(),
   businessType: text("business_type").notNull(),
-  coreOffer: text("core_offer").notNull(),
+  // Service-specific independent fields
+  coreOffer: text("core_offer"),
+  uniqueMechanism: text("unique_mechanism"),
+  coreProblemSolved: text("core_problem_solved"),
+  strategicAdvantage: text("strategic_advantage"),
+  // Product-specific independent fields
+  businessModel: text("business_model"), // nullable / UNKNOWN during migration
+  heroProduct: text("hero_product"),
+  productSpecs: text("product_specs"),
+  endConsumerUseCase: text("end_consumer_use_case"),
+  replacedCompetitor: text("replaced_competitor"),
+  // Shared / generic fields
   priceRange: text("price_range").notNull(),
   targetAudienceAge: text("target_audience_age").notNull(),
   targetAudienceSegment: text("target_audience_segment").notNull(),
@@ -1789,9 +1800,6 @@ export const businessDataLayer = pgTable("business_data_layer", {
   funnelObjective: text("funnel_objective").notNull(),
   primaryConversionChannel: text("primary_conversion_channel").notNull(),
   productCategory: text("product_category"),
-  coreProblemSolved: text("core_problem_solved"),
-  uniqueMechanism: text("unique_mechanism"),
-  strategicAdvantage: text("strategic_advantage"),
   targetDecisionMaker: text("target_decision_maker"),
   goalTarget: text("goal_target").default(""),
   goalTimeline: text("goal_timeline").default(""),
@@ -2295,6 +2303,7 @@ export const audienceSnapshots = pgTable("audience_snapshots", {
   inputSummary: text("input_summary"),
   signalLineage: text("signal_lineage"),
   structuredSignals: text("structured_signals"),
+  targetCoverage: jsonb("target_coverage"),
   executionTimeMs: integer("execution_time_ms"),
   inputHash: text("input_hash"),
   createdAt: timestamp("created_at").defaultNow(),

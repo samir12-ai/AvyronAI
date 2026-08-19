@@ -212,7 +212,7 @@ const SECTION_SPECS: SectionSpec[] = [
   },
 ];
 
-function generatePlanMarkdown(params: {
+export function generatePlanMarkdown(params: {
   blueprint: any;
   confirmedBlueprint: any;
   plan: any;

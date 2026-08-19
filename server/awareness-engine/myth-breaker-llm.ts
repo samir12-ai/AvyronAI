@@ -79,7 +79,7 @@ ${rejectedBlock}
 ═══ HARD RULES ═══
 1. mythBreakerStatement MUST be a single sharp sentence that contradicts a real belief in this market.
 2. beliefToContradict MUST be a paraphrase of an actual [BLF#], [OBJ#], or [PAIN#] item — not invented.
-3. rootCauseContradicted MUST cite at least one RC# from the list above (e.g. "RC2: ..."). If none of the root causes apply, use "RC_PAIN" and ground in a [PAIN#] item.
+3. rootCauseContradicted MUST cite EXACTLY the RC# and the exact text from the list above. DO NOT invent, summarize, or redefine the root cause. If none of the root causes apply, use "RC_PAIN" and quote the [PAIN#] item.
 4. The myth-breaker must NOT match any of the rejected claim patterns above.
 5. contradictionLogic must explain in plain language: "The audience believes X because of Y. The actual root cause is Z, so the right answer is W."
 6. No marketing jargon. No "transform", "unlock", "leverage", "scale", "optimize", "next-level".
@@ -89,7 +89,7 @@ Return JSON:
 {
   "mythBreakerStatement": "<one sharp sentence>",
   "beliefToContradict": "<the belief, in audience's own framing>",
-  "rootCauseContradicted": "<RC# and short description>",
+  "rootCauseContradicted": "<Exact RC# and exact description text from the list above>",
   "rootCauseRefs": ["RC1", "RC4"],
   "groundingRefs": ["RC1"],
   "evidenceForBelief": ["[BLF#] or [OBJ#] or [PAIN#] quote"],

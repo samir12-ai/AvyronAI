@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAudiencePainRegistry,
+  buildMarketPainPortfolio,
+  splitMarketPainPortfolio,
+  attachTargetCoverageToPainRegistry,
   classifyAudiencePainDetailed,
   selectPainForUse,
   selectPainsForUse,
@@ -115,7 +118,7 @@ describe("deterministic judge over LLM classifier output (G3)", () => {
     expect(updatedReports.allowedUses).toContain("positioning");
     expect(updatedPricing.productFit).toBe("UNKNOWN");
     expect(updatedPricing.eligible).toBe(false); // uncertain stays uncertain — never promoted
-    expect(selectPainForUse(updated, "offer_objection")?.painId).not.toBe(updatedPricing.painId);
+    expect(selectPainsForUse(updated, "offer_objection").map(p => p.painId)).not.toContain(updatedPricing.painId);
     // registry validation stays coherent after LLM application
     const validation = validateAudiencePainRegistry(updated, lineage);
     expect(validation.issues.filter((i) => i.startsWith("PRODUCT_FIT_MISMATCH"))).toEqual([]);
@@ -225,3 +228,244 @@ describe("synthesis preservation of engine roles (G6)", () => {
     expect(preserved.roles?.positioningCore).toBeUndefined();
   });
 });
+
+describe("product fit taxonomy and portfolio views (G7)", () => {
+  it("validates DIRECT_FIT and STRATEGIC_FIT with required bridge and boundary", () => {
+    const registry = registryFixture();
+    const reports = registry.find((p) => p.canonical.includes("reliable reports"))!;
+    const records = [
+      {
+        painId: reports.painId,
+        classification: "CORE_PURCHASE",
+        productFit: "ELIGIBLE",
+        fitType: "STRATEGIC_FIT" as const,
+        strategicBridge: "Provides automated report validation before stakeholder presentation.",
+        boundary: "Does not write custom spreadsheet macros.",
+        reason: "Strategic fit for analytics reporting reliability.",
+        semanticRank: 1,
+      },
+    ];
+
+    const sourceFacts = {
+      productCapabilities: "automated report validation and data reconciliation",
+      businessProfile: "Enterprise analytics tool",
+    };
+
+    const judged = judgePainClassifierOutput(
+      [reports],
+      records,
+      [],
+      sourceFacts
+    );
+
+    expect(judged.rejections).toEqual([]);
+    expect(judged.accepted.get(reports.painId)?.fitType).toBe("STRATEGIC_FIT");
+    expect(judged.accepted.get(reports.painId)?.strategicBridge).toBe("Provides automated report validation before stakeholder presentation.");
+    expect(judged.accepted.get(reports.painId)?.boundary).toBe("Does not write custom spreadsheet macros.");
+  });
+
+  it("rejects STRATEGIC_FIT when boundary or strategicBridge is missing", () => {
+    const registry = registryFixture();
+    const reports = registry.find((p) => p.canonical.includes("reliable reports"))!;
+    const missingBoundaryRecord = [
+      {
+        painId: reports.painId,
+        classification: "CORE_PURCHASE",
+        productFit: "ELIGIBLE",
+        fitType: "STRATEGIC_FIT" as const,
+        strategicBridge: "Provides automated report validation before stakeholder presentation.",
+        reason: "Strategic fit for analytics reporting.",
+        semanticRank: 1,
+      },
+    ];
+
+    const judged = judgePainClassifierOutput(
+      [reports],
+      missingBoundaryRecord,
+      [],
+      { productCapabilities: "automated report validation", businessProfile: "Analytics" }
+    );
+
+    expect(judged.rejections.some((r) => r.code === "BOUNDARY_MISSING")).toBe(true);
+  });
+
+  it("rejects generic false strategic bridges", () => {
+    const registry = registryFixture();
+    const reports = registry.find((p) => p.canonical.includes("reliable reports"))!;
+    const falseBridgeRecord = [
+      {
+        painId: reports.painId,
+        classification: "CORE_PURCHASE",
+        productFit: "ELIGIBLE",
+        fitType: "STRATEGIC_FIT" as const,
+        strategicBridge: "Both are in marketing and our tool is a marketing tool.",
+        boundary: "We do not write the reports.",
+        reason: "Strategic fit because of same marketing industry.",
+        semanticRank: 1,
+      },
+    ];
+
+    const judged = judgePainClassifierOutput(
+      [reports],
+      falseBridgeRecord,
+      [],
+      { productCapabilities: "analytics tool", businessProfile: "Analytics" }
+    );
+
+    expect(judged.rejections.some((r) => r.code === "FALSE_STRATEGIC_BRIDGE")).toBe(true);
+  });
+
+  it("recovers a STRATEGIC_FIT from a false-negative NOT_FIT via the Semantic Judge repair directive (LIVE LLM)", async () => {
+    // Phase 7: Domain-Neutral Controlled Case
+    // Pain: "Inability to predict which localized weather patterns will disrupt supply chain routing."
+    // Product: Global meteorological data API. Does NOT route trucks. Does provide the data needed to route trucks.
+    const registry = buildAudiencePainRegistry([
+      { canonical: "Inability to predict which localized weather patterns will disrupt supply chain routing, causing delivery delays.", sourceSignals: ["sig-1"] }
+    ], lineage);
+    
+    // Simulate Phase 8: Force the FIRST proposer attempt to return NOT_FIT.
+    // We will do this by mocking `classifyPainRegistryWithLLM` just for the first call,
+    // or we can manually feed the record to the Judge and then call the Proposer with the repair directive.
+    const forcedNotFitRecord = {
+      painId: registry[0].painId,
+      classification: "CORE_PURCHASE" as const,
+      productFit: "INELIGIBLE",
+      fitType: "NOT_FIT" as const,
+      requiredCapability: "Supply chain routing optimization software that automatically reroutes trucks.",
+      matchedProductCapability: "Global meteorological data API",
+      reason: "The product provides weather data but does not perform supply chain routing or truck dispatch.",
+      semanticRank: 1,
+    };
+
+    const sourceFacts = {
+      productCapabilities: [
+        { factId: "fact_1", sourceField: "coreOffer", rawValue: "Global meteorological data API with localized disruption forecasting" }
+      ]
+    };
+
+    // Phase 9: Semantic Judge must reject underclassification
+    const { judgePainWithLLM } = await import("../shared/pain-classifier");
+    const semanticVerdicts = await judgePainWithLLM(
+      registry,
+      [forcedNotFitRecord as any],
+      { accountId: lineage.accountId, productCapabilities: sourceFacts.productCapabilities }
+    );
+
+    const verdict = semanticVerdicts.get(registry[0].painId);
+    expect(verdict).toBeDefined();
+    expect(verdict!.valid).toBe(false);
+    expect(verdict!.rejectionCode).toBe("STRATEGIC_FIT_NOT_CONSIDERED");
+    expect(verdict!.repairDirective).toBeDefined();
+    
+    // Phase 10: Targeted Retry
+    const { classifyPainRegistryWithLLM } = await import("../shared/pain-classifier");
+    const previousRejections = [`STRATEGIC_FIT_NOT_CONSIDERED:${registry[0].painId} — ${verdict!.critique}\nRepair Directive: ${verdict!.repairDirective}`];
+    
+    const retryRecords = await classifyPainRegistryWithLLM(registry, {
+      accountId: lineage.accountId,
+      campaignId: "test",
+      productCapabilities: sourceFacts.productCapabilities
+    }, previousRejections);
+    
+    expect(retryRecords).toBeDefined();
+    expect(retryRecords!.length).toBe(1);
+    
+    // Phase 11: Retry Result
+    const retryRecord = retryRecords![0];
+    expect(retryRecord.fitType).toBe("STRATEGIC_FIT");
+    expect(retryRecord.productFit).toBe("ELIGIBLE");
+    expect(retryRecord.strategicBridge).toBeDefined();
+    expect(retryRecord.boundary).toBeDefined();
+    
+    // Final Judge approval
+    const finalVerdicts = await judgePainWithLLM(
+      registry,
+      [retryRecord],
+      { accountId: lineage.accountId, productCapabilities: sourceFacts.productCapabilities }
+    );
+    expect(finalVerdicts.get(registry[0].painId)!.valid).toBe(true);
+  }, 45000);
+
+  it("reconciles MarketPainPortfolio into ProductAligned and GeneralMarket without losing pains", () => {
+    const registry = registryFixture();
+    const views = splitMarketPainPortfolio(registry, {
+      campaignId: "camp-test",
+      accountId: "acct-test",
+      audienceSnapshotId: "snap-test",
+    });
+
+    expect(views.reconciliation.total).toBe(3);
+    expect(views.reconciliation.sumMatchesTotal).toBe(true);
+    expect(views.productAligned.length + views.generalMarket.length).toBe(3);
+    expect(views.marketPortfolio.pains.length).toBe(3);
+  });
+});
+
+describe("frozen target coverage authority consumption (G8)", () => {
+  it("marks all pains targetCovered: false when Target Coverage is GAP", () => {
+    const registry = registryFixture();
+    const targetCoverage = {
+      status: "GAP" as const,
+      matches: [
+        { isCovered: false, matchedSegmentNames: ["Operations Leads"] }
+      ]
+    };
+
+    const updated = attachTargetCoverageToPainRegistry(registry, targetCoverage);
+    expect(updated.every((p) => p.targetCovered === false)).toBe(true);
+  });
+
+  it("marks all pains targetCovered: false when Target Coverage is NOT_EVALUATED", () => {
+    const registry = registryFixture();
+    const targetCoverage = {
+      status: "NOT_EVALUATED" as const,
+      matches: []
+    };
+
+    const updated = attachTargetCoverageToPainRegistry(registry, targetCoverage);
+    expect(updated.every((p) => p.targetCovered === false)).toBe(true);
+  });
+
+  it("marks only pains belonging to covered segments as targetCovered: true", () => {
+    const raw = [
+      { canonical: "Pain 1", segmentIds: ["Segment Alpha"], segmentId: "Segment Alpha" },
+      { canonical: "Pain 2", segmentIds: ["Segment Beta"], segmentId: "Segment Beta" },
+    ];
+    const registry = buildAudiencePainRegistry(raw, lineage);
+    const targetCoverage = {
+      status: "PARTIAL" as const,
+      matches: [
+        { isCovered: true, matchedSegmentNames: ["Segment Alpha"] },
+        { isCovered: false, matchedSegmentNames: ["Segment Beta"] },
+      ]
+    };
+
+    const updated = attachTargetCoverageToPainRegistry(registry, targetCoverage);
+    const p1 = updated.find((p) => p.canonical === "Pain 1")!;
+    const p2 = updated.find((p) => p.canonical === "Pain 2")!;
+
+    expect(p1.targetCovered).toBe(true);
+    expect(p2.targetCovered).toBe(false);
+  });
+
+  it("does not allow off-target or GAP pains to become strategyEligible", () => {
+    const raw = [
+      { canonical: "Pain Alpha", segmentIds: ["Segment A"], segmentId: "Segment A" },
+      { canonical: "Pain Beta", segmentIds: ["Segment B"], segmentId: "Segment B" },
+    ];
+    const registry = buildAudiencePainRegistry(raw, lineage);
+    const targetCoverage = {
+      status: "GAP" as const,
+      matches: []
+    };
+
+    const attached = attachTargetCoverageToPainRegistry(registry, targetCoverage);
+    for (const pain of attached) {
+      const isFit = pain.productFit === "ELIGIBLE" || pain.fitType === "DIRECT_FIT";
+      const isStrategyEligible = !!pain.targetCovered && isFit;
+      expect(isStrategyEligible).toBe(false);
+    }
+  });
+});
+
+

@@ -211,6 +211,39 @@ function buildStructuredObjectionMap(
   const structuredObjections: StructuredObjection[] = [];
   const seen = new Set<string>();
 
+  const primaryLane = ((audience as any).approvedLanes || []).find((l: any) => l.isPrimary) || ((audience as any).approvedLanes || [])[0];
+  const lanePains = primaryLane ? (primaryLane.associatedPains || []) : null;
+
+  if (audience.painRegistry && lanePains) {
+    const laneObjections = audience.painRegistry.filter(p => 
+      p.classification === "OBJECTION" && lanePains.includes(p.painId)
+    );
+
+    if (laneObjections.length > 0) {
+      for (const pain of laneObjections) {
+        const painStr = typeof pain.canonical === "string" ? pain.canonical : safeString(pain.canonical || pain.painId || "", "");
+        if (!painStr) continue;
+        const normalized = painStr.toLowerCase().replace(/[\s-]+/g, "_").slice(0, 60);
+        if (seen.has(normalized)) continue;
+        seen.add(normalized);
+
+        const objType = classifyObjectionType(painStr);
+
+        structuredObjections.push({
+          objectionStatement: `Lane-mapped objection: ${painStr.slice(0, 180)}`,
+          objectionTrigger: "lane_objection",
+          objectionStage: "consideration",
+          objectionType: objType,
+          requiredProofType: OBJECTION_PROOF_TYPE_MAP[objType],
+          persuasionResponse: buildPersuasionResponse(objType, painStr),
+          source: "audience_objection",
+          confidence: 0.9,
+        });
+      }
+      return structuredObjections; // Authoritative restriction
+    }
+  }
+
   const objectionMap = audience.objectionMap || {};
   for (const [key, value] of Object.entries(objectionMap)) {
     const statement = typeof value === "string" ? value : (Array.isArray(value) ? value.join("; ") : JSON.stringify(value));

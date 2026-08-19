@@ -39,7 +39,7 @@ const GOAL_TIMELINES = [
 ] as const;
 
 interface BusinessData {
-  businessModel: 'service' | 'product';
+  businessModel: 'service' | 'product' | 'mixed';
   heroProduct: string;
   productSpecs: string;
   endConsumerUseCase: string;
@@ -392,6 +392,8 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     if (!baseComplete) return false;
     if (data.businessModel === 'product') {
       return data.heroProduct.trim().length > 0 && data.productSpecs.trim().length > 0;
+    } else if (data.businessModel === 'mixed') {
+      return (data.heroProduct.trim().length > 0 || data.coreOffer.trim().length > 0);
     } else {
       return data.coreOffer.trim().length > 0;
     }
@@ -413,7 +415,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         if (!cancelled && json.exists && json.data) {
           const d = json.data;
           setData({
-            businessModel: d.businessModel || 'service',
+            businessModel: d.businessModel || (d.heroProduct && d.coreOffer ? 'mixed' : (d.heroProduct ? 'product' : 'service')),
             heroProduct: d.heroProduct || '',
             productSpecs: d.productSpecs || '',
             endConsumerUseCase: d.endConsumerUseCase || '',
@@ -681,19 +683,27 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
           >
             <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'product' ? colors.primary : colors.textMuted }}>Product</Text>
           </Pressable>
+          <Pressable
+            onPress={() => updateField('businessModel', 'mixed')}
+            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6, backgroundColor: data.businessModel === 'mixed' ? colors.primary + '20' : 'transparent' }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'mixed' ? colors.primary : colors.textMuted }}>Mixed</Text>
+          </Pressable>
         </View>
       </View>
 
-      {data.businessModel === 'product' ? (
+      {(data.businessModel === 'product' || data.businessModel === 'mixed') && (
         <>
           {renderTextField('heroProduct', 'Hero Product', 'e.g. Smart Watch Pro, Organic Coffee Beans', 'cube-outline')}
           {renderTextField('productSpecs', 'Product Specs / Features', 'e.g. 48hr battery, AMOLED display...', 'list-outline', true)}
           {renderTextField('endConsumerUseCase', 'End Consumer Use Case', 'e.g. Fitness tracking, morning energy...', 'person-outline', true)}
           {renderTextField('replacedCompetitor', 'Replaced Competitor', 'e.g. Apple Watch, Starbucks', 'swap-horizontal-outline')}
         </>
-      ) : (
+      )}
+
+      {(data.businessModel === 'service' || data.businessModel === 'mixed') && (
         <>
-          {renderTextField('coreOffer', 'Core Offer', 'e.g. Premium photography packages', 'pricetag-outline', true)}
+          {renderTextField('coreOffer', 'Core Offer / Service', 'e.g. Premium photography packages, Sourcing and distribution', 'pricetag-outline', true)}
         </>
       )}
 

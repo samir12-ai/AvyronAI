@@ -59,9 +59,7 @@ export interface ContextPayload {
 }
 
 // Simple deterministic token estimation
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
+import { estimateTokens } from "../shared/token-utils";
 
 // Format relative freshness string
 function getFreshnessState(date: Date): { age: string; status: string } {

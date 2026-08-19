@@ -1683,6 +1683,7 @@ function buildDeterministicOfferSkeletons(
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
   differentiation: OfferDifferentiationInput,
+  mechanismStatus?: string,
 ): {
   primary: OfferSkeleton & { laneFraming?: Record<string, any> };
   alternative: OfferSkeleton & { laneFraming?: Record<string, any> };
@@ -1717,7 +1718,12 @@ function buildDeterministicOfferSkeletons(
   // coerced to a human-readable string are dropped and recorded as contract
   // violations in layerDiagnostics.
   const registryPains = Array.isArray(rootPains) ? rootPains : audience.painRegistry || [];
-  const coreRegistryPain = selectPainForUse(registryPains, "offer_core");
+  const rootLanes = strategyRoot?.approvedLanes ? (typeof strategyRoot.approvedLanes === "string" ? safeJsonParse(strategyRoot.approvedLanes) : strategyRoot.approvedLanes) : [];
+  const primaryLane = rootLanes.length > 0 ? rootLanes[0] : null;
+
+  const coreRegistryPain = (primaryLane && primaryLane.painIds?.length > 0)
+    ? registryPains.find((p: any) => p.painId === primaryLane.painIds[0])
+    : selectPainForUse(registryPains, "offer_core");
   const objectionRegistryPains = registryPains.filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"));
   const painsList: string[] = (() => {
     if (coreRegistryPain) return [cleanPainScaffolding(coreRegistryPain.canonical)];
@@ -1870,6 +1876,7 @@ function buildDeterministicOfferSkeletons(
   })();
 
   const deliverables = (() => {
+    if (mechanismStatus === "NO_DISTINCT_MECHANISM_ESTABLISHED") return [];
     const fromRoot = safeLabelArray(rootMechSteps, "skeleton.deliverables.root");
     if (fromRoot.length > 0) return fromRoot.slice(0, 6);
     const fromCore = safeLabelArray(differentiation.mechanismCore?.mechanismSteps || [], "skeleton.deliverables.core");
@@ -1989,6 +1996,7 @@ function buildDeterministicOfferSkeletons(
         outcome: lanePrimaryOutcome,
         proofPath,
         objectionHandling: laneObjectionsList.length > 0 ? laneObjectionsList : objectionHandling,
+        buyerJob: lane.valueContext || "Target audience seeking a tailored solution",
       };
 
       altLaneFraming[lane.laneId] = {
@@ -1998,6 +2006,7 @@ function buildDeterministicOfferSkeletons(
         outcome: laneAltOutcome,
         proofPath,
         objectionHandling: laneObjectionsList.length > 0 ? laneObjectionsList : objectionHandling,
+        buyerJob: lane.valueContext || "Target audience seeking a tailored solution",
       };
     });
   }
@@ -2076,7 +2085,8 @@ export async function aiOfferGeneration(
   }
 
   if (strategyRoot) {
-    const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation);
+    const mechanismStatus = mechanismContext?.status;
+    const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation, mechanismStatus);
     const skeletons = skeletonResult;
     console.log(`[OfferEngine-V4] DETERMINISTIC_SKELETON_BUILT | primaryHook="${skeletons.primary.name.substring(0, 60)}" | mechName="${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || 'n/a')}" | proofTypes=${skeletons.primary.proofPath.length} | objections=${skeletons.primary.objectionHandling.length}`);
 
@@ -2090,11 +2100,11 @@ export async function aiOfferGeneration(
     if (aelBlock) console.log(`[OfferEngine-V4] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
     const primaryLanesStr = skeletons.primary.laneFraming ? Object.entries(skeletons.primary.laneFraming).map(([laneId, l]: any) => {
-      return `  * Lane "${l.title}" (Lane ID: "${laneId}"):\n    - Headline/Hook: "${l.hook}"\n    - Problem: "${l.problemStatement}"\n    - Outcome Payoff: "${l.outcome}"\n    - Objections: ${JSON.stringify(l.objectionHandling)}`;
+      return `  * Lane "${l.title}" (Lane ID: "${laneId}"):\n    - Headline/Hook: "${l.hook}"\n    - Buyer Job: "${l.buyerJob}"\n    - Problem: "${l.problemStatement}"\n    - Outcome Payoff: "${l.outcome}"\n    - Objections: ${JSON.stringify(l.objectionHandling)}`;
     }).join("\n") : "";
 
     const altLanesStr = skeletons.alternative.laneFraming ? Object.entries(skeletons.alternative.laneFraming).map(([laneId, l]: any) => {
-      return `  * Lane "${l.title}" (Lane ID: "${laneId}"):\n    - Headline/Hook: "${l.hook}"\n    - Problem: "${l.problemStatement}"\n    - Outcome Payoff: "${l.outcome}"\n    - Objections: ${JSON.stringify(l.objectionHandling)}`;
+      return `  * Lane "${l.title}" (Lane ID: "${laneId}"):\n    - Headline/Hook: "${l.hook}"\n    - Buyer Job: "${l.buyerJob}"\n    - Problem: "${l.problemStatement}"\n    - Outcome Payoff: "${l.outcome}"\n    - Objections: ${JSON.stringify(l.objectionHandling)}`;
     }).join("\n") : "";
 
     const prompt = `You are an Offer Copywriter. You must refine the wording of pre-built offer skeletons.

@@ -105,7 +105,7 @@ let geminiInstance: GoogleGenAI | null = null;
 let geminiApiKey: string | undefined;
 
 export function getOpenAI(): OpenAI {
-  const currentKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const currentKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
   if (!openaiInstance || currentKey !== openaiApiKey) {
     openaiApiKey = currentKey;
     openaiInstance = new OpenAI({
@@ -119,16 +119,14 @@ export function getOpenAI(): OpenAI {
 }
 
 export function getGemini(): GoogleGenAI {
-  const currentKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY;
+  const currentKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
   if (!geminiInstance || currentKey !== geminiApiKey) {
     geminiApiKey = currentKey;
-    geminiInstance = new GoogleGenAI({
-      apiKey: currentKey,
-      httpOptions: {
-        apiVersion: "",
-        baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL,
-      },
-    });
+    const opts: any = { apiKey: currentKey };
+    if (process.env.AI_INTEGRATIONS_GEMINI_BASE_URL) {
+      opts.httpOptions = { baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL };
+    }
+    geminiInstance = new GoogleGenAI(opts);
   }
   return geminiInstance;
 }
@@ -228,6 +226,91 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
     });
     return result;
   } catch (err: any) {
+    const isQuotaOrRateLimit =
+      err &&
+      (/429/i.test(String(err.message)) ||
+        /credits/i.test(String(err.message)) ||
+        /quota/i.test(String(err.message)) ||
+        /insufficient_quota/i.test(String(err.message)));
+
+    const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (isQuotaOrRateLimit && geminiKey) {
+      console.warn(
+        `[aiChat] OpenAI quota/rate-limit hit ("${err.message}"). Attempting seamless Gemini fallback...`
+      );
+      try {
+        const gemini = getGemini();
+        let promptText = "";
+        let systemInstruction = "";
+        for (const msg of rest.messages) {
+          const contentStr =
+            typeof msg.content === "string"
+              ? msg.content
+              : JSON.stringify(msg.content);
+          if (msg.role === "system") {
+            systemInstruction += contentStr + "\n\n";
+          } else {
+            promptText += `${msg.role.toUpperCase()}:\n${contentStr}\n\n`;
+          }
+        }
+        const fullContent = systemInstruction
+          ? `${systemInstruction}\n${promptText}`
+          : promptText;
+
+        const isJson = rest.response_format?.type === "json_object";
+        const geminiModel = "gemini-2.5-flash";
+
+        const geminiRes = await gemini.models.generateContent({
+          model: geminiModel,
+          contents: fullContent,
+          config: {
+            maxOutputTokens: rest.max_tokens,
+            temperature: rest.temperature,
+            ...(isJson ? { responseMimeType: "application/json" } : {}),
+          },
+        });
+
+        const text = geminiRes.text || "";
+        success = true;
+        actualTokens =
+          (geminiRes as any)?.usageMetadata?.totalTokenCount || rest.max_tokens;
+
+        recordReplayLlmCall("gemini", geminiModel, payload, geminiRes);
+        const costUsd = estimateCostUsd(geminiModel, actualTokens);
+        recordAiCost("gemini", geminiModel, costUsd);
+        logger.info({
+          msg: "ai.gemini.fallback.call",
+          accountId,
+          endpoint,
+          model: geminiModel,
+          tokens: actualTokens,
+          costUsd: Number(costUsd.toFixed(6)),
+          durationMs: Date.now() - startTime,
+        });
+
+        const fakeOpenAIResult: OpenAI.Chat.Completions.ChatCompletion = {
+          id: `gemini-fallback-${Date.now()}`,
+          choices: [
+            {
+              finish_reason: "stop",
+              index: 0,
+              message: {
+                role: "assistant",
+                content: text,
+                refusal: null,
+              },
+            },
+          ],
+          created: Math.floor(Date.now() / 1000),
+          model: geminiModel,
+          object: "chat.completion",
+        };
+        return fakeOpenAIResult;
+      } catch (geminiErr: any) {
+        console.error(`[aiChat] Gemini fallback error: ${geminiErr.message}`);
+      }
+    }
+
     const isTimeout =
       (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
       (err && (err.name === "APITimeoutError" || /timeout/i.test(String(err.message ?? ""))));
@@ -391,6 +474,7 @@ const FOUNDER_ACCOUNT_ID = "a2d87878-a1e9-41ea-a8a5-90beff569673";
 
 const ACCOUNT_BUDGET_OVERRIDES: Record<string, number> = {
   [FOUNDER_ACCOUNT_ID]: Infinity,
+  "system": Infinity,
 };
 
 function getAccountBudget(accountId: string): number {
