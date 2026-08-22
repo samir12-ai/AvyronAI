@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 /**
  * Authoritative Audience Pain classifier — LLM proposer + Independent Semantic Judge.
  *
@@ -26,7 +27,14 @@ import {
 } from "./audience-pain-registry";
 import { getEvidenceByUids } from "../strategic-reasoning/evidence-registry";
 
-export const LLM_CLASSIFIER_VERSION = "llm_v2+semantic_judge_v1";
+import { runTargetAssessmentForPain } from "../strategic-reasoning/target-assessment";
+import { runProductAssessmentForPain } from "../strategic-reasoning/product-assessment";
+import { judgeStrategicPainDecision } from "../strategic-pain-decision-judge";
+import { db } from "../db";
+import { businessUnderstandingSnapshots } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
+
+export const LLM_CLASSIFIER_VERSION = "strategic_pain_pipeline_v3";
 
 const VALID_CLASSES: AudiencePainClass[] = ["CORE_PURCHASE", "OBJECTION", "POST_PURCHASE_FRICTION", "SUPPORTING"];
 const VALID_FIT = ["ELIGIBLE", "INELIGIBLE", "UNKNOWN"] as const;
@@ -41,9 +49,20 @@ export interface ProductTruthFact {
   provenance?: string;
 }
 
-export interface LlmPainRecord {
+export interface LlmPainClassRecord {
   painId: string;
+  marketProblemMeaning: string;
+  marketFunction: "PROBLEM_TO_SOLVE" | "SUPPORTING_PROBLEM" | "PURCHASE_OBJECTION";
+  problemEvidenceUids: string[];
+  centralityStatus: "PROVEN" | "NOT_ESTABLISHED" | "CONTRADICTED" | "NOT_APPLICABLE";
+  centralityEvidenceUids: string[];
+  centralityReason: string;
   classification: AudiencePainClass;
+  reason: string;
+}
+
+export interface LlmProductFitRecord {
+  painId: string;
   productFit: "ELIGIBLE" | "INELIGIBLE" | "UNKNOWN";
   fitType: ProductFitType;
   requiredCapability?: string;
@@ -82,8 +101,120 @@ export function formatProductFactsForPrompt(facts?: ProductTruthFact[] | string 
   return facts.map(f => `[${f.factId}] (${f.sourceField}): ${f.rawValue}`).join("\n");
 }
 
+/** Resolved evidence context keyed by evidenceUid. */
+export type EvidenceContextMap = Map<string, { label: string; detail: string }>;
+
+/**
+ * Build a concise evidence basis string for a single pain's evidence UIDs.
+ * Preserves ALL referenced evidence (no arbitrary top-N selection).
+ * Uses sentence-boundary-aware truncation for long detail text.
+ * Deduplicates identical detail text structurally.
+ */
+export function packEvidenceForPain(
+  evidenceUids: string[],
+  evidenceContext: EvidenceContextMap,
+  maxCharsPerItem: number = 250,
+): string {
+  const texts = evidenceUids.map(u => {
+    if (!u.startsWith("EV:")) return u;
+    const ev = evidenceContext.get(u);
+    return ev ? `${ev.label}: ${ev.detail}` : null;
+  }).filter(Boolean);
+  if (texts.length === 0) return "none";
+  
+  const seenDetails = new Set<string>();
+  const lines: string[] = [];
+  for (const uid of evidenceUids) {
+    const ev = evidenceContext.get(uid);
+    if (!ev) {
+        lines.push(`  [${uid}] ${uid}`);
+        continue;
+    }
+    // Structurally deduplicate identical evidence text
+    const detailKey = ev.detail.trim().toLowerCase();
+    if (seenDetails.has(detailKey)) continue;
+    seenDetails.add(detailKey);
+    let detail = ev.detail.trim();
+    if (detail.length > maxCharsPerItem) {
+      // Sentence-boundary-aware truncation
+      const cutpoint = detail.lastIndexOf(".", maxCharsPerItem);
+      detail = cutpoint > maxCharsPerItem * 0.5
+        ? detail.slice(0, cutpoint + 1)
+        : detail.slice(0, maxCharsPerItem) + "…";
+    }
+    lines.push(`  [${uid}] ${ev.label}: ${detail}`);
+  }
+  return lines.length > 0 ? "\n  Evidence basis:\n" + lines.join("\n") : "";
+}
+
 /** Ask the LLM Proposer to classify each pain from first principles. */
-export async function classifyPainRegistryWithLLM(
+
+export async function proposePainClassWithLLM(
+  registry: AuthoritativeAudiencePain[],
+  opts: { accountId: string; campaignId: string; audienceSegments?: any[]; evidenceContext?: EvidenceContextMap },
+  previousRejections?: string[],
+): Promise<LlmPainClassRecord[] | null> {
+  if (registry.length === 0) return null;
+  const prompt = `You are a strict marketing-pain semantic classifier. Classify EACH pain below.
+
+SEMANTIC INVARIANCE RULE:
+Pain class must be based on the semantic function and evidence-supported meaning of the market claim.
+Surface wording, tone, or lexical choice must not determine whether a claim is CORE_PURCHASE, SUPPORTING, or OBJECTION.
+Semantically equivalent claims supported by equivalent evidence should normally receive the same class.
+
+CENTRALITY PRINCIPLES:
+1. PROBLEM PROVEN + MATERIAL IMPORTANCE PROVEN = CORE_PURCHASE
+2. PROBLEM PROVEN + MATERIAL IMPORTANCE NOT ESTABLISHED = SUPPORTING
+3. CORE_PURCHASE requires evidence of material importance (strong consequence, pervasive frustration, severe impact).
+4. Centrality does NOT require literal "I will buy" language, solution-seeking, or switching behavior. Material importance is sufficient.
+5. Do NOT infer importance just because the product solves it well. Product Fit is separate.
+6. A PROBLEM_TO_SOLVE does not automatically mean CORE_PURCHASE.
+
+TAXONOMY:
+1. marketProblemMeaning: What actual problem/barrier does the evidence establish?
+2. marketFunction: Choose PROBLEM_TO_SOLVE, SUPPORTING_PROBLEM, or PURCHASE_OBJECTION.
+3. problemEvidenceUids: List evidence UIDs (from the supplied context only) that prove the problem exists.
+4. centralityStatus: PROVEN, NOT_ESTABLISHED, CONTRADICTED, or NOT_APPLICABLE.
+5. centralityEvidenceUids: List evidence UIDs that prove material importance (required if CORE_PURCHASE).
+6. centralityReason: Explain why those exact evidence items establish material importance.
+7. classification:
+   - CORE_PURCHASE: A material problem the audience faces (requires centrality PROVEN).
+   - SUPPORTING: A valid market problem that matters but is secondary/minor (centrality NOT_ESTABLISHED).
+   - OBJECTION: A barrier, hesitation, doubt, perceived risk, or reason NOT to adopt/buy/act.
+   - POST_PURCHASE_FRICTION: Issues occurring after purchase (refunds, support).
+   - UNKNOWN: If evidence is insufficient.
+
+Do NOT classify a normal negative pain as OBJECTION just because it is undesirable. OBJECTION requires actual hesitation/barrier semantics.
+
+Previous Rejections to fix:
+${previousRejections?.join("\n") || "None"}
+
+Pains to classify:
+${registry.map(p => `<Pain id="${p.painId}">
+Segment: ${opts.audienceSegments?.find(s => s.name === p.segmentIds[0])?.segmentDefinition?.claim || p.segmentIds[0] || ""}
+Canonical: ${p.canonical}
+Evidence: ${opts.evidenceContext ? packEvidenceForPain(p.evidenceUids, opts.evidenceContext) : "none"}
+</Pain>`).join("\n")}
+
+Respond ONLY with JSON: {"records":[{"painId":"...","marketProblemMeaning":"...","marketFunction":"PROBLEM_TO_SOLVE|SUPPORTING_PROBLEM|PURCHASE_OBJECTION","problemEvidenceUids":["..."],"centralityStatus":"PROVEN|NOT_ESTABLISHED|CONTRADICTED|NOT_APPLICABLE","centralityEvidenceUids":["..."],"centralityReason":"...","classification":"CORE_PURCHASE|OBJECTION|POST_PURCHASE_FRICTION|SUPPORTING|UNKNOWN","reason":"..."}]}`;
+
+  const res = await aiChat({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.1,
+    max_tokens: 3000,
+    response_format: { type: "json_object" },
+    accountId: opts.accountId,
+    endpoint: "pain-class-proposer"
+  });
+  if (!res || !res.choices || !res.choices[0] || !res.choices[0].message || !res.choices[0].message.content) return null;
+  try {
+    return JSON.parse(res.choices[0].message.content).records;
+  } catch {
+    return null;
+  }
+}
+export async function proposeProductFitWithLLM(
   registry: AuthoritativeAudiencePain[],
   opts: { 
     accountId: string; 
@@ -91,9 +222,10 @@ export async function classifyPainRegistryWithLLM(
     productCapabilities?: string | ProductTruthFact[] | null;
     businessProfile?: string | null;
     audienceSegments?: any[];
+    evidenceContext?: EvidenceContextMap;
   },
   previousRejections?: string[],
-): Promise<LlmPainRecord[] | null> {
+): Promise<LlmProductFitRecord[] | null> {
   if (registry.length === 0) return null;
 
   const factsText = formatProductFactsForPrompt(opts.productCapabilities);
@@ -101,19 +233,21 @@ export async function classifyPainRegistryWithLLM(
 
 RULES (violations are rejected by an independent semantic judge):
 - Use ONLY the supplied painId values. Never invent, drop into free text, merge, or rewrite pains.
-- classification must be one of: CORE_PURCHASE (pre-purchase unmet outcome / purchase motivation), OBJECTION (pre-purchase hesitation: price, risk, trust, proof, time), POST_PURCHASE_FRICTION (refund, cancellation, support, onboarding, access, delivery — problems occurring AFTER purchase), SUPPORTING (contextual, not a direct purchase driver).
 
 FIT TAXONOMY & CAUSAL EVALUATION:
 1. requiredCapability: Identify the exact functional mechanism or capability required to solve this pain as verbatim stated.
 2. matchedProductCapability: Identify the exact capability verified in the Product Truth facts below that addresses it.
 3. fitType & productFit:
-   - DIRECT_FIT (productFit = "ELIGIBLE"): The business's EXISTING validated capability directly performs, produces, or executes the required function of the pain AS STATED.
-     * Note: DIRECT_FIT requires the validated product capability to perform or directly enable the function required to address the original pain. If the required function and supplied capability differ, evaluate whether a legitimate causal upstream strategic relationship exists before selecting NOT_FIT.
-   - STRATEGIC_FIT (productFit = "ELIGIBLE"): The product does NOT perform the literal operational task, but verified capabilities legitimately address an upstream strategic decision or root cause.
+   - DIRECT_FIT (productFit = "ELIGIBLE"): The business's EXISTING validated capability DIRECTLY PERFORMS OR DIRECTLY ENABLES the function required to address the pain AS STATED.
+     * Note: "Directly enables" means a validated Product Truth capability is causally necessary to reducing the pain, the connection is immediate, and it materially performs part of the function or removes a direct blocker. Role alignment (e.g., both target SMBs) or generic usefulness is FORBIDDEN.
+   - STRATEGIC_FIT (productFit = "ELIGIBLE"): The product contributes legitimate upstream strategy, decision support, or context, but does NOT directly perform or directly enable the function required by the pain.
      * MUST provide 'strategicBridge': Explain the causal mechanism connecting the upstream strategic capability to the pain. (Category/industry similarity like "both are in marketing" is NOT a valid bridge).
      * MUST provide 'boundary': Explicit statement of what operational tasks the product does NOT do.
-   - NOT_FIT (productFit = "INELIGIBLE"): The pain is real, but the product has no legitimate direct or strategic relationship to solving it. (Preserved as General Market Pain).
+   - NOT_FIT (productFit = "INELIGIBLE"): The product does not legitimately address the pain. (Preserved as General Market Pain).
    - UNKNOWN (productFit = "UNKNOWN"): Available Product Truth facts are insufficient to establish whether a legitimate relationship exists.
+
+SEMANTIC INVARIANCE PRINCIPLE:
+Classification must be based on the functional meaning of the pain and its supporting evidence basis, NOT on surface wording or lexical overlap with Product Truth. Two differently-worded pains that are supported by the same evidence and require the same functional capability must receive the same fit classification. Do not let word choice in the canonical pain text determine whether a fit is DIRECT vs STRATEGIC vs NOT_FIT.
 
 ROLE & PRODUCT TRUTH BOUNDARIES:
 - Evaluate THIS pain AS-IS. Preserve its original meaning. Do NOT reinterpret, translate, reframe, or substitute a different pain.
@@ -128,6 +262,7 @@ ROLE & PRODUCT TRUTH BOUNDARIES:
 - uncertainty: (For UNKNOWN) Explicitly state the missing information or unresolved question.
 - reason: Concise summary of the causal relationship.
 - semanticRank: rank ALL pains from 1 (most strategically dominant purchase driver) to N. Every rank exactly once.
+- fitType is REQUIRED for every record. You must always provide exactly one of: DIRECT_FIT, STRATEGIC_FIT, NOT_FIT, UNKNOWN.
 
 VERIFIED PRODUCT TRUTH FACTS:
 ${factsText}
@@ -137,8 +272,12 @@ ${opts.businessProfile || "UNKNOWN — no verified business profile provided."}
 
 PAINS:
 ${registry.map((p) => {
-  const roles = p.segmentIds.map(sid => opts.audienceSegments?.find(s => s.id === sid)?.name || sid).join(", ");
-  return `- painId=${p.painId} rank=${p.rank} role="${roles}" text="${p.canonical}"`;
+  const seg = opts.audienceSegments?.find(s => s.id === p.segmentIds?.[0] || s.name === p.segmentIds?.[0]);
+  const segName = seg?.name || p.segmentIds?.join(", ") || "unknown";
+  const segDef = seg?.segmentDefinition?.claim || seg?.description || "";
+  const roleLabel = (p as any).strategicRole || segName;
+  const evidenceBasis = opts.evidenceContext ? packEvidenceForPain(p.evidenceUids, opts.evidenceContext) : "";
+  return `- painId=${p.painId} rank=${p.rank} segment="${segName}"${segDef ? ` segmentDefinition="${segDef}"` : ""} role="${roleLabel}" text="${p.canonical}"${evidenceBasis}`;
 }).join("\n")}
 ${previousRejections && previousRejections.length > 0 ? `\nPREVIOUS REJECTIONS TO REPAIR:\n${previousRejections.join("\n")}` : ""}
 
@@ -172,33 +311,99 @@ Respond ONLY with JSON: {"records":[{"painId":"...","classification":"CORE_PURCH
  * Independent Semantic Judge: Evaluates the proposed product-fit records
  * against raw Product Truth facts and original pains from first principles.
  */
-export async function judgePainWithLLM(
+
+export async function judgePainClassWithLLM(
   registry: AuthoritativeAudiencePain[],
-  records: LlmPainRecord[],
+  records: LlmPainClassRecord[],
+  opts: { accountId: string; evidenceContext?: EvidenceContextMap }
+): Promise<Map<string, { valid: boolean; rejectionCode?: string; critique?: string; repairDirective?: string }>> {
+  const verdicts = new Map<string, { valid: boolean; rejectionCode?: string; critique?: string; repairDirective?: string }>();
+  if (records.length === 0) return verdicts;
+  
+  const prompt = `You are the Semantic Invariance Judge for Pain Classification.
+Your sole job is to verify that the proposed pain class is rigorously supported by the evidence and functional meaning, NOT by keyword hijacking or false centrality.
+
+CENTRALITY PRINCIPLES:
+1. Material importance (severity, frustration, frequency, operational impact) is sufficient for a problem to be classified as CORE_PURCHASE. It does NOT require explicit evidence of purchase-intent, solution-seeking, switching, or decision-driving behavior.
+
+RULES:
+1. CORE_PURCHASE requires evidence of material importance (strong consequence, pervasive frustration, severe impact).
+   - If the problem is trivial or minor, reject with LACKS_MATERIAL_IMPORTANCE and direct them to evaluate SUPPORTING.
+2. OBJECTION requires evidence of hesitation, resistance, or barrier to purchase. Reject with OBJECTION_FUNCTION_UNSUPPORTED if it's just a negative pain.
+3. SUPPORTING should not hide a true CORE_PURCHASE problem. Reject with UNDERCLASSIFIED_CORE_PROBLEM if the problem is central but was downgraded.
+4. If wording alone drove the classification instead of functional meaning, reject with LEXICAL_CLASSIFICATION_NOT_AUTHORITY.
+
+Pains to Judge:
+${records.map(r => {
+  const p = registry.find(x => x.painId === r.painId)!;
+  return `<Pain id="${p.painId}">
+Canonical: ${p.canonical}
+Evidence: ${opts.evidenceContext ? packEvidenceForPain(p.evidenceUids, opts.evidenceContext) : "none"}
+Proposed Class: ${r.classification}
+Proposer Meaning: ${r.marketProblemMeaning}
+Proposer Function: ${r.marketFunction}
+Problem Evidence UIDs: ${r.problemEvidenceUids?.join(", ")}
+Centrality Status: ${r.centralityStatus}
+Centrality Evidence UIDs: ${r.centralityEvidenceUids?.join(", ")}
+Centrality Reason: ${r.centralityReason}
+</Pain>`;
+}).join("\n")}
+
+Respond ONLY with JSON: {"verdicts":[{"painId":"...","valid":true|false,"rejectionCode":"...","critique":"...","repairDirective":"..."}]}`;
+
+  const res = await aiChat({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0,
+    max_tokens: 3000,
+    response_format: { type: "json_object" },
+    accountId: opts.accountId,
+    endpoint: "pain-class-judge"
+  });
+
+  if (res && res.choices && res.choices[0] && res.choices[0].message && res.choices[0].message.content) {
+    try {
+      const data = JSON.parse(res.choices[0].message.content);
+      for (const v of data.verdicts) verdicts.set(v.painId, v);
+    } catch {}
+  }
+  return verdicts;
+}
+
+export async function judgeProductFitWithLLM(
+  registry: AuthoritativeAudiencePain[],
+  records: LlmProductFitRecord[],
   opts: {
     accountId: string;
     productCapabilities?: string | ProductTruthFact[] | null;
     businessProfile?: string | null;
     audienceSegments?: any[];
+    evidenceContext?: EvidenceContextMap;
   }
 ): Promise<Map<string, { valid: boolean; rejectionCode?: string; critique?: string; repairDirective?: string }>> {
   const verdicts = new Map<string, { valid: boolean; rejectionCode?: string; critique?: string; repairDirective?: string }>();
   if (records.length === 0) return verdicts;
 
   const factsText = formatProductFactsForPrompt(opts.productCapabilities);
-  const prompt = `You are the strict Product Fit Semantic Judge for Avyron AI.
+  const prompt = `You are the strict Product Fit Semantic Judge.
 Your role is to independently judge whether proposed product-fit classifications are factually and causally truthful. Protect precision (reject hallucinations) AND recall (reject false negatives).
 
+VALIDITY INSTRUCTIONS:
+- "valid": true — YOU AGREE WITH AND ACCEPT THE PROPOSED CLASSIFICATION (whether it is DIRECT_FIT, STRATEGIC_FIT, NOT_FIT, or UNKNOWN) as factually and causally truthful. Do NOT provide a rejectionCode when valid is true.
+- "valid": false — YOU REJECT THE PROPOSED CLASSIFICATION because it is causally incorrect, inaccurate, overclaimed, or underclaimed. You MUST provide a rejectionCode and repairDirective.
+
 EVALUATION CRITERIA:
-1. If DIRECT_FIT is proposed: The product's existing validated capability MUST directly perform, produce, or execute the required functional mechanism of the pain as verbatim stated.
-   - If the product is an upstream intelligence/strategy platform and the pain requires a downstream operational execution task, DIRECT_FIT is FALSE. Reject with code "DIRECT_CAPABILITY_NOT_ESTABLISHED".
-2. If STRATEGIC_FIT is proposed: The product does NOT perform the literal operational task, but its validated capabilities legitimately address an upstream strategic decision or root cause.
+1. If DIRECT_FIT is proposed: The product's EXISTING validated capability MUST DIRECTLY PERFORM OR DIRECTLY ENABLE the required function of the pain AS STATED.
+   - "Directly enables" means the capability is causally necessary/relevant to reducing the pain, the connection is immediate, and the product materially performs part of the required function OR removes a direct dependency causing the pain.
+   - Generic usefulness, mere role alignment, or broad strategic relevance is forbidden. Reject generic relevance with "DIRECT_CAPABILITY_NOT_ESTABLISHED".
+2. If STRATEGIC_FIT is proposed: The product does NOT directly perform or enable the operational task, but its validated capabilities legitimately address an upstream strategic decision or root cause.
    - The strategicBridge must explain an actual upstream causal mechanism, not mere category similarity. If generic similarity, reject with code "FALSE_STRATEGIC_BRIDGE".
    - The bridge must be supported by market meaning (bridgeEvidenceBasis). If unsupported, reject with code "BRIDGE_EVIDENCE_UNSUPPORTED".
    - The boundary must explicitly state what the product does NOT do. If missing or misleading, reject with code "FIT_BOUNDARY_INVALID".
-3. If NOT_FIT is proposed (UNDERCLASSIFICATION CHECK): If NOT_FIT is proposed, but a legitimate strategic relationship exists supported by both Product Truth and Market Evidence, reject with code "STRATEGIC_FIT_NOT_CONSIDERED". You must not force NOT_FIT if a genuine strategic causal bridge exists.
+3. If NOT_FIT is proposed (UNDERCLASSIFICATION CHECK): Confirm whether the product legitimately addresses this pain. If you AGREE that the product has no direct or strategic capability to solve this pain, return valid=true. (If a legitimate capability was overlooked, reject with valid=false and code "STRATEGIC_FIT_NOT_CONSIDERED").
 4. CAPABILITY INVENTION: If reasoning claims capabilities not found in the verified Product Truth facts, reject with code "CAPABILITY_INVENTION".
 5. PAIN MEANING CHANGED / ROLE TRANSFER: If the reasoning reinterprets the original pain meaning or transfers a consumer pain to a commercial buyer, reject with "PAIN_MEANING_CHANGED" or "ROLE_TRANSFER".
+6. SEMANTIC INVARIANCE: Evaluate fit based on the functional meaning of the pain as supported by its evidence, not on lexical similarity between the canonical pain wording and Product Truth. Equivalent evidence-supported pain meanings should not receive different classifications merely because wording differs. If the proposed classification appears driven by word overlap rather than functional capability match, reject with code "LEXICAL_OVERLAP_NOT_AUTHORITY".
 
 VERIFIED PRODUCT TRUTH FACTS:
 ${factsText}
@@ -207,19 +412,29 @@ BUSINESS PROFILE:
 ${opts.businessProfile || "UNKNOWN"}
 
 PROPOSED FIT RECORDS TO JUDGE:
-${JSON.stringify(records.map(r => ({
-    painId: r.painId,
-    originalPainText: registry.find(item => item.painId === r.painId)?.canonical,
-    proposedFitType: r.fitType,
-    requiredCapability: r.requiredCapability,
-    matchedProductCapability: r.matchedProductCapability,
-    directCausalExplanation: r.directCausalExplanation,
-    strategicBridge: r.strategicBridge,
-    bridgeEvidenceBasis: r.bridgeEvidenceBasis,
-    boundary: r.boundary,
-    productTruthFactIds: r.productTruthFactIds,
-    reason: r.reason
-})), null, 2)}
+${JSON.stringify(records.map(r => {
+    const pain = registry.find(item => item.painId === r.painId);
+    const seg = pain ? opts.audienceSegments?.find(s => s.id === pain.segmentIds?.[0] || s.name === pain.segmentIds?.[0]) : null;
+    const evidenceBasis = pain && opts.evidenceContext
+      ? packEvidenceForPain(pain.evidenceUids, opts.evidenceContext).trim()
+      : "";
+    return {
+      painId: r.painId,
+      originalPainText: pain?.canonical,
+      segment: seg?.name || pain?.segmentIds?.[0],
+      segmentDefinition: seg?.segmentDefinition?.claim || seg?.description || undefined,
+      evidenceBasis: evidenceBasis || undefined,
+      proposedFitType: r.fitType,
+      requiredCapability: r.requiredCapability,
+      matchedProductCapability: r.matchedProductCapability,
+      directCausalExplanation: r.directCausalExplanation,
+      strategicBridge: r.strategicBridge,
+      bridgeEvidenceBasis: r.bridgeEvidenceBasis,
+      boundary: r.boundary,
+      productTruthFactIds: r.productTruthFactIds,
+      reason: r.reason
+    };
+}), null, 2)}
 
 Respond ONLY with JSON:
 {
@@ -266,9 +481,57 @@ Respond ONLY with JSON:
 }
 
 /** Structural verification over LLM classifier output. */
-export function judgePainClassifierOutput(
+
+export function judgePainClassStructural(
   registry: AuthoritativeAudiencePain[],
-  records: LlmPainRecord[] | null,
+  records: LlmPainClassRecord[] | null,
+): { accepted: Map<string, LlmPainClassRecord>; rejections: { painId: string; code: string }[] } {
+  const accepted = new Map<string, LlmPainClassRecord>();
+  const rejections: { painId: string; code: string }[] = [];
+  if (!records) {
+    registry.forEach((p) => rejections.push({ painId: p.painId, code: "LLM_PAYLOAD_MISSING" }));
+    return { accepted, rejections };
+  }
+  const byId = new Map(records.map((r) => [r.painId, r]));
+  for (const pain of registry) {
+    const record = byId.get(pain.painId);
+    if (!record) {
+      rejections.push({ painId: pain.painId, code: "LLM_RECORD_MISSING" });
+      continue;
+    }
+    if (!VALID_CLASSES.includes((record as any).classification as any) && (record as any).classification !== "UNKNOWN") {
+      rejections.push({ painId: record.painId, code: "INVALID_CLASSIFICATION" });
+      continue;
+    }
+    const hasEV = pain.evidenceUids?.some((uid) => uid.startsWith("EV:"));
+    if (hasEV) {
+      if (!record.problemEvidenceUids || record.problemEvidenceUids.length === 0) {
+        rejections.push({ painId: record.painId, code: "PROBLEM_EVIDENCE_MISSING" });
+        continue;
+      }
+      const invalidUids = record.problemEvidenceUids.filter(uid => !pain.evidenceUids.includes(uid));
+      if (invalidUids.length > 0) {
+        rejections.push({ painId: record.painId, code: "PROBLEM_EVIDENCE_OUTSIDE_AUTHORITY" });
+        continue;
+      }
+    }
+
+    if (!record.marketFunction || !record.marketProblemMeaning) {
+      rejections.push({ painId: record.painId, code: "MISSING_SEMANTIC_REASONING" });
+      continue;
+    }
+    // Legacy CORE_CENTRALITY gates removed per requirements
+    // Strategic Materiality (Phase 3) handles CORE_PURCHASE now.
+    accepted.set(record.painId, record);
+  }
+  return { accepted, rejections };
+}
+
+export const judgePainClassifierOutput = judgeProductFitStructural;
+
+export function judgeProductFitStructural(
+  registry: AuthoritativeAudiencePain[],
+  records: LlmProductFitRecord[] | null,
   audienceSegments?: any[],
   sourceFacts?: { productCapabilities?: string | ProductTruthFact[] | null; businessProfile?: string | null },
 ): PainJudgeResult {
@@ -311,7 +574,7 @@ export function judgePainClassifierOutput(
       rejections.push({ painId, code: "LLM_REWRITE_OR_MERGE_FORBIDDEN" });
       continue;
     }
-    if (!VALID_CLASSES.includes(record.classification as AudiencePainClass)) {
+    if (!VALID_CLASSES.includes((record as any).classification as AudiencePainClass) && (record as any).classification !== "UNKNOWN") {
       rejections.push({ painId, code: "LLM_CLASSIFICATION_INVALID" });
       continue;
     }
@@ -327,9 +590,11 @@ export function judgePainClassifierOutput(
     } else if (fitType === "UNKNOWN") {
       productFit = "UNKNOWN";
     } else if (!fitType) {
-      if (productFit === "ELIGIBLE") fitType = "DIRECT_FIT";
-      else if (productFit === "INELIGIBLE") fitType = "NOT_FIT";
-      else fitType = "UNKNOWN";
+      // CRITICAL: Missing fitType is INVALID semantic output.
+      // ELIGIBLE does NOT imply DIRECT_FIT. Do NOT auto-assign a fit type.
+      // This triggers targeted repair on the next attempt.
+      rejections.push({ painId, code: "FIT_TYPE_MISSING" });
+      continue;
     }
 
     if (!VALID_FIT.includes(productFit)) {
@@ -364,7 +629,7 @@ export function judgePainClassifierOutput(
 
     // Promotion guard: post-purchase friction cannot be promoted to CORE_PURCHASE
     const deterministic = classifyAudiencePainDetailed(source.canonical).classification;
-    if (deterministic === "POST_PURCHASE_FRICTION" && record.classification === "CORE_PURCHASE") {
+    if (deterministic === "POST_PURCHASE_FRICTION" && (record as any).classification === "CORE_PURCHASE") {
       rejections.push({ painId, code: "LLM_POST_PURCHASE_PROMOTION_FORBIDDEN" });
       continue;
     }
@@ -372,7 +637,7 @@ export function judgePainClassifierOutput(
     let reason = record.reason.trim();
 
     accepted.set(painId, {
-      classification: record.classification as AudiencePainClass,
+      classification: (record as any).classification as AudiencePainClass,
       productFit,
       fitType,
       requiredCapability: record.requiredCapability?.trim(),
@@ -401,36 +666,7 @@ export function judgePainClassifierOutput(
 
 /** Apply judged LLM classifications. Rejected/missing records keep the
  * deterministic classification (recorded in classifierVersion/reason). */
-export function applyJudgedPainClassification(
-  registry: AuthoritativeAudiencePain[],
-  judge: PainJudgeResult,
-): AuthoritativeAudiencePain[] {
-  const updated = registry.map((pain) => {
-    const verdict = judge.accepted.get(pain.painId);
-    if (!verdict) return pain;
-    const classification = verdict.classification;
-    const allowedUses = allowedUsesForClass(classification);
-    const productFit = verdict.productFit;
-    return {
-      ...pain,
-      classification,
-      allowedUses,
-      prohibitedUses: prohibitedUsesForClass(classification),
-      productFit,
-      fitType: verdict.fitType ?? (productFit === "ELIGIBLE" ? "DIRECT_FIT" : (productFit === "INELIGIBLE" ? "NOT_FIT" : "UNKNOWN")),
-      strategicBridge: verdict.strategicBridge,
-      boundary: verdict.boundary,
-      productTruthFactIds: verdict.productTruthFactIds,
-      eligible: pain.eligible !== false && productFit === "ELIGIBLE" && pain.canonical.length > 0
-        ? true
-        : productFit === "ELIGIBLE" && pain.eligible,
-      classifierVersion: LLM_CLASSIFIER_VERSION,
-      classificationReason: verdict.reason,
-      rank: judge.semanticRanks?.get(pain.painId) ?? pain.rank,
-    };
-  });
-  return updated.sort((a, b) => a.rank - b.rank);
-}
+
 
 export interface EvidenceOwnershipResult {
   registry: AuthoritativeAudiencePain[];
@@ -445,7 +681,7 @@ export async function validatePainEvidenceOwnership(
   campaignId: string,
 ): Promise<EvidenceOwnershipResult> {
   const issues: string[] = [];
-  const allUids = [...new Set(registry.flatMap((p) => p.evidenceUids.filter((uid) => uid.startsWith("EV:"))))];
+  const allUids = [...new Set(registry.flatMap((p) => (p.evidenceUids || []).filter((uid) => uid.startsWith("EV:"))))];
   if (allUids.length === 0) return { registry, issues };
   let resolved: Set<string>;
   try {
@@ -473,102 +709,276 @@ export async function validatePainEvidenceOwnership(
 /**
  * One-call pipeline entry: Proposer -> Structural & Semantic Judge -> Targeted Retry with Claim Locking.
  */
+
+
+export async function proposeCoreStrategicPrioritization(
+  candidates: AuthoritativeAudiencePain[],
+  lockedClasses: Map<string, LlmPainClassRecord>,
+  lockedFits: Map<string, LlmProductFitRecord>,
+  opts: { accountId: string; audienceSegments?: any[]; evidenceContext?: EvidenceContextMap },
+  previousRejections?: string[],
+): Promise<{painId: string, classification: string, strategicMaterialityReason: string}[] | null> {
+  const prompt = `You are the CORE Strategic Prioritization engine.
+You are given a list of market pains that have ALREADY been validated as:
+1. Real market problems supported by evidence.
+2. Relevant to the intended target audience (targetCovered = true).
+3. Directly solvable by this product (DIRECT_FIT).
+
+Your job is to determine which of these candidate pains are materially important enough to anchor the business strategy as CORE_PURCHASE, and which should remain SUPPORTING.
+
+CORE_PURCHASE: A primary strategic market pain that is materially important, pervasive, or consequential enough to serve as a strong strategic anchor. (It does NOT require explicit evidence of buying intent, just clear material importance).
+SUPPORTING: A valid, directly addressed market problem that is secondary, contextual, or not strong enough to anchor strategy.
+
+Do NOT make every pain CORE_PURCHASE. Use your semantic judgment of the market evidence.
+
+Previous Rejections to fix:
+${previousRejections?.join("\n") || "None"}
+
+CANDIDATE PAINS:
+${candidates.map(p => {
+  const classRecord = lockedClasses.get(p.painId);
+  const fitRecord = lockedFits.get(p.painId);
+  const evidence = opts.evidenceContext ? packEvidenceForPain(p.evidenceUids, opts.evidenceContext) : "none";
+  return `<Pain id="${p.painId}">
+Segment: ${opts.audienceSegments?.find(s => s.name === p.segmentIds[0])?.segmentDefinition?.claim || p.segmentIds[0] || ""}
+Canonical: ${p.canonical}
+Market Problem Meaning: ${classRecord?.marketProblemMeaning || ""}
+Matched Product Capability: ${fitRecord?.matchedProductCapability || ""}
+Evidence: ${evidence}
+</Pain>`;
+}).join("\n")}
+
+Respond ONLY with JSON: {"records":[{"painId":"...","classification":"CORE_PURCHASE|SUPPORTING","strategicMaterialityReason":"Explain why this pain is or isn't materially important enough to anchor strategy based on the evidence."}]}
+`;
+  const res = await aiChat({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.1,
+    max_tokens: 3000,
+    response_format: { type: "json_object" },
+    accountId: opts.accountId,
+    endpoint: "core-priority-proposer"
+  });
+  if (!res || !res.choices || !res.choices[0] || !res.choices[0].message || !res.choices[0].message.content) return null;
+  try {
+    return JSON.parse(res.choices[0].message.content).records;
+  } catch {
+    return null;
+  }
+}
+
+export async function judgeCoreStrategicPrioritization(
+  candidates: AuthoritativeAudiencePain[],
+  records: {painId: string, classification: string, strategicMaterialityReason: string}[],
+  lockedClasses: Map<string, LlmPainClassRecord>,
+  lockedFits: Map<string, LlmProductFitRecord>,
+  opts: { accountId: string; evidenceContext?: EvidenceContextMap }
+): Promise<Map<string, { valid: boolean; rejectionCode?: string; critique?: string }>> {
+  const verdicts = new Map<string, { valid: boolean; rejectionCode?: string; critique?: string }>();
+  if (records.length === 0) return verdicts;
+  
+  const prompt = `You are the Semantic Judge for CORE Strategic Prioritization.
+Verify that the proposed CORE_PURCHASE or SUPPORTING classification is supported by the market evidence's materiality.
+
+RULES:
+1. Ensure CORE_PURCHASE pains actually demonstrate material importance (strong consequence, pervasive frustration, severe impact) in the evidence.
+2. If CORE is assigned to a weak, trivial, or weakly supported pain just because it's DIRECT_FIT, reject with LACKS_MATERIAL_IMPORTANCE.
+3. If SUPPORTING is assigned to a clearly severe, foundational market problem, reject with UNDERCLASSIFIED_CORE_CANDIDATE.
+4. Do NOT require explicit purchase/switching intent language. "Material importance" is sufficient.
+
+Evaluations:
+${records.map(r => {
+  const p = candidates.find(c => c.painId === r.painId);
+  const evidenceText = opts.evidenceContext && p ? packEvidenceForPain(p.evidenceUids, opts.evidenceContext) : "none";
+  return `---
+Pain ID: ${r.painId}
+Canonical: ${p?.canonical}
+Proposed Classification: ${r.classification}
+Reasoning: ${r.strategicMaterialityReason}
+Evidence: ${evidenceText}`;
+}).join("\n\n")}
+
+Respond ONLY with JSON: {"verdicts":[{"painId":"...","valid":true|false,"rejectionCode":"LACKS_MATERIAL_IMPORTANCE|UNDERCLASSIFIED_CORE_CANDIDATE","critique":"..."}]}
+`;
+  const res = await aiChat({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    temperature: 0.0,
+    max_tokens: 2000,
+    response_format: { type: "json_object" },
+    accountId: opts.accountId,
+    endpoint: "core-priority-judge"
+  });
+  if (!res || !res.choices || !res.choices[0] || !res.choices[0].message || !res.choices[0].message.content) {
+    records.forEach(r => verdicts.set(r.painId, { valid: false, rejectionCode: "LLM_ERROR" }));
+    return verdicts;
+  }
+  try {
+    const parsed = JSON.parse(res.choices[0].message.content).verdicts;
+    parsed.forEach((v: any) => verdicts.set(v.painId, v));
+  } catch {
+    records.forEach(r => verdicts.set(r.painId, { valid: false, rejectionCode: "PARSE_ERROR" }));
+  }
+  return verdicts;
+}
+
 export async function refineAudiencePainRegistry(
   registry: AuthoritativeAudiencePain[],
   opts: { 
     accountId: string; 
     campaignId: string; 
+    jobId?: string;
     productCapabilities?: string | ProductTruthFact[] | null; 
     businessProfile?: string | null;
     audienceSegments?: any[];
+    businessUnderstanding?: any;
     llmEnabled?: boolean;
   },
 ): Promise<{ registry: AuthoritativeAudiencePain[]; classifierUsed: string; judgeRejections: string[]; evidenceIssues: string[] }> {
-  let working = registry;
-  let classifierUsed = "deterministic_v1";
+  let working: AuthoritativeAudiencePain[] = [];
+  const classifierUsed = LLM_CLASSIFIER_VERSION;
   const allJudgeRejections: string[] = [];
   
-  if (opts.llmEnabled !== false && registry.length > 0) {
-    const lockedAccepted = new Map<string, {
-      classification: AudiencePainClass;
-      productFit: typeof VALID_FIT[number];
-      fitType: ProductFitType;
-      requiredCapability?: string;
-      matchedProductCapability?: string;
-      strategicBridge?: string;
-      boundary?: string;
-      productTruthFactIds?: string[];
-      reason: string;
-    }>();
+  if (registry.length === 0) {
+    return { registry: [], classifierUsed, judgeRejections: [], evidenceIssues: [] };
+  }
 
-    let attempt = 0;
-    const maxAttempts = 2;
-    let previousRejections: string[] = [];
-    
-    while (attempt < maxAttempts) {
-      attempt++;
-      const pending = registry.filter(p => !lockedAccepted.has(p.painId));
-      if (pending.length === 0) break;
-
-      const llmRecords = await classifyPainRegistryWithLLM(pending, {
-        accountId: opts.accountId,
-        campaignId: opts.campaignId,
-        productCapabilities: opts.productCapabilities ?? null,
-        businessProfile: opts.businessProfile ?? null,
-        audienceSegments: opts.audienceSegments ?? [],
-      }, previousRejections);
-      
-      const structuralJudge = judgePainClassifierOutput(pending, llmRecords, opts.audienceSegments, {
-        productCapabilities: opts.productCapabilities,
-        businessProfile: opts.businessProfile,
-      });
-
-      // Semantic Judge on structurally valid candidates
-      const candidateRecords = (llmRecords || []).filter(r => structuralJudge.accepted.has(r.painId));
-      const semanticVerdicts = await judgePainWithLLM(pending, candidateRecords, {
-        accountId: opts.accountId,
-        productCapabilities: opts.productCapabilities,
-        businessProfile: opts.businessProfile,
-        audienceSegments: opts.audienceSegments
-      });
-
-      const currentRejections: string[] = [];
-
-      for (const r of structuralJudge.rejections) {
-        currentRejections.push(`${r.code}:${r.painId}`);
-        allJudgeRejections.push(`${r.code}:${r.painId}`);
-      }
-
-      for (const [painId, acceptedVerdict] of structuralJudge.accepted.entries()) {
-        const semanticVerdict = semanticVerdicts.get(painId);
-        if (semanticVerdict && !semanticVerdict.valid) {
-          const code = semanticVerdict.rejectionCode || "SEMANTIC_JUDGE_REJECTED";
-          let rejectionStr = `${code}:${painId} — ${semanticVerdict.critique || "Rejected by semantic judge"}`;
-          if (semanticVerdict.repairDirective) rejectionStr += `\nRepair Directive: ${semanticVerdict.repairDirective}`;
-          currentRejections.push(rejectionStr);
-          allJudgeRejections.push(`${code}:${painId}`);
-        } else {
-          lockedAccepted.set(painId, acceptedVerdict);
-        }
-      }
-
-      if (lockedAccepted.size === registry.length) {
-        break;
-      }
-      previousRejections = currentRejections;
-    }
-
-    if (lockedAccepted.size > 0) {
-      const finalJudgeResult: PainJudgeResult = {
-        accepted: lockedAccepted,
-        semanticRanks: null,
-        rejections: allJudgeRejections.map(r => ({ painId: r.split(":")[1] || "*", code: r.split(":")[0] }))
-      };
-      working = applyJudgedPainClassification(registry, finalJudgeResult);
-      classifierUsed = LLM_CLASSIFIER_VERSION;
+  // 1. Resolve Canonical Business Understanding & Authority Lineage
+  let bu = opts.businessUnderstanding;
+  if (!bu) {
+    try {
+      const [snap] = await db
+        .select({ payload: businessUnderstandingSnapshots.businessUnderstanding })
+        .from(businessUnderstandingSnapshots)
+        .where(
+          and(
+            eq(businessUnderstandingSnapshots.campaignId, opts.campaignId),
+            eq(businessUnderstandingSnapshots.accountId, opts.accountId)
+          )
+        )
+        .orderBy(desc(businessUnderstandingSnapshots.createdAt))
+        .limit(1);
+      bu = snap?.payload;
+    } catch (e: any) {
+      console.warn(`[PainClassifier] Failed to query businessUnderstandingSnapshots: ${e.message}`);
     }
   }
-  
+
+  const targetUnderstandingAuthorityId = bu?.targetUnderstanding?.targetUnderstandingAuthorityId || `tu_${opts.campaignId}`;
+  const canonicalTargetRoles = bu?.targetUnderstanding?.targetRoles || [];
+  const campaignOfferingId = bu?.campaignOfferingId || bu?.campaignOffering?.id || `co_${opts.campaignId}`;
+  const businessUnderstandingAuthorityId = bu?.businessUnderstandingAuthorityId || `bu_${opts.campaignId}`;
+  const productTruthFacts = bu?.campaignOffering?.productTruthFacts || (
+    Array.isArray(opts.productCapabilities) ? opts.productCapabilities : []
+  );
+  const productTruthFactIds = (
+    bu?.campaignOffering?.productTruthFactIds || 
+    productTruthFacts.map((f: any) => f.productTruthFactId || f.factId || "fact_default")
+  ).filter(Boolean);
+
+  const effectiveJobId = opts.jobId || `job_${opts.campaignId}_${Date.now()}`;
+
+  console.log(`[PainClassifier] CANONICAL_PAIN_PIPELINE_START | pains=${registry.length} | jobId=${effectiveJobId} | bu=${businessUnderstandingAuthorityId} | co=${campaignOfferingId} | tu=${targetUnderstandingAuthorityId}`);
+
+  // 2. Sequential Assessment per Canonical Pain: TargetAssessment -> ProductAssessment -> StrategicPainDecision
+  for (const pain of registry) {
+    const segContext = (opts.audienceSegments || []).find(
+      (s: any) => s.id === pain.segmentId || s.name === pain.segmentName || s.name === pain.segmentId
+    );
+
+    // Step A: Target Assessment
+    const ta = await runTargetAssessmentForPain({
+      painId: pain.painId,
+      segmentId: pain.segmentId || pain.segmentName || "default_segment",
+      canonicalPain: pain.canonical,
+      segmentContext: segContext ? { name: segContext.name, role: segContext.role, segmentDefinition: segContext.segmentDefinition } : undefined,
+      targetUnderstandingAuthorityId,
+      canonicalTargetRoles,
+      accountId: opts.accountId,
+      campaignId: opts.campaignId,
+      jobId: effectiveJobId,
+    });
+
+    // Step B: Product Assessment
+    const pa = await runProductAssessmentForPain({
+      painId: pain.painId,
+      canonicalPain: pain.canonical,
+      campaignOfferingId,
+      businessUnderstandingAuthorityId,
+      productTruthFacts,
+      accountId: opts.accountId,
+      campaignId: opts.campaignId,
+      jobId: effectiveJobId,
+    });
+
+    // Step C: Strategic Pain Decision Judge
+    const spd = await judgeStrategicPainDecision({
+      jobId: effectiveJobId,
+      painId: pain.painId,
+      targetUnderstandingAuthorityId,
+      productTruthFactIds,
+      campaignOfferingId,
+      targetAssessmentAuthorityId: ta.targetAssessmentAuthorityId,
+      productAssessmentAuthorityId: pa.productAssessmentAuthorityId,
+      targetAssessmentParentAuthorityIds: ta.parentAuthorityIds,
+      productAssessmentParentAuthorityIds: pa.parentAuthorityIds,
+      targetAssessmentJobId: ta.jobId,
+      productAssessmentJobId: pa.jobId,
+      painClaim: pain.canonical,
+      productFitType: pa.fitType,
+      materialityContext: {
+        citationCount: (pain as any).citationCount ?? ((pain.evidenceUids?.length || 0) + (pain.sourceSignalIds?.length || 0)),
+        uniqueEvidenceCount: (pain as any).uniqueEvidenceCount ?? (pain.evidenceUids?.length || 0),
+        uniqueSourceCount: (pain as any).uniqueSourceCount ?? (new Set(pain.sourceTypes || []).size),
+        uniqueCompetitorCount: (pain as any).uniqueCompetitorCount,
+        occurrenceCount: (pain as any).occurrenceCount || (pain.evidenceUids ? pain.evidenceUids.length : 1),
+        sourceTypes: pain.sourceTypes || [],
+        evidenceUids: pain.evidenceUids || [],
+        sourceSignalIds: pain.sourceSignalIds || [],
+        evidenceSummaries: (pain as any).evidenceSummaries,
+        evidenceStrength: pain.evidenceStrength,
+      },
+      accountId: opts.accountId,
+      campaignId: opts.campaignId,
+    });
+
+    let finalClass: AudiencePainClass = "SUPPORTING";
+    if (spd.finalClassification === "CORE_PURCHASE") {
+      finalClass = "CORE_PURCHASE";
+    } else if (spd.finalClassification === "SUPPORTING") {
+      finalClass = "SUPPORTING";
+    } else if (spd.finalClassification === "EXCLUDE" || spd.finalClassification === "DROPPED") {
+      finalClass = "UNKNOWN";
+      allJudgeRejections.push(`STRATEGIC_EXCLUDED:${pain.painId} - ${spd.reason}`);
+    }
+
+    const allowedUses = allowedUsesForClass(finalClass);
+    const prohibitedUses = prohibitedUsesForClass(finalClass);
+
+    working.push({
+      ...pain,
+      classification: finalClass,
+      strategicPainDecisionAuthorityId: spd.strategicPainDecisionAuthorityId,
+      targetAssessmentAuthorityId: ta.targetAssessmentAuthorityId,
+      productAssessmentAuthorityId: pa.productAssessmentAuthorityId,
+      targetUnderstandingAuthorityId,
+      businessUnderstandingAuthorityId,
+      campaignOfferingId,
+      coverageDecision: ta.decision,
+      fitType: pa.fitType,
+      allowedUses,
+      prohibitedUses,
+      productTruthFactIds,
+      productFit: (pa.fitType === "DIRECT_FIT" || pa.fitType === "STRATEGIC_FIT") ? "ELIGIBLE" : "INELIGIBLE",
+      eligible: finalClass !== "UNKNOWN" && allowedUses.length > 0 && pain.canonical.length > 0,
+      classifierVersion: LLM_CLASSIFIER_VERSION,
+      classificationReason: spd.reason,
+    });
+  }
+
+  working.sort((a, b) => a.rank - b.rank);
+
   const ownership = await validatePainEvidenceOwnership(working, opts.accountId, opts.campaignId);
   return { registry: ownership.registry, classifierUsed, judgeRejections: allJudgeRejections, evidenceIssues: ownership.issues };
 }
+

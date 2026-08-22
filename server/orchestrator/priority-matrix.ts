@@ -26,8 +26,8 @@
 export const ENGINE_PRIORITY_ORDER = [
   { id: "market_intelligence", name: "Market Intelligence", priority: 1, tier: "MARKET_REALITY", dependencies: [] as readonly string[] },
   { id: "audience", name: "Audience Engine", priority: 2, tier: "MARKET_REALITY", dependencies: ["market_intelligence"] as readonly string[] },
-  { id: "positioning", name: "Positioning Engine", priority: 3, tier: "POSITIONING", dependencies: ["market_intelligence", "audience"] as readonly string[] },
-  { id: "differentiation", name: "Differentiation Engine", priority: 4, tier: "POSITIONING", dependencies: ["market_intelligence", "audience", "positioning"] as readonly string[] },
+  { id: "differentiation", name: "Differentiation Engine", priority: 3, tier: "POSITIONING", dependencies: ["market_intelligence", "audience"] as readonly string[] },
+  { id: "positioning", name: "Positioning Engine", priority: 4, tier: "POSITIONING", dependencies: ["market_intelligence", "audience", "differentiation"] as readonly string[] },
   { id: "mechanism", name: "Mechanism Engine", priority: 5, tier: "OFFER", dependencies: ["audience", "positioning", "differentiation"] as readonly string[] },
   { id: "offer", name: "Offer Engine", priority: 6, tier: "OFFER", dependencies: ["audience", "positioning", "mechanism"] as readonly string[] },
   { id: "awareness", name: "Awareness Engine", priority: 7, tier: "MESSAGING", dependencies: ["audience", "positioning", "offer"] as readonly string[] },

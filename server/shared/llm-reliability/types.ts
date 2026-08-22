@@ -3,6 +3,12 @@ export type LlmFailureClass = "EVIDENCE_FAILURE" | "GENERATION_QUALITY_FAILURE" 
 export interface JudgeRejection {
   rule: string;
   reason: string;
+  claimId?: string;
+  claimType?: string;
+  segmentId?: string;
+  rejectionCode?: string;
+  critique?: string;
+  repairDirective?: string;
 }
 
 export interface JudgeResult<T> {
@@ -16,6 +22,7 @@ export interface ReliabilityTelemetry {
   engine: string;
   touchpoint: string;
   attempts: number;
+  technicalRetries: number;
   finalVerdict: "PASS" | "HONEST_FAIL" | "TECHNICAL_FAIL";
   repairLog: {
     attempt: number;
@@ -34,6 +41,7 @@ export interface GenerationContext<TInput> {
 
 export interface ReliabilityConfig {
   maxRepairs?: number;
+  maxTechnicalRetries?: number;
   failClosed?: boolean;
 }
 

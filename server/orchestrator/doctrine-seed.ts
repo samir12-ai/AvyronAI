@@ -69,6 +69,9 @@ export async function loadCampaignProductAnchor(
  * Fail-loud: DB errors propagate. The run already depends on these tables, so a
  * failure here is a genuine environment failure, surfaced rather than swallowed.
  */
+import { businessUnderstandingSnapshots } from "@shared/schema";
+import { desc } from "drizzle-orm";
+
 export async function seedDoctrine(
   ctx: DoctrineCtxLike,
   campaignId: string,
@@ -76,38 +79,40 @@ export async function seedDoctrine(
 ): Promise<void> {
   if (!ctx.ssc) return;
 
-  // Tenant-scoped anchor read (see loadCampaignProductAnchor for the
-  // NO-TENANT-LEAK join rule). Absent anchor → business_level_degraded below.
-  const productAnchor = await loadCampaignProductAnchor(campaignId, accountId);
-
-  const [biz] = await db
-    .select({
-      coreOffer: businessDataLayer.coreOffer,
-      productCategory: businessDataLayer.productCategory,
-    })
-    .from(businessDataLayer)
+  // Tenant-scoped Business Understanding read
+  const snaps = await db
+    .select({ payload: businessUnderstandingSnapshots.businessUnderstanding })
+    .from(businessUnderstandingSnapshots)
     .where(
       and(
-        eq(businessDataLayer.accountId, accountId),
-        eq(businessDataLayer.campaignId, campaignId),
-      ),
+        eq(businessUnderstandingSnapshots.campaignId, campaignId),
+        eq(businessUnderstandingSnapshots.accountId, accountId)
+      )
     )
+    .orderBy(desc(businessUnderstandingSnapshots.createdAt))
     .limit(1);
 
-  const doctrine = resolveDoctrine({
-    productAnchor,
-    businessLevelOffer: biz?.coreOffer ?? null,
-    productCategory: biz?.productCategory ?? null,
-  });
+  if (snaps.length === 0 || !snaps[0].payload) {
+    throw new Error(`[Doctrine] FAIL-CLOSED: No Business Understanding found for campaign ${campaignId}. Architecture requires canonical BusinessUnderstandingPayload.`);
+  }
 
-  ctx.ssc.doctrine = doctrine;
+  const payload: any = snaps[0].payload;
+  
+  if (payload.status !== "COMPLETE") {
+    throw new Error(`[Doctrine] FAIL-CLOSED: Business Understanding is INCOMPLETE for campaign ${campaignId}.`);
+  }
+
+  // We assign the new canonical doctrine
+  ctx.ssc.doctrine = {
+    version: DOCTRINE_VERSION,
+    resolution: "anchored", // Kept for compatibility, though meaning is now canonical
+    businessUnderstanding: payload,
+    anchorHash: payload.businessUnderstandingAuthorityId, // Salt uses authority id
+  } as any;
+
   console.log(
-    `[Doctrine] SEEDED | campaign=${campaignId} | resolution=${doctrine.resolution} | anchorHash=${doctrine.anchorHash || "none"} | version=${doctrine.version}`,
+    `[Doctrine] SEEDED | campaign=${campaignId} | businessUnderstandingAuthorityId=${payload.businessUnderstandingAuthorityId}`
   );
-
-  // Authority-model protection: DETECT anchor writes that bypassed the audited
-  // writer (direct SQL / legacy paths). Loud log only — never blocks the run.
-  await checkAnchorAuditConsistency(campaignId, productAnchor);
 }
 
 /**

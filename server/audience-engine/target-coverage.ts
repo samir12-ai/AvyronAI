@@ -12,32 +12,30 @@ export type BuyerType =
   | "BUSINESS_OWNER"
   | "UNKNOWN";
 
-export type RoleMatchType =
-  | "EXACT_MATCH"
-  | "VALID_SEMANTIC_MATCH"
-  | "BROADER_THAN_TARGET"
-  | "NARROWER_THAN_TARGET"
-  | "BUYER_USER_MISMATCH"
-  | "INSUFFICIENT_EVIDENCE"
-  | "NO_MATCH";
+export type CoverageDecision =
+  | "COVERED"
+  | "RELATED_BUT_UNPROVEN"
+  | "NOT_COVERED";
 
 export interface NormalizedTargetRole {
   targetId: string;
   roleName: string;
   description: string;
   buyerType: BuyerType;
-  sourceField: string;
-  rawSourceText: string;
+  sourceLineages: Array<{ sourceField: string; rawSourceText: string }>;
 }
 
 export interface TargetRoleMatch {
   targetId: string;
+  segmentId?: string;
   roleName: string;
-  matchType: RoleMatchType;
-  isCovered: boolean;
+  coverageDecision: CoverageDecision;
+  targetIdentity: string;
+  segmentIdentity: string;
+  relationshipDescription: string;
+  confidence: number;
+  reason: string;
   matchedSegmentNames: string[];
-  matchedRoles: string[];
-  reasoning: string;
 }
 
 export interface TargetCoverageResult {
@@ -48,6 +46,8 @@ export interface TargetCoverageResult {
   reason: string;
   targetRoles: NormalizedTargetRole[];
   matches?: TargetRoleMatch[];
+  parentAuthorityIds?: string[];
+  jobId?: string;
 }
 
 export interface BusinessTargetSourceItem {
@@ -184,19 +184,19 @@ export async function resolveTargetRolesWithJudge(
     const resolverPrompt = `You are an expert target audience parser extracting the EXPLICIT business target roles intended by this business.
 ${repairSection}
 RULES:
-1. ONLY extract target roles explicitly stated in the business source items below.
-2. Extract 1 normalized target role per business source item, using the exact role phrasing from that source item (e.g. if the item states "Marketing Operations Lead and Growth Team Managers", keep that exact title as roleName; do not split or subdivide it).
-3. DO NOT invent, infer, or hallucinate buyer roles, B2B defaults, B2C defaults, or unstated personas.
-4. If the explicit target statement does not explicitly declare executive purchasing signoff (e.g. CEO, CFO, procurement head), set buyerType = "UNKNOWN" or "PRACTITIONER".
-5. Every normalized target role MUST preserve its lineage: exact sourceField and exact rawSourceText.
+1. Extract normalized target roles explicitly stated in the business source items below.
+2. Do not invent, infer, or hallucinate buyer roles, B2B defaults, B2C defaults, or unstated personas.
+3. If the explicit target statement does not explicitly declare executive purchasing signoff, set buyerType = "UNKNOWN" or "PRACTITIONER".
+4. Do not create duplicate semantic authorities when the same target appears in multiple Business Profile fields. If multiple fields refer to effectively the same explicit target (e.g., "SMB founders" and "SMB founders and owners"), merge them into a single semantic target and preserve ALL source lineages.
+5. Every normalized target role MUST preserve its lineage in the sourceLineages array.
 
 ALLOWED BUYER TYPES:
-- ECONOMIC_BUYER (Only for executive titles with explicit sign-off / budget ownership: e.g. CEO, CFO, VP of Procurement)
-- TECHNICAL_EVALUATOR (Evaluates technical specs: e.g. Lead Architect, Security Engineer)
-- END_USER (Uses the software day-to-day: e.g. staff member, subscriber)
-- PRACTITIONER (Operator or team lead who executes hands-on workflows: e.g. Marketing Lead, Content Creator, Operator)
-- BUSINESS_OWNER (Small business or agency owner)
-- UNKNOWN (Target statement does not explicitly prove purchasing sign-off)
+- ECONOMIC_BUYER
+- TECHNICAL_EVALUATOR
+- END_USER
+- PRACTITIONER
+- BUSINESS_OWNER
+- UNKNOWN
 
 BUSINESS SOURCE ITEMS:
 ${sources.map((s, idx) => `[Item ${idx + 1} | Field: ${s.field}]\n"${s.text}"`).join("\n\n")}
@@ -207,10 +207,14 @@ Return a JSON object:
     {
       "targetId": "target_1",
       "roleName": "Short descriptive role name",
-      "description": "Concise description of the explicit target role from source text",
+      "description": "Concise description",
       "buyerType": "ECONOMIC_BUYER" | "TECHNICAL_EVALUATOR" | "END_USER" | "PRACTITIONER" | "BUSINESS_OWNER" | "UNKNOWN",
-      "sourceField": "source field name",
-      "rawSourceText": "exact text from source item that proves this target"
+      "sourceLineages": [
+        {
+          "sourceField": "source field name",
+          "rawSourceText": "exact text from source item"
+        }
+      ]
     }
   ]
 }`;
@@ -220,7 +224,7 @@ Return a JSON object:
       const res = await aiChat({
         messages: [{ role: "user", content: resolverPrompt }],
         model,
-        max_tokens: 1500,
+        max_tokens: 16000,
         temperature: 0.1,
         response_format: { type: "json_object" },
         accountId: "system",
@@ -235,8 +239,10 @@ Return a JSON object:
         buyerType: (["ECONOMIC_BUYER", "TECHNICAL_EVALUATOR", "END_USER", "PRACTITIONER", "BUSINESS_OWNER", "UNKNOWN"].includes(t.buyerType)
           ? t.buyerType
           : "UNKNOWN") as BuyerType,
-        sourceField: String(t.sourceField || ""),
-        rawSourceText: String(t.rawSourceText || "")
+        sourceLineages: Array.isArray(t.sourceLineages) ? t.sourceLineages.map((l: any) => ({
+          sourceField: String(l.sourceField || ""),
+          rawSourceText: String(l.rawSourceText || "")
+        })) : []
       })).filter((t: NormalizedTargetRole) => t.roleName.length > 0);
 
       if (targetRoles.length === 0) {
@@ -253,9 +259,9 @@ PROPOSED NORMALIZED TARGET ROLES:
 ${JSON.stringify(targetRoles, null, 2)}
 
 JUDGE VERIFICATION CRITERIA:
-1. NO TARGET_ROLE_INVENTION: Does every proposed target role originate directly from the text of the source items? (Pass if the roles accurately represent the target personas stated in the source text. Only reject if an unmentioned role was invented).
-2. ACCURATE BUYER TYPE: Is the buyerType supported by the source text? (UNKNOWN, PRACTITIONER, and BUSINESS_OWNER are always valid. Do not reject a role for using UNKNOWN or PRACTITIONER. Only reject if an unstated executive budget authority like ECONOMIC_BUYER was fabricated).
-3. PROVENANCE VERIFIED: Does rawSourceText in each target role match the original source text?
+1. NO TARGET_ROLE_INVENTION: Does every proposed target role originate directly from the text of the source items?
+2. ACCURATE BUYER TYPE: Is the buyerType supported by the source text?
+3. PROVENANCE VERIFIED: Do the rawSourceText strings in sourceLineages match the original source text?
 
 DECISION INSTRUCTION:
 - Set "valid": true if the proposed target roles satisfy all 3 criteria above.
@@ -271,7 +277,7 @@ Return a JSON object:
       const judgeRes = await aiChat({
         messages: [{ role: "user", content: judgePrompt }],
         model: judgeModel,
-        max_tokens: 1000,
+        max_tokens: 4000,
         temperature: 0.1,
         response_format: { type: "json_object" },
         accountId: "system",
@@ -312,46 +318,62 @@ export async function matchAudienceToTargetsWithJudge(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const repairSection = repairFeedback ? `\nPREVIOUS ROLE-MATCH JUDGE REPAIR DIRECTIVE (Fix these issues):\n${repairFeedback}\n` : "";
 
-    const matcherPrompt = `You are an expert market intelligence evaluator comparing explicit Business Target Roles against evidence-derived Canonical Audience Segments.
+    const matcherPrompt = `You are an expert market intelligence evaluator determining AUDIENCE IDENTITY / TARGET MEMBERSHIP.
 ${repairSection}
-SEMANTIC MATCH TYPES:
-1. EXACT_MATCH: The audience segment explicitly and directly represents this exact buyer role and function. (Counts as COVERED).
-2. VALID_SEMANTIC_MATCH: Different wording, but the evidence-derived segment definition, role, and pains prove this exact buyer function and context. (Counts as COVERED).
-3. BROADER_THAN_TARGET: The evidence describes a general user, operator, or broad practitioner category, but CANNOT confirm the specific decision maker or niche targeted. (DOES NOT COUNT AS COVERED).
-4. NARROWER_THAN_TARGET: The evidence describes a very narrow sub-demographic that represents only a minor fraction of the target. (DOES NOT COUNT AS COVERED).
-5. BUYER_USER_MISMATCH: The business explicitly targets an economic buyer, business owner, or decision maker, but the audience evidence only represents complaining end users or software support tickets. (DOES NOT COUNT AS COVERED).
-6. INSUFFICIENT_EVIDENCE: There is speculative mention or mention without sufficient corroborating evidence to establish the role. (DOES NOT COUNT AS COVERED).
-7. NO_MATCH: No audience segment corresponds to this target role. (DOES NOT COUNT AS COVERED).
+THE ONLY QUESTION YOU ANSWER:
+"Based only on audience identity, role, function, and context, does this evidence-derived Audience Segment legitimately represent people included in the explicit Business Target?"
 
-IMPORTANT RULES:
-- ONLY EXACT_MATCH and VALID_SEMANTIC_MATCH may have isCovered: true. All other match types MUST have isCovered: false.
-- DO NOT collapse end-user complaints or general software users into Business Owners or Economic Buyers without explicit evidence.
-- DO NOT treat broad practitioners as automatically covering specific executive roles (e.g. Marketing Director, VP, Agency Owner).
+CRITICAL RULE - NO PRODUCT OR PAIN RELEVANCE:
+You must NEVER ask or consider:
+- Does our product solve this segment's pain?
+- Is this pain relevant to our product?
+- Is this segment commercially attractive?
+- Will this segment buy?
+- Is this a CORE pain?
+- Is there Product Fit?
+Pain text must NOT determine target membership. Never use "What are they complaining about?" as evidence that they are or are not the business target.
+
+THREE SEMANTIC OUTCOMES:
+
+1. COVERED
+The Audience segment legitimately represents people included in the explicit Business Target.
+- Wording does NOT need to match. Titles do NOT need to be identical.
+- The segment may be somewhat broader or narrower. What matters is the actual semantic identity/function.
+- Example: Target: "SMB founders and owners" / Segment: "SMB Founders and Owners Struggling with Billing and Customer Service Issues" -> COVERED.
+
+2. RELATED_BUT_UNPROVEN
+There is a meaningful overlap, but the Audience authority does not establish strongly enough that the intended Business Target is actually represented.
+- Example: Target: "Marketing Managers" / Segment: "Business professionals interested in AI" -> RELATED_BUT_UNPROVEN.
+
+3. NOT_COVERED
+The Audience segment genuinely represents a different population from the Business Target.
+- Example: Target: "CEOs" / Segment: "Customer support representatives" -> NOT_COVERED.
 
 EXPLICIT BUSINESS TARGET ROLES:
 ${JSON.stringify(targetRoles, null, 2)}
 
-ACCEPTED EVIDENCE-DERIVED AUDIENCE SEGMENTS:
+ACCEPTED EVIDENCE-DERIVED AUDIENCE SEGMENTS (Evaluate against every target):
 ${JSON.stringify(audienceSegments.map(s => ({
+  segmentId: s.id || s.name,
   name: s.name,
   role: s.role,
-  roleClaim: s.roleClaim,
-  segmentDefinition: s.segmentDefinition,
-  pains: s.pains,
-  groundingRefs: s.groundingRefs
+  segmentDefinition: s.segmentDefinition
 })), null, 2)}
 
-Return a JSON object:
+Return a JSON object evaluating EVERY combination of Target Role and Audience Segment that is relevant. You MUST output a match object for EVERY target-segment combination provided.
 {
   "matches": [
     {
       "targetId": "target_1",
+      "segmentId": "segment_id_or_name",
       "roleName": "Target role name",
-      "matchType": "EXACT_MATCH" | "VALID_SEMANTIC_MATCH" | "BROADER_THAN_TARGET" | "NARROWER_THAN_TARGET" | "BUYER_USER_MISMATCH" | "INSUFFICIENT_EVIDENCE" | "NO_MATCH",
-      "isCovered": boolean,
       "matchedSegmentNames": ["Segment Name"],
-      "matchedRoles": ["END_CONSUMER" | "PRACTITIONER" | ...],
-      "reasoning": "Concise justification for why this target role is or is not covered by the audience evidence"
+      "coverageDecision": "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED",
+      "targetIdentity": "Who the business explicitly wants",
+      "segmentIdentity": "Who the Audience evidence actually represents",
+      "relationshipDescription": "Describe role relationship and functional relationship (broader/narrower is okay to mention here)",
+      "confidence": 0.95,
+      "reason": "Concise business rationale. Do NOT mention pain relevance."
     }
   ]
 }`;
@@ -361,7 +383,7 @@ Return a JSON object:
       const res = await aiChat({
         messages: [{ role: "user", content: matcherPrompt }],
         model,
-        max_tokens: 2000,
+        max_tokens: 16000,
         temperature: 0.1,
         response_format: { type: "json_object" },
         accountId: "system",
@@ -370,57 +392,60 @@ Return a JSON object:
 
       const parsed = JSON.parse(res.choices[0]?.message?.content || '{"matches":[]}');
       const matches: TargetRoleMatch[] = (parsed.matches || []).map((m: any) => {
-        const mType: RoleMatchType = [
-          "EXACT_MATCH", "VALID_SEMANTIC_MATCH", "BROADER_THAN_TARGET",
-          "NARROWER_THAN_TARGET", "BUYER_USER_MISMATCH", "INSUFFICIENT_EVIDENCE", "NO_MATCH"
-        ].includes(m.matchType) ? m.matchType : "NO_MATCH";
-
-        const isCovered = (mType === "EXACT_MATCH" || mType === "VALID_SEMANTIC_MATCH") && m.isCovered === true;
+        const coverageDecision: CoverageDecision = ["COVERED", "RELATED_BUT_UNPROVEN", "NOT_COVERED"].includes(m.coverageDecision) ? m.coverageDecision : "NOT_COVERED";
 
         return {
-          targetId: m.targetId,
-          roleName: m.roleName,
-          matchType: mType,
-          isCovered,
+          targetId: m.targetId || "",
+          segmentId: m.segmentId || "",
+          roleName: m.roleName || "",
+          coverageDecision,
+          relationshipDescription: String(m.relationshipDescription || ""),
+          targetIdentity: String(m.targetIdentity || ""),
+          segmentIdentity: String(m.segmentIdentity || ""),
+          confidence: Number(m.confidence) || 0,
+          reason: String(m.reason || ""),
           matchedSegmentNames: Array.isArray(m.matchedSegmentNames) ? m.matchedSegmentNames : [],
-          matchedRoles: Array.isArray(m.matchedRoles) ? m.matchedRoles : [],
-          reasoning: String(m.reasoning || "")
         };
       });
 
       // ROLE-MATCH JUDGE
-      const judgePrompt = `You are the Role-Match Judge evaluating whether the audience evidence legitimately covers the business target roles.
+      const judgePrompt = `You are the Role-Match Judge evaluating TARGET MEMBERSHIP decisions.
 
 EXPLICIT BUSINESS TARGET ROLES:
 ${JSON.stringify(targetRoles, null, 2)}
 
 ACCEPTED AUDIENCE SEGMENTS:
-${JSON.stringify(audienceSegments.map(s => ({ name: s.name, role: s.role, roleClaim: s.roleClaim, segmentDefinition: s.segmentDefinition, pains: s.pains })), null, 2)}
+${JSON.stringify(audienceSegments.map(s => ({ id: s.id, name: s.name, role: s.role, segmentDefinition: s.segmentDefinition })), null, 2)}
 
 PROPOSED ROLE MATCHES:
 ${JSON.stringify(matches, null, 2)}
 
-JUDGE VERIFICATION CRITERIA:
-1. NO BUYER_USER_ROLE_COLLAPSE: Were complaining end-users or support ticket commenters classified as matching an Economic Buyer or Business Owner? (If so, this MUST be BUYER_USER_MISMATCH and isCovered MUST be false).
-2. NO UNWARRANTED_BROADENING: Was a broad category (e.g. general practitioner) marked as an EXACT_MATCH or VALID_SEMANTIC_MATCH for a specific executive or distinct business role without proof? (If broader, it MUST be BROADER_THAN_TARGET and isCovered MUST be false).
-3. STRICT COVERAGE ENFORCEMENT: Are ONLY EXACT_MATCH and VALID_SEMANTIC_MATCH marked isCovered: true?
-4. FACTUAL REASONING: Does the reasoning accurately reflect what the evidence-derived segments state?
+JUDGE VERIFICATION CRITERIA (Answer YES/NO internally before deciding):
+1. Did the Matcher preserve the explicit Business Target?
+2. Did it preserve the Audience Segment identity?
+3. Did it judge WHO the segment represents rather than what pain they have?
+4. Is COVERED supported by legitimate semantic inclusion?
+5. Is RELATED_BUT_UNPROVEN more appropriate when membership cannot be proven?
+6. Is NOT_COVERED supported by an actual audience-role/context contradiction?
+7. Did Product relevance contaminate the decision?
+8. Did pain relevance contaminate the decision?
+9. Did wording specificity alone cause rejection?
 
 DECISION INSTRUCTION:
-- Set "valid": true if you APPROVE the proposed matches (i.e. the matchType and isCovered determinations are correct, whether covered or not covered). If the matcher correctly determined that a target is NOT covered (e.g. isCovered: false due to BROADER_THAN_TARGET, BUYER_USER_MISMATCH, or NO_MATCH), you MUST return "valid": true.
-- Set "valid": false ONLY if you REJECT the proposed evaluation (e.g. if the matcher falsely set isCovered: true for an unproven role, or missed a buyer/user role collapse).
+- Set "valid": true if you APPROVE the proposed semantic conclusions.
+- Set "valid": false ONLY if you REJECT the proposed evaluation due to violations.
 
 Return a JSON object:
 {
   "valid": boolean,
-  "rejectionCode": "BUYER_USER_ROLE_COLLAPSE" | "UNWARRANTED_BROADENING" | "INVALID_COVERAGE_FLAG" | "MISCLASSIFIED_MATCH" | null,
+  "rejectionCode": "PRODUCT_RELEVANCE_LEAK" | "PAIN_RELEVANCE_LEAK" | "TARGET_MEANING_DRIFT" | "SEGMENT_MEANING_DRIFT" | "VALID_TARGET_MEMBERSHIP_REJECTED" | "GENERIC_OVERLAP_MISTAKEN_FOR_COVERAGE" | "UNPROVEN_RELATIONSHIP_MISTAKEN_FOR_REJECTION" | "ROLE_CONTRADICTION_IGNORED" | "WORDING_SPECIFICITY_OVERWEIGHTED" | null,
   "reasons": ["string"]
 }`;
 
       const judgeRes = await aiChat({
         messages: [{ role: "user", content: judgePrompt }],
         model: judgeModel,
-        max_tokens: 1000,
+        max_tokens: 4000,
         temperature: 0.1,
         response_format: { type: "json_object" },
         accountId: "system",
@@ -450,7 +475,9 @@ export async function evaluateTargetCoverage(
   audienceSegments: AudienceSegment[],
   audienceStatus: string,
   audienceLineage?: AudienceLineage,
-  explicitTargetInput?: string
+  explicitTargetInput?: string,
+  jobId?: string,
+  parentAuthorityIds?: string[]
 ): Promise<TargetCoverageResult> {
   const effectiveAccountId = accountId || "default";
 
@@ -651,8 +678,8 @@ export async function evaluateTargetCoverage(
   const { matches } = matchResult;
 
   // E. Deterministic Aggregation
-  const supportedTargetRoles = matches.filter(m => m.isCovered).map(m => m.roleName);
-  const unsupportedTargetRoles = matches.filter(m => !m.isCovered).map(m => m.roleName);
+  const supportedTargetRoles = matches.filter(m => m.coverageDecision === "COVERED").map(m => m.roleName);
+  const unsupportedTargetRoles = matches.filter(m => m.coverageDecision === "NOT_COVERED" || m.coverageDecision === "RELATED_BUT_UNPROVEN").map(m => m.roleName);
 
   let status: "FULL" | "PARTIAL" | "GAP" = "GAP";
   let evidenceGap = false;

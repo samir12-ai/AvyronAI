@@ -1,73 +1,115 @@
-import type { AuthorityMode, ProofCategory } from "./constants";
 
-export interface MIInput {
-  dominanceData: any;
-  contentDnaData: any;
-  marketDiagnosis: string | null;
-  opportunitySignals: any[];
-  threatSignals: any[];
-  narrativeSynthesis: string | null;
-  multiSourceSignals?: any;
-  sourceAvailability?: any;
+export interface CanonicalDifferentiationInput {
+  lineage: {
+    accountId: string;
+    campaignId: string;
+    jobId: string;
+    audienceSnapshotId: string;
+    miSnapshotId: string;
+  };
+  corePains: Array<{
+    painId: string;
+    targetCoverageAuthorityId: string;
+    productFitAuthorityId: string;
+    coreDecisionId: string;
+    canonicalPain: string;
+    segmentIds: string[];
+    fitType: string;
+    requiredCapability: string;
+    matchedProductCapability: string;
+    productTruthFactIds: string[];
+  }>;
+  productTruth: Array<{
+    factId: string;
+    fact: string;
+  }>;
+  competitiveAuthority: Array<{
+    miAuthorityId: string;
+    competitorId: string;
+    factType: string;
+    fact: string;
+    miSnapshotId: string;
+  }>;
 }
 
-export interface AudienceInput {
-  objectionMap: Record<string, any>;
-  emotionalDrivers: any[];
-  maturityIndex: number | null;
-  awarenessLevel: string | null;
-  audiencePains: any[];
-  /**
-   * Authoritative pain registry from the orchestrator run context (Task 163).
-   * Optional — legacy `audiencePains` stays untouched as the raw input; the
-   * registry is the validated routing layer (classification + allowedUses).
-   */
-  painRegistry?: any[];
-  desireMap: Record<string, any>;
-  audienceSegments: any[];
-  intentDistribution: any;
+export type PainDispositionCode =
+  | "ACCEPTED_DIFFERENTIATION"
+  | "NO_SUPPORTED_DIFFERENTIATION"
+  | "COMPETITIVE_EVIDENCE_INSUFFICIENT"
+  | "DIFFERENTIATION_INCOMPLETE"
+  | "MAPPED_TO_ACCEPTED_UMBRELLA"
+  | "STRUCTURAL_DISPOSITION_MISSING";
+
+export interface PainDisposition {
+  painId: string;
+  disposition: PainDispositionCode;
+  differentiationId?: string;
 }
 
-export interface ProfileInput {
-  businessType: string | null;
-  coreOffer: string | null;
-  targetAudienceSegment: string | null;
-  targetAudienceAge: string | null;
-  priceRange: string | null;
-  funnelObjective: string | null;
-  businessLocation: string | null;
-  goalDescription: string | null;
-  productCategory?: string | null;
-  coreProblemSolved?: string | null;
-  uniqueMechanism?: string | null;
-  strategicAdvantage?: string | null;
-  targetDecisionMaker?: string | null;
+export type MechanismStatus = "ESTABLISHED" | "NO_DISTINCT_MECHANISM_ESTABLISHED";
+
+export interface DifferentiationCandidate {
+  differentiationId?: string;
+  corePainIds: string[];
+  differentiationClaim: string;
+  comparisonBaseline: {
+    statement: string;
+    miAuthorityIds: string[];
+    competitorIds: string[];
+  };
+  distinctiveProperty: string;
+  productTruthFactIds: string[];
+  buyerValue: string;
+  mechanismStatus: MechanismStatus;
+  mechanismName: string | null;
+  proofBoundary: string;
+  isJudgeApproved?: boolean;
 }
 
-export interface ProfileSignals {
-  claimTokens: Set<string>;
-  offerTokens: Set<string>;
-  audienceTokens: Set<string>;
-  strategyTokens: Set<string>;
-  signalCount: number;
-  hasProfile: boolean;
+export type JudgeRejectionCode =
+  | "GENERIC_INTERCHANGEABLE"
+  | "CAPABILITY_NOT_DIFFERENTIATION"
+  | "VALUE_MISTAKEN_FOR_DIFFERENTIATION"
+  | "PRODUCT_TRUTH_UNSUPPORTED"
+  | "MI_BASELINE_UNSUPPORTED"
+  | "COMPETITIVE_SCOPE_OVERCLAIM"
+  | "MECHANISM_HALLUCINATED"
+  | "PAIN_MEANING_DRIFT"
+  | "BUYER_VALUE_NOT_ESTABLISHED"
+  | "LINEAGE_REFERENCE_INVALID"
+  | "STRUCTURAL_DISPOSITION_MISSING"
+  | "SPECIFICITY_LACKING";
+
+export interface JudgeDefect {
+  differentiationId?: string;
+  painId?: string;
+  code: JudgeRejectionCode;
+  reason: string;
+  rejectedFields: string[];
+  fixDirective: string;
 }
 
-export interface PositioningInput {
-  territories: Territory[];
-  differentiationVector: any;
-  enemyDefinition: string | null;
-  contrastAxis: string | null;
-  narrativeDirection: string | null;
-  flankingMode: boolean;
-  stabilityResult: any;
-  strategyCards: any[];
-  domainFailures?: string[];
-  operationalProblems?: string[];
-  proofRequirements?: string[];
+export interface DifferentiationJudgeOutput {
+  valid: boolean;
+  defects: JudgeDefect[];
+}
+
+export interface DifferentiationResult {
+  status: string;
+  statusMessage?: string;
+  differentiations: DifferentiationCandidate[];
+  pillars?: any[];
+  claimStructures?: any[];
+  proofArchitecture?: any[];
+  painDispositions: PainDisposition[];
+  confidenceScore: number;
+  executionTimeMs: number;
+  engineVersion: number;
+  diagnostics?: any;
 }
 
 export interface Territory {
+  positioningId?: string;
   name: string;
   opportunityScore?: number;
   confidenceScore?: number;
@@ -76,107 +118,3 @@ export interface Territory {
   description?: string;
 }
 
-export interface CompetitorClaim {
-  competitorId?: string;
-  claim: string;
-  source: string;
-  category: string;
-  strength: number;
-}
-
-export interface ClaimCollision {
-  candidateClaim: string;
-  competitorClaim: string;
-  similarity: number;
-  narrativeProximity: number;
-  collisionRisk: number;
-  competitorSource: string;
-}
-
-export interface ProofDemand {
-  category: ProofCategory;
-  priority: number;
-  rationale: string;
-  requiredFor: string[];
-}
-
-export interface TrustGap {
-  objection: string;
-  severity: number;
-  relevanceToTerritory: number;
-  priorityRank: number;
-  relatedTerritories?: string[];
-}
-
-export interface ProofAsset {
-  category: ProofCategory;
-  description: string;
-  feasibility: number;
-  impactScore: number;
-}
-
-export interface MechanismCandidate {
-  name: string | null;
-  description: string;
-  supported: boolean;
-  proofBasis: string[];
-  type: "named_process" | "branded_method" | "framework" | "system" | "none";
-}
-
-export interface DifferentiationPillar {
-  name: string;
-  description: string;
-  uniqueness: number;
-  proofability: number;
-  trustAlignment: number;
-  positioningAlignment: number;
-  objectionCoverage: number;
-  overallScore: number;
-  territory: string;
-  supportingProof: string[];
-}
-
-export interface ClaimStructure {
-  claim: string;
-  territory: string;
-  distinctiveness: number;
-  believability: number;
-  defensibility: number;
-  relevance: number;
-  overallScore: number;
-  collisionRisk: number;
-  proofBasis: string[];
-}
-
-export interface MechanismCore {
-  mechanismName: string;
-  mechanismType: "method" | "system" | "protocol" | "framework" | "none";
-  mechanismSteps: string[];
-  mechanismPromise: string;
-  mechanismProblem: string;
-  mechanismLogic: string;
-}
-
-export interface DifferentiationResult {
-  status: string;
-  statusMessage: string | null;
-  pillars: DifferentiationPillar[];
-  proofArchitecture: ProofAsset[];
-  claimStructures: ClaimStructure[];
-  authorityMode: AuthorityMode;
-  authorityRationale: string;
-  mechanismFraming: MechanismCandidate;
-  mechanismCore: MechanismCore;
-  trustPriorityMap: TrustGap[];
-  claimScores: { averageScore: number; highestCollision: number; totalClaims: number };
-  collisionDiagnostics: ClaimCollision[];
-  stabilityResult: { stable: boolean; failures: string[] };
-  confidenceScore: number;
-  executionTimeMs: number;
-  engineVersion: number;
-  layerDiagnostics: Record<string, any>;
-  celDepthCompliance?: any;
-  depthGateResult?: any;
-  snapshotId?: string;
-  claims?: any[];
-}

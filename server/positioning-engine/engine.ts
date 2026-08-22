@@ -2483,7 +2483,7 @@ export async function runPositioningEngine(
   if (result.status === "SUCCESS" && Array.isArray(painRegistry) && painRegistry.length > 0) {
     try {
       const corePains = selectPainsForUse(painRegistry, "positioning");
-      const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && p.eligible && p.productFit === "ELIGIBLE");
+      const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && Array.isArray(p.allowedUses) && p.allowedUses.includes("offer_objection"));
       const allPositioningPains = [...corePains, ...eligibleObjections];
       
       let finalPains = allPositioningPains;
@@ -2524,7 +2524,7 @@ async function runPositioningEngineInternal(
   }
 
   const corePains = selectPainsForUse(painRegistry, "positioning");
-  const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && p.eligible && p.productFit === "ELIGIBLE");
+  const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && Array.isArray(p.allowedUses) && p.allowedUses.includes("offer_objection"));
   let positioningPains = [...corePains, ...eligibleObjections];
   if (Array.isArray(strategicLanes) && strategicLanes.length > 0) {
     const lanePainIds = new Set(strategicLanes.flatMap(l => l.painIds || []));
@@ -2532,7 +2532,7 @@ async function runPositioningEngineInternal(
   }
 
   if (!positioningPains || positioningPains.length === 0) {
-    const hasAnyValidPains = painRegistry.some(p => p.eligible);
+    const hasAnyValidPains = painRegistry.some(p => p.classification !== "UNKNOWN" && p.classification !== "EXCLUDE" && Array.isArray(p.allowedUses) && p.allowedUses.length > 0);
     if (hasAnyValidPains) {
        console.log(`[PositioningEngine-V3] TARGET_AUDIENCE_EVIDENCE_GAP — valid pains exist, but none eligible for target buyer/lane`);
        return buildEmptyResult("MISSING_DEPENDENCY", `TARGET_AUDIENCE_EVIDENCE_GAP: Positioning engine requires at least one authoritative pain suitable for positioning. Valid pains exist for other roles, but not the target.`, Date.now() - startTime, miSnapshotId, audienceSnapshotId);

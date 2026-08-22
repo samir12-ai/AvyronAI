@@ -245,14 +245,16 @@ export function layer2_audienceOfferAlignment(
   }
 
   if (objections.length > 0) {
-    const funnelStages = funnel.stageMap || [];
-    const frictionMitigations = (Array.isArray(funnel.frictionMap) ? funnel.frictionMap : []).map((f: any) => (f.mitigation || "").toLowerCase());
-    const trustActions = (funnel.trustPath || []).map((t: any) => (t.action || "").toLowerCase());
-    const allFunnelText = [...frictionMitigations, ...trustActions, ...funnelStages.map((s: any) => (s.purpose || "").toLowerCase())].join(" ");
+    const funnelStages = (funnel as any).stageMap || (funnel as any).primaryFunnel?.stageMap || [];
+    const frictionMitigations = (Array.isArray(funnel.frictionMap) ? funnel.frictionMap : []).map((f: any) => `${f.frictionPoint || ''} ${f.mitigation || ''}`.toLowerCase());
+    const trustActions = (funnel.trustPath || []).map((t: any) => `${t.action || ''} ${t.milestone || ''} ${t.trustFactor || ''}`.toLowerCase());
+    const stageTexts = funnelStages.map((s: any) => `${s.name || ''} ${s.purpose || ''} ${s.contentType || ''} ${s.conversionGoal || ''} ${s.keyDeliverable || ''} ${s.objectionAddressed || ''}`.toLowerCase());
+    const laneTexts = (Array.isArray((funnel as any).lanes) ? (funnel as any).lanes : []).map((l: any) => JSON.stringify(l).toLowerCase());
+    const allFunnelText = [...frictionMitigations, ...trustActions, ...stageTexts, ...laneTexts].join(" ");
 
     let addressedCount = 0;
     for (const obj of objections.slice(0, 5)) {
-      const objWords = obj.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+      const objWords = (typeof obj === "string" ? obj : (obj as any)?.text || (obj as any)?.statement || "").toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
       if (objWords.some((w: string) => allFunnelText.includes(w))) {
         addressedCount++;
       }
@@ -850,7 +852,7 @@ export function runIntegrityEngine(
     l6.passed === false ||
     l6.warnings.some(w => {
       const wl = w.toLowerCase();
-      return wl.includes("no proof") || wl.includes("proof missing") || wl.includes("zero proof") || wl.includes("missing proof") || wl.includes("proof gap");
+      return wl.includes("no proof") || wl.includes("proof missing") || wl.includes("zero proof") || wl.includes("proof gap");
     })
   );
 

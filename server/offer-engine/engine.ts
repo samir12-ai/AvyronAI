@@ -1724,7 +1724,7 @@ function buildDeterministicOfferSkeletons(
   const coreRegistryPain = (primaryLane && primaryLane.painIds?.length > 0)
     ? registryPains.find((p: any) => p.painId === primaryLane.painIds[0])
     : selectPainForUse(registryPains, "offer_core");
-  const objectionRegistryPains = registryPains.filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"));
+  const objectionRegistryPains = registryPains.filter((pain: any) => pain?.classification === "OBJECTION" && Array.isArray(pain?.allowedUses) && pain?.allowedUses?.includes("offer_objection"));
   const painsList: string[] = (() => {
     if (coreRegistryPain) return [cleanPainScaffolding(coreRegistryPain.canonical)];
     if (rootPains && Array.isArray(rootPains)) {
@@ -2499,7 +2499,7 @@ async function _runOfferEngine(
       count: rootPainRegistry.length,
       corePainId: selectPainForUse(rootPainRegistry, "offer_core")?.painId ?? null,
       objectionPainIds: rootPainRegistry
-        .filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"))
+        .filter((pain: any) => pain?.classification === "OBJECTION" && pain?.allowedUses?.includes("offer_objection"))
         .map((pain: any) => pain.painId),
     };
   }
@@ -2511,7 +2511,7 @@ async function _runOfferEngine(
   // never mistakes a truthful early return for a dropped core pain.
   const authoritativeOfferCorePain = selectPainForUse(audience.painRegistry || [], "offer_core");
   const authoritativeOfferObjectionPains = (audience.painRegistry || [])
-    .filter((pain: any) => pain?.eligible && pain?.allowedUses?.includes("offer_objection"));
+    .filter((pain: any) => pain?.classification === "OBJECTION" && pain?.allowedUses?.includes("offer_objection"));
   const buildOfferPainRoles = () =>
     authoritativeOfferCorePain
       ? {

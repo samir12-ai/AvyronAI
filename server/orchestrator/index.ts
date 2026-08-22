@@ -1,3 +1,4 @@
+import { validateAuthorityLineage } from "../shared/lineage-validator";
 // @ts-nocheck
 import { z } from "zod";
 import { db } from "../db";
@@ -118,7 +119,7 @@ import {
 // out of scope (boundary enforced by server/tests/retry-policy-boundary.test.ts).
 import { planRetry, computeShadowRetryRecommendation } from "../decision-policy/retry-policy";
 import { synthesizePlan } from "./plan-synthesis";
-import { buildAudiencePainRegistry, attachSelectedPainRoles } from "../shared/audience-pain-registry";
+import { buildAudiencePainRegistry, attachSelectedPainRoles, attachTargetCoverageToPainRegistry, extractCanonicalSegmentPains } from "../shared/audience-pain-registry";
 import { refineAudiencePainRegistry } from "../shared/pain-classifier";
 import { runLaneGrouper } from "../shared/lane-grouper";
 import {
@@ -882,8 +883,8 @@ function extractDifferentiationInput(diffResult: any): any {
   if (!diffResult) return {
     ...diffResult,};
   return {
-    claims: diffResult.validatedClaims || [],
-    pillars: diffResult.pillars || diffResult.validatedClaims || [],
+    claims: diffResult.validatedClaims || diffResult.differentiations || [],
+    pillars: diffResult.differentiations || diffResult.pillars || diffResult.validatedClaims || [],
     collisions: diffResult.collisions || [],
     trustGaps: diffResult.trustGaps || [],
     proofMap: diffResult.proofDemandMap || [],
@@ -1722,15 +1723,21 @@ async function executeEngine(
         // Failure here is non-fatal: engines fall back to legacy pain
         // handling and the root assembler rebuilds deterministically.
         try {
-          const painsForRegistry = (ctx.audience as any)?.audiencePains;
-          if (Array.isArray(painsForRegistry) && painsForRegistry.length > 0 && ctx.audienceSnapshotId) {
+          const audienceSegments = (ctx.audience as any)?.audienceSegments;
+          const canonicalSegmentPains = extractCanonicalSegmentPains(audienceSegments);
+
+          if (Array.isArray(audienceSegments) && audienceSegments.length > 0 && canonicalSegmentPains.length === 0) {
+            console.warn(`[Orchestrator] CANONICAL_SEGMENT_PAINS_EMPTY | audienceSegments present (${audienceSegments.length}) but contained 0 judge-approved pain claims — failing closed without legacy fallback`);
+          }
+
+          if (canonicalSegmentPains.length > 0 && ctx.audienceSnapshotId) {
             const deterministicRegistry = buildAudiencePainRegistry(
-              painsForRegistry,
+              canonicalSegmentPains,
               {
                 accountId: config.accountId,
                 audienceSnapshotId: ctx.audienceSnapshotId,
               },
-              (ctx.audience as any)?.audienceSegments ?? [],
+              audienceSegments,
             );
             const anchorForFit = runStrategicContextOf(ctx)?.doctrine?.productAnchor ?? null;
             let productCapabilities: string | null = null;
@@ -1771,9 +1778,16 @@ async function executeEngine(
             const [bc] = await db.select().from(brandConfig).where(eq(brandConfig.accountId, config.accountId)).limit(1);
             const businessProfile = bc ? `Brand: ${bc.brandName || "Unknown"}. Industry: ${bc.targetIndustry || "Unknown"}. Tone: ${bc.tone || "Unknown"}.` : null;
 
-            const refined = await refineAudiencePainRegistry(deterministicRegistry, {
+            const attachedRegistry = attachTargetCoverageToPainRegistry(
+              deterministicRegistry,
+              (ctx.audience as any)?.targetCoverage || { status: "NOT_EVALUATED" },
+              (ctx.audience as any)?.audienceSegments ?? []
+            );
+            const refined = await refineAudiencePainRegistry(attachedRegistry, {
               accountId: config.accountId,
               campaignId: config.campaignId,
+              jobId,
+              businessUnderstanding: ctx.ssc?.doctrine?.businessUnderstanding,
               productCapabilities,
               businessProfile,
               audienceSegments: (ctx.audience as any)?.audienceSegments ?? [],
@@ -1787,6 +1801,17 @@ async function executeEngine(
             if (refined.evidenceIssues.length > 0) {
               console.warn(`[Orchestrator] PAIN_EVIDENCE_ISSUES | ${refined.evidenceIssues.join(", ")}`);
             }
+
+            validateAuthorityLineage(
+              { jobId, campaignId: config.campaignId, accountId: config.accountId },
+              {
+                audienceSnapshotId: ctx.audienceSnapshotId,
+                audienceCampaignId: (ctx.audience as any)?.campaignId,
+                audienceAccountId: (ctx.audience as any)?.accountId,
+                audienceJobId: (ctx.audience as any)?.jobId,
+                targetCoverageParentSnapshotId: (ctx.audience as any)?.targetCoverage?.audienceSnapshotId
+              }
+            );
 
             // Task 163 / Positioning Correction 3: 
             // Rebuild Lanes purely from the newly qualified pain portfolio.
@@ -1852,13 +1877,18 @@ async function executeEngine(
             const competitiveData = competitorList.length > 0
               ? { competitors: competitorList, posts: miAny?.competitorPosts || miAny?.posts || [] }
               : null;
-            // ProductDNA is loaded by the audience engine and exposed on its result.
-            const productDnaFromAudience = (ctx.audience as any)?.productDna || null;
-            console.log(`[Orchestrator] AEL_INPUT_PROBE | hasMI=${!!ctx.mi} | hasAudience=${!!ctx.audience} | hasProductDNA=${!!productDnaFromAudience} | competitorListSize=${competitorList.length} | miMarketState=${miAny?.output?.marketState ?? miAny?.marketState ?? "n/a"}`);
-            const aelPkg = await buildAnalyticalPackage({
+            let productDnaForAEL = null;
+            if (config.accountId) {
+              const { loadProductDNA } = await import("../shared/product-dna");
+              productDnaForAEL = await loadProductDNA(config.campaignId, config.accountId);
+            }
+            const productTruthForAEL = runStrategicContextOf(ctx)?.doctrine?.productAnchor || null;
+            const hasProductData = !!(productTruthForAEL || (productDnaForAEL && (productDnaForAEL.coreOffer || productDnaForAEL.businessType)));
+            
+            console.log(`[Orchestrator] AEL_INPUT_PROBE | hasMI=${!!ctx.mi} | hasAudience=${!!ctx.audience} | hasProductDNA=${hasProductData} | competitorListSize=${competitorList.length} | miMarketState=${miAny?.output?.marketState ?? miAny?.marketState ?? "n/a"}`);            const aelPkg = await buildAnalyticalPackage({
               mi: ctx.mi,
               audience: ctx.audience,
-              productDNA: productDnaFromAudience,
+              productDNA: productDnaForAEL || productTruthForAEL,
               competitiveData,
               accountId: config.accountId,
               campaignId: config.campaignId,
@@ -1977,6 +2007,17 @@ async function executeEngine(
           };
         }
         { const sglBlock = resolveSglOrBlock("positioning", ctx, startTime); if (sglBlock) return sglBlock; }
+        const diffCount = (ctx.differentiation?.differentiations?.length ?? 0) || (ctx.differentiation?.pillars?.length ?? 0);
+        if (ctx.differentiation && (ctx.differentiation.status === "SKIPPED" || ctx.differentiation.status === "FAILED" || diffCount === 0)) {
+          console.log(`[Orchestrator] POSITIONING_BLOCKED_BY_DIFFERENTIATION | differentiation status=${ctx.differentiation.status} | differentiations=${diffCount}`);
+          return {
+            engineId,
+            status: "BLOCKED",
+            output: null,
+            durationMs: Date.now() - startTime,
+            blockReason: `DIFFERENTIATION_INSUFFICIENT: Approved Differentiation count is 0 (${ctx.differentiation.statusMessage || "No supported differentiations"}). Positioning remains blocked per strategic integrity contract.`,
+          };
+        }
         const posInputHash = computeInputHash(
           "positioning-v1",
           doctrineSalt(ctx),
@@ -2010,6 +2051,7 @@ async function executeEngine(
             runStrategicContextOf(ctx),
             ctx.painRegistry,
             ctx.strategicLanes,
+            ctx.differentiation
           );
           if (result?.snapshotId) {
             try {
@@ -2111,16 +2153,11 @@ async function executeEngine(
         if (!diffReused) {
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "differentiation" });
         const audInput = extractAudienceInput(ctx.audience);
-        const posInput = extractPositioningInput(ctx.positioning);
         result = await runDifferentiationEngine(
           miInput,
           { ...audInput, painRegistry: ctx.painRegistry },
-          posInput,
-          config.accountId,
-          undefined,
-          ctx.analyticalEnrichment,
-          runStrategicContextOf(ctx),
-          (ctx.audience as any)?.productDna || null
+          { territories: [], differentiationVector: null, enemyDefinition: null, contrastAxis: null, narrativeDirection: null, flankingMode: false, stabilityResult: null, strategyCards: [] },
+          { accountId: config.accountId, campaignId: config.campaignId, jobId: jobId, audienceSnapshotId: ctx.audienceSnapshotId, miSnapshotId: ctx.miSnapshotId }
         );
         output = result;
         ctx.differentiation = result;

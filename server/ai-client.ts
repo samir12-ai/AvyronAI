@@ -258,7 +258,7 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
           : promptText;
 
         const isJson = rest.response_format?.type === "json_object";
-        const geminiModel = "gemini-2.5-flash";
+        const geminiModel = "gemini-3.6-flash";
 
         const geminiRes = await gemini.models.generateContent({
           model: geminiModel,

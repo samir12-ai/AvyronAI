@@ -4199,3 +4199,197 @@ export const performanceDecisionOutcomes = pgTable(
 
 export type PerformanceDecisionOutcome = typeof performanceDecisionOutcomes.$inferSelect;
 
+
+export const websiteSnapshots = pgTable(
+  "website_snapshots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    rootUrl: text("root_url").notNull(),
+    pagesCrawled: jsonb("pages_crawled").notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").notNull().default('SUCCESS'),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("website_snapshots_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type WebsiteSnapshotRow = typeof websiteSnapshots.$inferSelect;
+
+export const businessUnderstandingSnapshots = pgTable(
+  "business_understanding_snapshots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    websiteSnapshotId: varchar("website_snapshot_id").notNull(),
+    offeringInputEvidenceId: varchar("offering_input_evidence_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    version: integer("version").notNull().default(1),
+    businessUnderstanding: jsonb("business_understanding").notNull(),
+    status: text("status").notNull().default('COMPLETE'),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("business_understanding_snapshots_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type BusinessUnderstandingSnapshotRow = typeof businessUnderstandingSnapshots.$inferSelect;
+
+export const competitorWebsiteSnapshots = pgTable(
+  "competitor_website_snapshots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    competitorId: varchar("competitor_id").notNull(),
+    websiteUrl: text("website_url").notNull(),
+    pagesCrawled: jsonb("pages_crawled").notNull(),
+    contentHash: text("content_hash").notNull(),
+    status: text("status").notNull().default('COMPLETE'),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("competitor_website_snapshots_tenant_idx").on(table.accountId, table.campaignId),
+    competitorIdx: index("competitor_website_snapshots_competitor_idx").on(table.competitorId),
+  }),
+);
+
+export type CompetitorWebsiteSnapshotRow = typeof competitorWebsiteSnapshots.$inferSelect;
+
+export const competitorUnderstandingSnapshots = pgTable(
+  "competitor_understanding_snapshots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    competitorId: varchar("competitor_id").notNull(),
+    competitorWebsiteSnapshotId: varchar("competitor_website_snapshot_id").notNull(),
+    status: text("status").notNull().default('COMPLETE'),
+    competitorUnderstanding: jsonb("competitor_understanding").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("competitor_understanding_snapshots_tenant_idx").on(table.accountId, table.campaignId),
+    competitorIdx: index("competitor_understanding_snapshots_competitor_idx").on(table.competitorId),
+  }),
+);
+
+export type CompetitorUnderstandingSnapshotRow = typeof competitorUnderstandingSnapshots.$inferSelect;
+
+
+export const offeringInputEvidence = pgTable(
+  "offering_input_evidence",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    rawOfferingName: text("raw_offering_name").notNull(),
+    rawFeaturesAndNotes: text("raw_features_and_notes").notNull(),
+    contentHash: text("content_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("offering_input_evidence_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type OfferingInputEvidenceRow = typeof offeringInputEvidence.$inferSelect;
+
+
+export const campaignOfferings = pgTable(
+  "campaign_offerings",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    offeringName: text("offering_name").notNull(),
+    sourceInputEvidenceId: varchar("source_input_evidence_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("campaign_offerings_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type CampaignOfferingRow = typeof campaignOfferings.$inferSelect;
+
+export const targetAssessments = pgTable(
+  "target_assessments",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    jobId: varchar("job_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    painId: varchar("pain_id").notNull(),
+    targetUnderstandingAuthorityId: varchar("target_understanding_authority_id").notNull(),
+    decision: varchar("decision").notNull(),
+    status: varchar("status").notNull(),
+    parentAuthorityIds: jsonb("parent_authority_ids").notNull(),
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("target_assessments_tenant_idx").on(table.accountId, table.campaignId),
+    jobIdx: index("target_assessments_job_idx").on(table.jobId),
+  }),
+);
+
+export type TargetAssessmentRow = typeof targetAssessments.$inferSelect;
+
+export const productAssessments = pgTable(
+  "product_assessments",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    jobId: varchar("job_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    painId: varchar("pain_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    businessUnderstandingAuthorityId: varchar("business_understanding_authority_id").notNull(),
+    productTruthFactIds: jsonb("product_truth_fact_ids").notNull(),
+    fitType: varchar("fit_type").notNull(),
+    status: varchar("status").notNull(),
+    parentAuthorityIds: jsonb("parent_authority_ids").notNull(),
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("product_assessments_tenant_idx").on(table.accountId, table.campaignId),
+    jobIdx: index("product_assessments_job_idx").on(table.jobId),
+  }),
+);
+
+export type ProductAssessmentRow = typeof productAssessments.$inferSelect;
+
+export const strategicPainDecisions = pgTable(
+  "strategic_pain_decisions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    jobId: varchar("job_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    painId: varchar("pain_id"),
+    targetAssessmentAuthorityId: varchar("target_assessment_authority_id"),
+    productAssessmentAuthorityId: varchar("product_assessment_authority_id"),
+    finalClassification: varchar("final_classification"),
+    status: varchar("status").notNull().default("COMPLETE"),
+    reason: text("reason"),
+    payload: jsonb("payload").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("strategic_pain_decisions_tenant_idx").on(table.accountId, table.campaignId),
+    jobIdx: index("strategic_pain_decisions_job_idx").on(table.jobId),
+  }),
+);
+
+export type StrategicPainDecisionRow = typeof strategicPainDecisions.$inferSelect;
+

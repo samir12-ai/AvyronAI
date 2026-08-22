@@ -1,0 +1,660 @@
+{
+  "results": [
+    {
+      "runId": 1,
+      "manual": {
+        "pain": {
+          "painId": "pain_2_1",
+          "canonical": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "originalStatement": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "normalizedStatement": "spending excessive time on ad design and manual prospecting that do not convert well",
+          "classification": "CORE_PURCHASE",
+          "rank": 4,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing Managers and Leads Seeking Efficiency and Automation"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The need to improve efficiency in ad design and prospecting is a fundamental problem that the audience actively seeks to solve. | Unified marketing intelligence enables strategic decisions to automate repetitive marketing tasks, indirectly addressing inefficiency.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables marketing managers to identify and prioritize automation opportunities, indirectly reducing time spent on manual ad design and prospecting.",
+          "boundary": "The product does NOT directly perform ad creation, manual prospecting, or task automation workflows.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_2_1",
+          "marketProblemMeaning": "Excessive time spent on ad design and manual prospecting that do not yield conversions.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that indicates this problem drives decision-making or solution-seeking behavior.",
+          "classification": "SUPPORTING",
+          "reason": "While the problem of inefficiency in ad design and prospecting is valid, it does not demonstrate centrality to purchasing decisions without supporting evidence."
+        },
+        "verdict": {
+          "painId": "pain_2_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "There is no evidence provided that indicates this problem drives decision-making or solution-seeking behavior.",
+          "repairDirective": "Evaluate the evidence to establish how excessive time on ad design and manual prospecting influences purchase decisions or solution-seeking."
+        }
+      },
+      "dataQuality": {
+        "pain": {
+          "painId": "pain_3_1",
+          "canonical": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "originalStatement": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "normalizedStatement": "difficulty managing data quality and connecting scattered insights to real buying signals",
+          "classification": "CORE_PURCHASE",
+          "rank": 6,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing and Sales Professionals Focused on Data Quality and Targeting"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The challenge of managing data quality is a critical problem that directly affects the audience's decision-making and effectiveness. | The product’s capability to unify fragmented data addresses the root cause of poor data quality management and insight connection, enabling strategic improvements though not operational execution.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables upstream strategic decisions that improve data quality management and insight connection, even though it does not directly clean data or identify buying signals.",
+          "boundary": "The product does NOT directly perform data cleaning, quality control, or real-time buying signal detection.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_3_1",
+          "marketProblemMeaning": "Challenges in managing data quality and connecting insights to buying signals.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that indicates this problem drives decision-making or solution-seeking behavior.",
+          "classification": "SUPPORTING",
+          "reason": "The issue of data quality and insight connection is significant but lacks evidence to establish it as a central problem influencing purchase decisions."
+        },
+        "verdict": {
+          "painId": "pain_3_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "There is no evidence provided that indicates this problem drives decision-making or solution-seeking behavior.",
+          "repairDirective": "Evaluate the evidence to establish how challenges in managing data quality and connecting insights to buying signals influence purchase decisions or solution-seeking."
+        }
+      }
+    },
+    {
+      "runId": 2,
+      "manual": {
+        "pain": {
+          "painId": "pain_2_1",
+          "canonical": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "originalStatement": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "normalizedStatement": "spending excessive time on ad design and manual prospecting that do not convert well",
+          "classification": "CORE_PURCHASE",
+          "rank": 4,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing Managers and Leads Seeking Efficiency and Automation"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The need to improve efficiency in ad design and prospecting is a fundamental problem that the audience actively seeks to solve. | Unified marketing intelligence enables strategic decisions to automate repetitive marketing tasks, indirectly addressing inefficiency.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables marketing managers to identify and prioritize automation opportunities, indirectly reducing time spent on manual ad design and prospecting.",
+          "boundary": "The product does NOT directly perform ad creation, manual prospecting, or task automation workflows.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_2_1",
+          "marketProblemMeaning": "Excessive time spent on ad design and manual prospecting that do not yield conversions.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "While the problem of spending excessive time on ad design and manual prospecting is acknowledged, there is no evidence provided that demonstrates this issue drives solution-seeking behavior or decision-making in a way that would classify it as central to purchase.",
+          "classification": "SUPPORTING",
+          "reason": "The problem is valid and relevant to the audience but lacks evidence of centrality in driving purchase decisions."
+        },
+        "verdict": {
+          "painId": "pain_2_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "The problem of excessive time spent on ad design and manual prospecting is acknowledged, but there is no evidence provided that demonstrates this issue drives solution-seeking behavior or decision-making in a way that would classify it as central to purchase.",
+          "repairDirective": "Evaluate the evidence for how this problem influences purchasing decisions or solution-seeking behavior."
+        }
+      },
+      "dataQuality": {
+        "pain": {
+          "painId": "pain_3_1",
+          "canonical": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "originalStatement": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "normalizedStatement": "difficulty managing data quality and connecting scattered insights to real buying signals",
+          "classification": "CORE_PURCHASE",
+          "rank": 6,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing and Sales Professionals Focused on Data Quality and Targeting"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The challenge of managing data quality is a critical problem that directly affects the audience's decision-making and effectiveness. | The product’s capability to unify fragmented data addresses the root cause of poor data quality management and insight connection, enabling strategic improvements though not operational execution.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables upstream strategic decisions that improve data quality management and insight connection, even though it does not directly clean data or identify buying signals.",
+          "boundary": "The product does NOT directly perform data cleaning, quality control, or real-time buying signal detection.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_3_1",
+          "marketProblemMeaning": "Challenges in managing data quality and connecting insights to buying signals.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "The difficulty in managing data quality and connecting insights to buying signals is a recognized issue, but there is no evidence indicating that this problem is central to the audience's purchasing decisions or solution-seeking behavior.",
+          "classification": "SUPPORTING",
+          "reason": "The problem is significant but does not demonstrate the necessary centrality to be classified as a core purchase issue."
+        },
+        "verdict": {
+          "painId": "pain_3_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "The difficulty in managing data quality and connecting insights to buying signals is recognized, but there is no evidence indicating that this problem is central to the audience's purchasing decisions or solution-seeking behavior.",
+          "repairDirective": "Assess the evidence for how this issue impacts decision-making or drives the search for solutions."
+        }
+      }
+    },
+    {
+      "runId": 3,
+      "manual": {
+        "pain": {
+          "painId": "pain_2_1",
+          "canonical": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "originalStatement": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "normalizedStatement": "spending excessive time on ad design and manual prospecting that do not convert well",
+          "classification": "CORE_PURCHASE",
+          "rank": 4,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing Managers and Leads Seeking Efficiency and Automation"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The need to improve efficiency in ad design and prospecting is a fundamental problem that the audience actively seeks to solve. | Unified marketing intelligence enables strategic decisions to automate repetitive marketing tasks, indirectly addressing inefficiency.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables marketing managers to identify and prioritize automation opportunities, indirectly reducing time spent on manual ad design and prospecting.",
+          "boundary": "The product does NOT directly perform ad creation, manual prospecting, or task automation workflows.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_2_1",
+          "marketProblemMeaning": "Excessive time spent on ad design and manual prospecting that do not yield conversions.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that indicates this problem drives decision-making or solution-seeking behavior among the audience.",
+          "classification": "SUPPORTING",
+          "reason": "While the problem of inefficiency in ad design and prospecting is valid, it does not establish a direct link to centrality in purchasing decisions."
+        },
+        "verdict": {
+          "painId": "pain_2_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "The proposed class of SUPPORTING is not supported by evidence that indicates this problem drives decision-making or solution-seeking behavior.",
+          "repairDirective": "Provide evidence that demonstrates how excessive time spent on ad design and manual prospecting influences purchasing decisions or solution-seeking behavior."
+        }
+      },
+      "dataQuality": {
+        "pain": {
+          "painId": "pain_3_1",
+          "canonical": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "originalStatement": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "normalizedStatement": "difficulty managing data quality and connecting scattered insights to real buying signals",
+          "classification": "CORE_PURCHASE",
+          "rank": 6,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing and Sales Professionals Focused on Data Quality and Targeting"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The challenge of managing data quality is a critical problem that directly affects the audience's decision-making and effectiveness. | The product’s capability to unify fragmented data addresses the root cause of poor data quality management and insight connection, enabling strategic improvements though not operational execution.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables upstream strategic decisions that improve data quality management and insight connection, even though it does not directly clean data or identify buying signals.",
+          "boundary": "The product does NOT directly perform data cleaning, quality control, or real-time buying signal detection.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_3_1",
+          "marketProblemMeaning": "Challenges in managing data quality and connecting insights to buying signals.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that demonstrates this problem influences decision-making or prioritization in purchasing behavior.",
+          "classification": "SUPPORTING",
+          "reason": "The issue of data quality and insight connection is relevant but lacks evidence of centrality in driving purchase decisions."
+        },
+        "verdict": {
+          "painId": "pain_3_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "The proposed class of SUPPORTING lacks evidence that shows this problem influences decision-making or prioritization in purchasing behavior.",
+          "repairDirective": "Include evidence that connects the challenges in managing data quality and connecting insights to actual decision-making or purchasing behavior."
+        }
+      }
+    },
+    {
+      "runId": 4,
+      "manual": {
+        "pain": {
+          "painId": "pain_2_1",
+          "canonical": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "originalStatement": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "normalizedStatement": "spending excessive time on ad design and manual prospecting that do not convert well",
+          "classification": "CORE_PURCHASE",
+          "rank": 4,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing Managers and Leads Seeking Efficiency and Automation"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The need to improve efficiency in ad design and prospecting is a fundamental problem that the audience actively seeks to solve. | Unified marketing intelligence enables strategic decisions to automate repetitive marketing tasks, indirectly addressing inefficiency.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables marketing managers to identify and prioritize automation opportunities, indirectly reducing time spent on manual ad design and prospecting.",
+          "boundary": "The product does NOT directly perform ad creation, manual prospecting, or task automation workflows.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_2_1",
+          "marketProblemMeaning": "Excessive time spent on ad design and manual prospecting that do not yield conversions.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that indicates this problem drives decision-making or solution-seeking behavior.",
+          "classification": "SUPPORTING",
+          "reason": "While the problem of inefficiency in ad design and prospecting is valid, it does not establish a centrality that influences purchasing decisions."
+        },
+        "verdict": {
+          "painId": "pain_2_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "The proposed class of SUPPORTING is not supported by evidence that indicates this problem drives decision-making or solution-seeking behavior.",
+          "repairDirective": "Provide evidence that demonstrates how excessive time spent on ad design and manual prospecting influences purchasing decisions or solution-seeking behavior."
+        }
+      },
+      "dataQuality": {
+        "pain": {
+          "painId": "pain_3_1",
+          "canonical": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "originalStatement": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "normalizedStatement": "difficulty managing data quality and connecting scattered insights to real buying signals",
+          "classification": "CORE_PURCHASE",
+          "rank": 6,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing and Sales Professionals Focused on Data Quality and Targeting"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The challenge of managing data quality is a critical problem that directly affects the audience's decision-making and effectiveness. | The product’s capability to unify fragmented data addresses the root cause of poor data quality management and insight connection, enabling strategic improvements though not operational execution.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables upstream strategic decisions that improve data quality management and insight connection, even though it does not directly clean data or identify buying signals.",
+          "boundary": "The product does NOT directly perform data cleaning, quality control, or real-time buying signal detection.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_3_1",
+          "marketProblemMeaning": "Challenges in managing data quality and connecting insights to buying signals.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that demonstrates this problem is central to decision-making or drives solution-seeking behavior.",
+          "classification": "SUPPORTING",
+          "reason": "The issue of data quality and insight connection is significant but lacks evidence of centrality in influencing purchasing behavior."
+        },
+        "verdict": {
+          "painId": "pain_3_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "The proposed class of SUPPORTING lacks evidence that shows this problem is central to decision-making or drives solution-seeking behavior.",
+          "repairDirective": "Include evidence that illustrates how difficulties in managing data quality and connecting insights to buying signals impact purchasing decisions or solution-seeking behavior."
+        }
+      }
+    },
+    {
+      "runId": 5,
+      "manual": {
+        "pain": {
+          "painId": "pain_2_1",
+          "canonical": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "originalStatement": "Spending excessive time on ad design and manual prospecting that do not convert well.",
+          "normalizedStatement": "spending excessive time on ad design and manual prospecting that do not convert well",
+          "classification": "CORE_PURCHASE",
+          "rank": 4,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing Managers and Leads Seeking Efficiency and Automation"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The need to improve efficiency in ad design and prospecting is a fundamental problem that the audience actively seeks to solve. | Unified marketing intelligence enables strategic decisions to automate repetitive marketing tasks, indirectly addressing inefficiency.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables marketing managers to identify and prioritize automation opportunities, indirectly reducing time spent on manual ad design and prospecting.",
+          "boundary": "The product does NOT directly perform ad creation, manual prospecting, or task automation workflows.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_2_1",
+          "marketProblemMeaning": "Excessive time spent on ad design and manual prospecting that do not yield conversions.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that indicates this problem drives solution-seeking or decision behavior among the audience.",
+          "classification": "SUPPORTING",
+          "reason": "While the problem of inefficiency in ad design and prospecting is valid, it does not establish centrality as a decision-driving factor without supporting evidence."
+        },
+        "verdict": {
+          "painId": "pain_2_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "There is no evidence provided that indicates this problem drives solution-seeking or decision behavior among the audience.",
+          "repairDirective": "Evaluate the evidence to establish how this problem materially drives solution-seeking or decision behavior."
+        }
+      },
+      "dataQuality": {
+        "pain": {
+          "painId": "pain_3_1",
+          "canonical": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "originalStatement": "Difficulty managing data quality and connecting scattered insights to real buying signals.",
+          "normalizedStatement": "difficulty managing data quality and connecting scattered insights to real buying signals",
+          "classification": "CORE_PURCHASE",
+          "rank": 6,
+          "productFit": "ELIGIBLE",
+          "eligible": true,
+          "allowedUses": [
+            "positioning",
+            "differentiation",
+            "mechanism",
+            "offer_core",
+            "awareness",
+            "funnel",
+            "persuasion",
+            "channel"
+          ],
+          "prohibitedUses": [
+            "offer_objection",
+            "retention"
+          ],
+          "evidenceUids": [],
+          "sourceSignalIds": [],
+          "sourceTypes": [],
+          "evidenceStrength": 0,
+          "rootCauseIds": [],
+          "segmentIds": [
+            "Marketing and Sales Professionals Focused on Data Quality and Targeting"
+          ],
+          "classifierVersion": "llm_v2+semantic_judge_v1",
+          "classificationReason": "The challenge of managing data quality is a critical problem that directly affects the audience's decision-making and effectiveness. | The product’s capability to unify fragmented data addresses the root cause of poor data quality management and insight connection, enabling strategic improvements though not operational execution.",
+          "lineage": {
+            "accountId": "a2d87878-a1e9-41ea-a8a5-90beff569673",
+            "audienceSnapshotId": "2b0f2035-5edd-4849-8281-52bad7c94cb4"
+          },
+          "fitType": "STRATEGIC_FIT",
+          "strategicBridge": "By consolidating fragmented data into a unified marketing strategy, the product enables upstream strategic decisions that improve data quality management and insight connection, even though it does not directly clean data or identify buying signals.",
+          "boundary": "The product does NOT directly perform data cleaning, quality control, or real-time buying signal detection.",
+          "productTruthFactIds": [
+            "fact_1"
+          ]
+        },
+        "proposal": {
+          "painId": "pain_3_1",
+          "marketProblemMeaning": "Challenges in managing data quality and integrating insights with buying signals.",
+          "marketFunction": "PROBLEM_TO_SOLVE",
+          "problemEvidenceUids": [],
+          "centralityStatus": "NOT_ESTABLISHED",
+          "centralityEvidenceUids": [],
+          "centralityReason": "There is no evidence provided that indicates this problem drives solution-seeking or decision behavior among the audience.",
+          "classification": "SUPPORTING",
+          "reason": "The issue of data quality and insight integration is significant but lacks evidence to prove it is a central problem driving purchase decisions."
+        },
+        "verdict": {
+          "painId": "pain_3_1",
+          "valid": false,
+          "rejectionCode": "CORE_CENTRALITY_NOT_ESTABLISHED",
+          "critique": "There is no evidence provided that indicates this problem drives solution-seeking or decision behavior among the audience.",
+          "repairDirective": "Evaluate the evidence to establish how this problem materially drives solution-seeking or decision behavior."
+        }
+      }
+    }
+  ],
+  "evidenceContext": []
+}

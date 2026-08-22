@@ -56,9 +56,7 @@ describe("Target Coverage Authority and Semantic Matching", () => {
         roleName: "Enterprise Marketing VP",
         description: "Enterprise decision maker purchasing marketing automation solutions",
         buyerType: "ECONOMIC_BUYER",
-        sourceField: "productDna.targetDecisionMaker",
-        rawSourceText: "Enterprise Marketing VP with budget authority"
-      }
+        sourceLineages: [{ sourceField: "productDna.targetDecisionMaker", rawSourceText: "Enterprise Marketing VP with budget authority" }]}
     ];
 
     const consumerComplaintSegments: AudienceSegment[] = [
@@ -95,8 +93,8 @@ describe("Target Coverage Authority and Semantic Matching", () => {
               matches: [{
                 targetId: "target_1",
                 roleName: "Enterprise Marketing VP",
-                matchType: "BUYER_USER_MISMATCH",
-                isCovered: false,
+                matchType: "NOT_COVERED",
+                coverageDecision: "NOT_COVERED",
                 matchedSegmentNames: ["Users frustrated by billing and cancellation"],
                 matchedRoles: ["END_CONSUMER"],
                 reasoning: "Audience evidence only represents end-user billing complaints, not Enterprise Marketing VPs."
@@ -120,8 +118,8 @@ describe("Target Coverage Authority and Semantic Matching", () => {
     const matchResult = await matchAudienceToTargetsWithJudge(targetRoles, consumerComplaintSegments);
     expect(matchResult.valid).toBe(true);
     expect(matchResult.matches.length).toBe(1);
-    expect(matchResult.matches[0].isCovered).toBe(false);
-    expect(matchResult.matches[0].matchType).toBe("BUYER_USER_MISMATCH");
+    expect(matchResult.matches[0].coverageDecision === "COVERED").toBe(false);
+    expect(matchResult.matches[0].coverageDecision).toBe("NOT_COVERED");
   });
 
   it("Case C1: Marketing Manager target + Generic Practitioner evidence only returns NOT COVERED (BROADER_THAN_TARGET)", async () => {
@@ -131,9 +129,7 @@ describe("Target Coverage Authority and Semantic Matching", () => {
         roleName: "B2B Marketing Director",
         description: "B2B Marketing Director overseeing multi-channel ad spend and team KPIs",
         buyerType: "ECONOMIC_BUYER",
-        sourceField: "campaign.targetAudience",
-        rawSourceText: "B2B Marketing Directors managing growth teams"
-      }
+        sourceLineages: [{ sourceField: "campaign.targetAudience", rawSourceText: "B2B Marketing Directors managing growth teams" }]}
     ];
 
     const genericPractitionerSegments: AudienceSegment[] = [
@@ -170,8 +166,8 @@ describe("Target Coverage Authority and Semantic Matching", () => {
               matches: [{
                 targetId: "target_1",
                 roleName: "B2B Marketing Director",
-                matchType: "BROADER_THAN_TARGET",
-                isCovered: false,
+                matchType: "NOT_COVERED",
+                coverageDecision: "NOT_COVERED",
                 matchedSegmentNames: ["Content Creators and Solo Operators"],
                 matchedRoles: ["PRACTITIONER"],
                 reasoning: "The evidence describes individual solo video creators, which is broader/different than B2B Marketing Directors."
@@ -194,8 +190,8 @@ describe("Target Coverage Authority and Semantic Matching", () => {
     const matchResult = await matchAudienceToTargetsWithJudge(targetRoles, genericPractitionerSegments);
     expect(matchResult.valid).toBe(true);
     expect(matchResult.matches.length).toBe(1);
-    expect(matchResult.matches[0].isCovered).toBe(false);
-    expect(matchResult.matches[0].matchType).toBe("BROADER_THAN_TARGET");
+    expect(matchResult.matches[0].coverageDecision === "COVERED").toBe(false);
+    expect(matchResult.matches[0].coverageDecision).toBe("NOT_COVERED");
   });
 
   it("Case C2: Marketing Manager target + Audience evidence clearly establishing marketing-management function returns VALID_SEMANTIC_MATCH (FULL)", async () => {
@@ -205,9 +201,7 @@ describe("Target Coverage Authority and Semantic Matching", () => {
         roleName: "Marketing Team Lead",
         description: "Marketing team leads and operators seeking automation for campaign workflows and prospecting",
         buyerType: "PRACTITIONER",
-        sourceField: "campaign.targetAudience",
-        rawSourceText: "Marketing team leads and operators"
-      }
+        sourceLineages: [{ sourceField: "campaign.targetAudience", rawSourceText: "Marketing team leads and operators" }]}
     ];
 
     const matchedMarketingSegments: AudienceSegment[] = [
@@ -244,8 +238,8 @@ describe("Target Coverage Authority and Semantic Matching", () => {
               matches: [{
                 targetId: "target_1",
                 roleName: "Marketing Team Lead",
-                matchType: "VALID_SEMANTIC_MATCH",
-                isCovered: true,
+                matchType: "COVERED",
+                coverageDecision: "COVERED",
                 matchedSegmentNames: ["Marketing and sales practitioners seeking automation to reduce manual workload"],
                 matchedRoles: ["PRACTITIONER"],
                 reasoning: "The evidence directly establishes marketing operators and team leads managing ad creation and prospecting."
@@ -268,8 +262,8 @@ describe("Target Coverage Authority and Semantic Matching", () => {
     const matchResult = await matchAudienceToTargetsWithJudge(targetRoles, matchedMarketingSegments);
     expect(matchResult.valid).toBe(true);
     expect(matchResult.matches.length).toBe(1);
-    expect(matchResult.matches[0].isCovered).toBe(true);
-    expect(matchResult.matches[0].matchType).toBe("VALID_SEMANTIC_MATCH");
+    expect(matchResult.matches[0].coverageDecision === "COVERED").toBe(true);
+    expect(matchResult.matches[0].coverageDecision).toBe("COVERED");
   });
 
   it("Case D: Target Resolver preserves lineage and allows UNKNOWN buyerType", async () => {
@@ -291,9 +285,7 @@ describe("Target Coverage Authority and Semantic Matching", () => {
                 roleName: "Real Estate Agents",
                 description: "Real estate agents looking to create social media posts",
                 buyerType: "UNKNOWN",
-                sourceField: "growthCampaigns.targetAudience",
-                rawSourceText: "real estate agents looking to create social media posts"
-              }]
+                sourceLineages: [{ sourceField: "growthCampaigns.targetAudience", rawSourceText: "real estate agents looking to create social media posts" }]}]
             })
           }
         }]
@@ -313,7 +305,7 @@ describe("Target Coverage Authority and Semantic Matching", () => {
     expect(resolution.valid).toBe(true);
     expect(resolution.targetRoles.length).toBe(1);
     expect(resolution.targetRoles[0].buyerType).toBe("UNKNOWN");
-    expect(resolution.targetRoles[0].rawSourceText).toBe("real estate agents looking to create social media posts");
+    expect(resolution.targetRoles[0].sourceLineages[0]?.rawSourceText).toBe("real estate agents looking to create social media posts");
   });
 
   it("Case E: CROSS_CAMPAIGN_AUTHORITY_MISMATCH fails closed without invoking LLMs when campaign IDs differ", async () => {

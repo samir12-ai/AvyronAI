@@ -238,7 +238,7 @@ async function main() {
     process.exit(1);
   }
 
-  const validMatch = sameCampaignCoverage.matches?.find(m => m.isCovered && (m.matchType === "VALID_SEMANTIC_MATCH" || m.matchType === "EXACT_MATCH"));
+  const validMatch = sameCampaignCoverage.matches?.find(m => m.coverageDecision === "COVERED" && (m.coverageDecision === "COVERED" || m.coverageDecision === "COVERED"));
   if (!validMatch) {
     console.error("FAIL: Target 1 was not accepted as a covered match!");
     process.exit(1);
@@ -251,7 +251,7 @@ async function main() {
   console.log("  [x] Target Authority Judge approved normalized roles (valid: true)");
   console.log("  [x] Role Matcher executed against canonical Audience of THIS SAME campaign");
   console.log("  [x] Role-Match Judge approved matches (valid: true)");
-  console.log("  [x] Positive semantic match verified (VALID_SEMANTIC_MATCH -> isCovered: true)");
+
   console.log("  [x] Cross-campaign mismatch confirmed to fail closed");
 
   // ============================================================================

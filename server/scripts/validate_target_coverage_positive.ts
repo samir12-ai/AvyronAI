@@ -119,8 +119,8 @@ async function main() {
     console.log(`  Role Name: "${t.roleName}"`);
     console.log(`  Description: "${t.description}"`);
     console.log(`  Buyer Type: ${t.buyerType}`);
-    console.log(`  Source Field: ${t.sourceField}`);
-    console.log(`  Raw Source Text: "${t.rawSourceText}"`);
+    console.log(`  Source Field: ${t.sourceLineages[0]?.sourceField}`);
+    console.log(`  Raw Source Text: "${t.sourceLineages[0]?.rawSourceText}"`);
   });
 
   // ============================================================================
@@ -138,11 +138,11 @@ async function main() {
   console.log(`Semantic Matches:`);
   positiveMatchResult.matches.forEach(m => {
     console.log(`\n  Target: "${m.roleName}" (ID: ${m.targetId})`);
-    console.log(`  Match Type: ${m.matchType}`);
-    console.log(`  Is Covered: ${m.isCovered}`);
+    console.log(`  Match Type: ${m.coverageDecision}`);
+    console.log(`  Is Covered: ${m.coverageDecision === "COVERED"}`);
     console.log(`  Matched Segments: ${JSON.stringify(m.matchedSegmentNames)}`);
-    console.log(`  Matched Roles: ${JSON.stringify(m.matchedRoles)}`);
-    console.log(`  Reasoning: "${m.reasoning}"`);
+    console.log(`  Matched Roles: ${JSON.stringify(m.targetFunction)}`);
+    console.log(`  Reasoning: "${m.reason}"`);
   });
 
   // ============================================================================
@@ -155,16 +155,14 @@ async function main() {
       roleName: "E-commerce and creator marketers",
       description: "Marketers and creators who manage ad designs and seek AI workflow automation",
       buyerType: "PRACTITIONER",
-      sourceField: "businessDataLayer.targetAudienceSegment",
-      rawSourceText: "E-commerce and creator marketers seeking AI tools to automate ad design and scheduling"
-    }
+      sourceLineages: [{ sourceField: "businessDataLayer.targetAudienceSegment", rawSourceText: "E-commerce and creator marketers seeking AI tools to automate ad design and scheduling" }]}
   ];
 
   const fullMatchResult = await matchAudienceToTargetsWithJudge(singleMatchingTarget, canonicalSegments);
   console.log(`Single Target Match Valid: ${fullMatchResult.valid}`);
-  console.log(`Single Target Match Type: ${fullMatchResult.matches[0]?.matchType}`);
-  console.log(`Single Target Is Covered: ${fullMatchResult.matches[0]?.isCovered}`);
-  const isFull = fullMatchResult.matches.every(m => m.isCovered);
+  console.log(`Single Target Match Type: ${fullMatchResult.matches[0]?.coverageDecision}`);
+  console.log(`Single Target Is Covered: ${fullMatchResult.matches[0]?.coverageDecision === "COVERED"}`);
+  const isFull = fullMatchResult.matches.every(m => m.coverageDecision === "COVERED");
   console.log(`Final Coverage Status for Single Target: ${isFull ? "FULL" : "GAP"}`);
 
   // ============================================================================
@@ -177,9 +175,7 @@ async function main() {
       roleName: "Chief Financial Officer / Procurement Director",
       description: "Executive with direct purchasing authority signing enterprise vendor contracts",
       buyerType: "ECONOMIC_BUYER",
-      sourceField: "productDna.targetDecisionMaker",
-      rawSourceText: "Chief Financial Officer / Procurement Director"
-    }
+      sourceLineages: [{ sourceField: "productDna.targetDecisionMaker", rawSourceText: "Chief Financial Officer / Procurement Director" }]}
   ];
 
   const consumerSegmentsOnly: AudienceSegment[] = canonicalSegments.filter(s => s.role === "END_CONSUMER");
@@ -188,7 +184,7 @@ async function main() {
   const buyerUserMatchResult = await matchAudienceToTargetsWithJudge(buyerTarget, consumerSegmentsOnly);
   console.log(`Buyer/User Match Valid: ${buyerUserMatchResult.valid}`);
   console.log(`Match Output:`, buyerUserMatchResult.matches[0]);
-  console.log(`Buyer/User Collapsed?: ${buyerUserMatchResult.matches[0]?.isCovered ? "YES (DEFECT)" : "NO (CORRECT)"}`);
+  console.log(`Buyer/User Collapsed?: ${buyerUserMatchResult.matches[0]?.coverageDecision === "COVERED" ? "YES (DEFECT)" : "NO (CORRECT)"}`);
 
   // ============================================================================
   // SECTION 15: NEGATIVE BROADER-ROLE SCENARIO (CONTROLLED LIVE PROOF)
@@ -200,9 +196,7 @@ async function main() {
       roleName: "Global VP of Enterprise Brand Strategy",
       description: "Senior executive directing global brand positioning across Fortune 500 companies",
       buyerType: "ECONOMIC_BUYER",
-      sourceField: "productDna.targetDecisionMaker",
-      rawSourceText: "Global VP of Enterprise Brand Strategy"
-    }
+      sourceLineages: [{ sourceField: "productDna.targetDecisionMaker", rawSourceText: "Global VP of Enterprise Brand Strategy" }]}
   ];
 
   const practitionerSegmentsOnly: AudienceSegment[] = canonicalSegments.filter(s => s.role === "PRACTITIONER");
@@ -211,7 +205,7 @@ async function main() {
   const broaderMatchResult = await matchAudienceToTargetsWithJudge(narrowExecutiveTarget, practitionerSegmentsOnly);
   console.log(`Broader Role Match Valid: ${broaderMatchResult.valid}`);
   console.log(`Match Output:`, broaderMatchResult.matches[0]);
-  console.log(`Unwarranted Broadening Allowed?: ${broaderMatchResult.matches[0]?.isCovered ? "YES (DEFECT)" : "NO (CORRECT)"}`);
+  console.log(`Unwarranted Broadening Allowed?: ${broaderMatchResult.matches[0]?.coverageDecision === "COVERED" ? "YES (DEFECT)" : "NO (CORRECT)"}`);
 
   // ============================================================================
   // SECTION 16: MISSING-AUTHORITY REGRESSION TEST ON REAL MARKETMIND

@@ -1,10 +1,12 @@
+import { randomUUID } from 'crypto';
 import crypto from "crypto";
 
 export type AudiencePainClass =
   | "CORE_PURCHASE"
   | "OBJECTION"
   | "POST_PURCHASE_FRICTION"
-  | "SUPPORTING";
+  | "SUPPORTING"
+  | "UNKNOWN";
 
 export type PainUse =
   | "positioning"
@@ -40,21 +42,50 @@ export interface AuthoritativeAudiencePain {
   boundary?: string;
   /** Exact Product Truth fact IDs cited to justify fit */
   productTruthFactIds?: string[];
+  /** Structural ID for the Product Fit decision */
+  productFitAuthorityId?: string;
   /** Whether the associated role is covered by Target Authority */
   targetCovered?: boolean;
+  /** Target coverage semantic decision */
+  coverageDecision?: "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED";
+  /** Structural ID for the Target Coverage decision */
+  targetCoverageAuthorityId?: string;
   eligible: boolean;
   allowedUses: PainUse[];
   prohibitedUses: PainUse[];
   evidenceUids: string[];
   sourceSignalIds: string[];
+  /** Structural ID for the final CORE Strategic Priority decision */
+  coreDecisionId?: string;
+  strategicPainDecisionAuthorityId?: string;
+  targetAssessmentAuthorityId?: string;
+  productAssessmentAuthorityId?: string;
+  targetUnderstandingAuthorityId?: string;
+  businessUnderstandingAuthorityId?: string;
+  campaignOfferingId?: string;
+  segmentId?: string;
   /** Source channel/type labels carried from the Audience signal (e.g. review, comment). */
   sourceTypes: string[];
-  /** 0..1 deterministic evidence-volume score. Records support; never gates eligibility by itself. */
-  evidenceStrength: number;
+  /** DEPRECATED: Non-authoritative backward compatibility field. Never used for semantic gating. */
+  evidenceStrength?: number;
+  /** Factual count of total citations across evidence UIDs and source signals */
+  citationCount?: number;
+  /** Factual count of unique evidence UIDs */
+  uniqueEvidenceCount?: number;
+  /** Factual count of unique source types/channels */
+  uniqueSourceCount?: number;
+  /** Factual count of unique competitors or source entities */
+  uniqueCompetitorCount?: number;
+  /** Factual occurrence count */
+  occurrenceCount?: number;
+  /** Grounded evidence quotes / summaries if available */
+  evidenceSummaries?: string[];
   /** AEL root-cause identifiers behind this pain, where the Audience engine supplied them. */
   rootCauseIds: string[];
   /** Dynamic target audience segments associated with this pain. */
   segmentIds: string[];
+  /** Segment name if available */
+  segmentName?: string;
   /** Strategic role designation (e.g. CORE_BUYER, CORE_USER, OBJECTION) */
   strategicRole?: string;
   /** Which classifier produced `classification` (deterministic_v1 | llm_v1+judge_v1). */
@@ -95,6 +126,7 @@ const USES_BY_CLASS: Record<AudiencePainClass, PainUse[]> = {
   OBJECTION: ["offer_objection", "awareness", "funnel", "persuasion"],
   POST_PURCHASE_FRICTION: ["retention"],
   SUPPORTING: ["awareness", "funnel", "persuasion", "channel"],
+  UNKNOWN: [],
 };
 
 export function allowedUsesForClass(classification: AudiencePainClass): PainUse[] {
@@ -111,7 +143,7 @@ export function prohibitedUsesForClass(classification: AudiencePainClass): PainU
 function painText(pain: any): string {
   return typeof pain === "string"
     ? pain
-    : String(pain?.canonical ?? pain?.pain ?? pain?.text ?? pain?.label ?? pain?.name ?? "").trim();
+    : String(pain?.canonical ?? pain?.claim ?? pain?.pain ?? pain?.text ?? pain?.label ?? pain?.name ?? "").trim();
 }
 
 function normalizeStatement(text: string): string {
@@ -123,24 +155,11 @@ function stableId(snapshotId: string, text: string): string {
   return `pain_${crypto.createHash("sha256").update(`${snapshotId}:${normalized}`).digest("hex").slice(0, 16)}`;
 }
 
-/** Evidence-only semantic classifier with an auditable reason. It only
- * classifies the supplied Audience wording; it never creates or combines
- * pain statements. */
 export function classifyAudiencePainDetailed(text: string): { classification: AudiencePainClass; reason: string } {
-  const value = text.toLowerCase();
-  const postPurchase = value.match(/\b(refund|refunds|return|returns|cancel|cancels|canceled|cancelled|canceling|cancelling|cancellation|cancellations|churn|onboard|onboarding|support|access|delivery|shipping|bug|bugs|billing|unauthorized)\b/);
-  if (postPurchase) {
-    return { classification: "POST_PURCHASE_FRICTION", reason: `post-purchase keyword "${postPurchase[0]}" in supplied wording` };
-  }
-  const objection = value.match(/\b(price|pricing|cost|afford|risk|trust|proof|skeptic|objection|time|complex)\b/);
-  if (objection) {
-    return { classification: "OBJECTION", reason: `pre-purchase objection keyword "${objection[0]}" in supplied wording` };
-  }
-  const core = value.match(/\b(cannot|can't|struggle|lack|need|want|slow|inefficient|inconsistent|poor|problem)\b/);
-  if (core) {
-    return { classification: "CORE_PURCHASE", reason: `unmet-outcome keyword "${core[0]}" in supplied wording` };
-  }
-  return { classification: "SUPPORTING", reason: "no purchase/objection/post-purchase markers in supplied wording" };
+  // Deterministic keyword hijacking has been removed.
+  // The LLM + Semantic Judge are the sole authority on semantic function.
+  // We return UNKNOWN. If the LLM fails to classify, the pain remains UNKNOWN.
+  return { classification: "UNKNOWN", reason: "no deterministic rules allowed; requires llm authority" };
 }
 
 export function classifyAudiencePain(text: string): AudiencePainClass {
@@ -153,6 +172,52 @@ function values(value: any): string[] {
     if (typeof item === "string") return item;
     return item?.uid ?? item?.evidenceUid ?? item?.id ?? item?.signalId ?? item?.rootCauseId ?? "";
   }).filter((item): item is string => typeof item === "string" && item.length > 0);
+}
+
+/**
+ * Extract canonical Judge-approved pain claims directly from audienceSegments.
+ * Preserves claimId, canonical text, evidenceIds, segment context, and role.
+ * Does NOT perform fuzzy text matching or merge with legacy painMap.
+ */
+export function extractCanonicalSegmentPains(segments: any[]): any[] {
+  if (!Array.isArray(segments) || segments.length === 0) return [];
+  const extracted: any[] = [];
+  segments.forEach((seg: any, sIdx: number) => {
+    const segName = seg.name ? String(seg.name).trim() : `Segment ${sIdx + 1}`;
+    const cleanSegName = segName.toLowerCase();
+    const segId = seg.id || `seg_${crypto.createHash("sha256").update(cleanSegName).digest("hex").slice(0, 16)}`;
+    const role = seg.role || seg.roleClaim?.value || seg.demographics?.role || "PRACTITIONER";
+    const roleClaimId = seg.roleClaim?.claimId || seg.roleClaimId;
+    const segmentDefinition = typeof seg.segmentDefinition === "object" ? seg.segmentDefinition?.claim : seg.segmentDefinition;
+    const segmentDefClaimId = typeof seg.segmentDefinition === "object" ? seg.segmentDefinition?.claimId : undefined;
+
+    const pains = Array.isArray(seg.pains) ? seg.pains : [];
+    pains.forEach((p: any, pIdx: number) => {
+      const claimText = typeof p === "string" ? p : (p.description || p.claim || p.text || p.canonical || p.pain || "");
+      if (!claimText || String(claimText).trim().length === 0) return;
+      const cleanClaim = String(claimText).trim();
+      const claimId = typeof p === "object" ? (p.claimId || p.painId || p.id) : undefined;
+      const evidenceIds = typeof p === "object" ? (p.evidenceIds || p.evidenceUids || p.evidence || []) : [];
+      
+      extracted.push({
+        painId: claimId || `pain_${sIdx + 1}_${pIdx + 1}`,
+        claimId,
+        canonical: cleanClaim,
+        originalStatement: cleanClaim,
+        role,
+        strategicRole: role,
+        roleClaimId,
+        segmentId: segId,
+        segmentName: segName,
+        segmentIds: [segId],
+        segmentDefinition,
+        segmentDefClaimId,
+        evidenceUids: Array.isArray(evidenceIds) ? evidenceIds : [evidenceIds],
+        evidenceIds: Array.isArray(evidenceIds) ? evidenceIds : [evidenceIds],
+      });
+    });
+  });
+  return extracted;
 }
 
 export function buildAudiencePainRegistry(
@@ -190,7 +255,7 @@ export function buildAudiencePainRegistry(
     const classifierVersion = typeof raw?.classifierVersion === "string" && raw.classifierVersion.length > 0
       ? raw.classifierVersion
       : DETERMINISTIC_CLASSIFIER_VERSION;
-    const evidenceUids = values(raw?.evidenceUids ?? raw?.evidence ?? raw?.groundingRefs);
+    const evidenceUids = values(raw?.evidenceUids ?? raw?.evidenceIds ?? raw?.evidence ?? raw?.groundingRefs);
     const sourceSignalIds = values(raw?.sourceSignalIds ?? raw?.signalIds ?? raw?.sourceSignals ?? raw?.parentSignalId);
     const sourceTypes = values(raw?.sourceTypes ?? raw?.sourceType);
     const rootCauseIds = values(raw?.rootCauseIds ?? raw?.rootCauses ?? raw?.deepCauseIds);
@@ -225,14 +290,32 @@ export function buildAudiencePainRegistry(
       });
     }
     if (segmentIds.length === 0) {
-      if (Array.isArray(segments) && segments.length > 0) {
+      if (Array.isArray(segments)) {
         segmentIds.push("UNMATCHED");
       }
     }
-    const strategicRole = typeof raw?.strategicRole === "string" ? raw.strategicRole : undefined;
+    const strategicRole = typeof raw?.strategicRole === "string"
+      ? raw.strategicRole
+      : typeof raw?.role === "string"
+        ? raw.role
+        : undefined;
+    
+    // Factual counts derived directly from structural evidence identity
+    const uniqueEvidenceUids = Array.from(new Set(evidenceUids));
+    const uniqueSourceSignals = Array.from(new Set(sourceSignalIds));
+    const uniqueSourceTypes = Array.from(new Set(sourceTypes || []));
+    const citationCount = uniqueEvidenceUids.length + uniqueSourceSignals.length;
+    const uniqueEvidenceCount = uniqueEvidenceUids.length;
+    const uniqueSourceCount = uniqueSourceTypes.length;
+    const uniqueCompetitorCount = Number.isFinite(raw?.uniqueCompetitorCount) ? raw.uniqueCompetitorCount : undefined;
+    const occurrenceCount = Number.isFinite(raw?.occurrenceCount)
+      ? raw.occurrenceCount
+      : Math.max(1, citationCount);
+
+    // DEPRECATED backward-compatibility field: preserved only if explicit, never fabricated as 1.0 or / 4
     const evidenceStrength = Number.isFinite(raw?.evidenceStrength)
       ? Math.max(0, Math.min(1, raw.evidenceStrength))
-      : Math.min(1, (evidenceUids.length + sourceSignalIds.length) / 4);
+      : undefined;
 
     const allowedUses = Array.isArray(raw?.allowedUses)
       ? raw.allowedUses.filter((use: unknown): use is PainUse => typeof use === "string" && (USES_BY_CLASS[classification] as string[]).includes(use))
@@ -240,10 +323,10 @@ export function buildAudiencePainRegistry(
 
     const makeRecordForSegment = (targetSegmentId: string | null, suffixId?: string) => {
       const segList = targetSegmentId ? [targetSegmentId] : segmentIds;
-      let defaultFit: "ELIGIBLE" | "INELIGIBLE" | "UNKNOWN" = "ELIGIBLE";
-      if (segList.includes("UNMATCHED")) {
-        defaultFit = "UNKNOWN";
-      }
+      const defaultFit: "ELIGIBLE" | "INELIGIBLE" | "UNKNOWN" = 
+        raw?.productFit === "ELIGIBLE" || raw?.productFit === "INELIGIBLE"
+          ? raw.productFit
+          : "UNKNOWN";
 
       const productFit = raw?.productFit === "INELIGIBLE" || raw?.productFit === "UNKNOWN"
         ? raw.productFit
@@ -252,8 +335,8 @@ export function buildAudiencePainRegistry(
             : (raw?.productFit === "ELIGIBLE" ? "ELIGIBLE" : defaultFit));
 
       const pid = suffixId 
-        ? `${typeof raw?.painId === "string" ? raw.painId : stableId(lineage.audienceSnapshotId, canonical)}_${suffixId}`
-        : (typeof raw?.painId === "string" ? raw.painId : stableId(lineage.audienceSnapshotId, canonical));
+        ? `${typeof raw?.painId === "string" ? raw.painId : (typeof raw?.claimId === "string" ? raw.claimId : stableId(lineage.audienceSnapshotId, canonical))}_${suffixId}`
+        : (typeof raw?.painId === "string" ? raw.painId : (typeof raw?.claimId === "string" ? raw.claimId : stableId(lineage.audienceSnapshotId, canonical)));
 
       return {
         painId: pid,
@@ -265,15 +348,29 @@ export function buildAudiencePainRegistry(
         classification,
         rank: Number.isFinite(raw?.rank) ? raw.rank : index + 1,
         productFit,
+        fitType: raw?.fitType || (productFit === "ELIGIBLE" ? "DIRECT_FIT" : (productFit === "INELIGIBLE" ? "NOT_FIT" : "UNKNOWN")),
+        targetCovered: typeof raw?.targetCovered === "boolean" ? raw.targetCovered : false,
+        targetCoverageAuthorityId: raw?.targetCoverageAuthorityId,
+        productFitAuthorityId: raw?.productFitAuthorityId,
+        coreDecisionId: raw?.coreDecisionId,
+        strategicBridge: raw?.strategicBridge,
+        boundary: raw?.boundary,
+        productTruthFactIds: raw?.productTruthFactIds,
         eligible: raw?.eligible === false ? false : productFit === "ELIGIBLE" && canonical.length > 0,
         allowedUses,
         prohibitedUses: (Object.keys(USES_BY_CLASS) as AudiencePainClass[])
           .flatMap((kind) => USES_BY_CLASS[kind])
           .filter((use, position, all) => all.indexOf(use) === position && !allowedUses.includes(use)),
-        evidenceUids,
-        sourceSignalIds,
+        evidenceUids: uniqueEvidenceUids,
+        sourceSignalIds: uniqueSourceSignals,
         sourceTypes,
         evidenceStrength,
+        citationCount,
+        uniqueEvidenceCount,
+        uniqueSourceCount,
+        uniqueCompetitorCount,
+        occurrenceCount,
+        evidenceSummaries: Array.isArray(raw?.evidenceSummaries) ? raw.evidenceSummaries : undefined,
         rootCauseIds,
         segmentIds: segList,
         strategicRole,
@@ -295,8 +392,8 @@ export function buildAudiencePainRegistry(
 }
 
 export function selectPainForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain {
-  const registry = pains as AuthoritativeAudiencePain[];
-  const pain = registry.find((pain) => pain.eligible && pain.allowedUses.includes(use));
+  const registry = (pains || []) as AuthoritativeAudiencePain[];
+  const pain = registry.find((pain) => Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use) && pain.classification !== "UNKNOWN" && (pain.classification as any) !== "EXCLUDE");
   if (!pain) {
     throw new Error(`NO_ELIGIBLE_PAIN: No authoritative pain found for use '${use}'`);
   }
@@ -304,8 +401,8 @@ export function selectPainForUse(pains: any[], use: PainUse): AuthoritativeAudie
 }
 
 export function selectPainsForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain[] {
-  const registry = pains as AuthoritativeAudiencePain[];
-  return registry.filter((pain) => pain?.eligible && Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use));
+  const registry = (pains || []) as AuthoritativeAudiencePain[];
+  return registry.filter((pain) => Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use) && pain.classification !== "UNKNOWN" && (pain.classification as any) !== "EXCLUDE");
 }
 
 /**
@@ -404,7 +501,9 @@ export function validateAudiencePainRegistry(
     if (pain?.lineage?.accountId !== expected.accountId || pain?.lineage?.audienceSnapshotId !== expected.audienceSnapshotId) {
       issues.push(`PAIN_LINEAGE_MISMATCH:${pain?.painId ?? "unknown"}`);
     }
-    if (!Array.isArray(pain?.allowedUses) || pain.allowedUses.length === 0) issues.push(`PAIN_ALLOWED_USES_MISSING:${pain.painId}`);
+    if (pain?.eligible && (!Array.isArray(pain?.allowedUses) || pain.allowedUses.length === 0)) {
+      issues.push(`PAIN_ALLOWED_USES_MISSING:${pain.painId}`);
+    }
     if (pain?.classification === "POST_PURCHASE_FRICTION" && pain.allowedUses.includes("offer_core")) {
       issues.push(`POST_PURCHASE_CORE_FORBIDDEN:${pain.painId}`);
     }
@@ -495,32 +594,69 @@ export function attachTargetCoverageToPainRegistry(
   targetCoverage: {
     status: "FULL" | "PARTIAL" | "GAP" | "NOT_EVALUATED";
     matches?: Array<{
-      isCovered: boolean;
+      coverageDecision?: "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED";
+      isCovered?: boolean;
       matchedSegmentNames?: string[];
     }>;
   },
   audienceSegments?: Array<{ name: string; id?: string }>
 ): AuthoritativeAudiencePain[] {
-  if (targetCoverage.status === "GAP" || targetCoverage.status === "NOT_EVALUATED") {
+  if (targetCoverage.status === "GAP") {
     return registry.map((p) => ({ ...p, targetCovered: false }));
   }
+  if (targetCoverage.status === "NOT_EVALUATED") {
+    return registry.map((p) => ({ ...p, targetCovered: undefined }));
+  }
 
-  const coveredSegmentNames = new Set(
-    (targetCoverage.matches || [])
-      .filter((m) => m.isCovered)
-      .flatMap((m) => m.matchedSegmentNames || [])
-  );
+  const coverageMap = new Map<string, {cov: boolean | undefined, dec: "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED"}>();
+  (targetCoverage.matches || []).forEach(m => {
+    const isCov = m.coverageDecision === 'COVERED' ? true : m.coverageDecision === 'RELATED_BUT_UNPROVEN' ? undefined : m.isCovered === true ? true : false;
+    const dec = m.coverageDecision || (m.isCovered ? "COVERED" : "NOT_COVERED");
+    (m.matchedSegmentNames || []).forEach(n => {
+       const key = String(n).trim().toLowerCase();
+       const existing = coverageMap.get(key);
+       if (isCov === true) coverageMap.set(key, {cov: true, dec});
+       else if (isCov === undefined && (!existing || existing.cov !== true)) coverageMap.set(key, {cov: undefined, dec});
+       else if (isCov === false && !existing) coverageMap.set(key, {cov: false, dec});
+    });
+  });
+
+  const segmentIdToName = new Map<string, string>();
+  if (Array.isArray(audienceSegments)) {
+    audienceSegments.forEach((seg) => {
+      if (seg?.name) {
+        const cleanName = String(seg.name).trim();
+        const lowerName = cleanName.toLowerCase();
+        const derivedId = `seg_${crypto.createHash("sha256").update(lowerName).digest("hex").slice(0, 16)}`;
+        segmentIdToName.set(derivedId, cleanName);
+        segmentIdToName.set(lowerName, cleanName);
+        if (seg.id) {
+          segmentIdToName.set(seg.id, cleanName);
+        }
+      }
+    });
+  }
 
   return registry.map((pain) => {
-    const isCovered = pain.segmentIds.some((segId) => {
-      if (coveredSegmentNames.has(segId)) return true;
-      const seg = audienceSegments?.find((s) => s.id === segId || s.name === segId);
-      return seg ? coveredSegmentNames.has(seg.name) : false;
-    });
+    let isCovered: boolean | undefined = false;
+    let coverageDec: "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED" | undefined = undefined;
+    const segNamesToCheck = [...(pain.segmentIds || []), pain.segmentName].filter(Boolean);
+    for (const segId of segNamesToCheck) {
+      const segName = segmentIdToName.get(segId) || segmentIdToName.get(String(segId).trim().toLowerCase()) || String(segId);
+      const key = segName.trim().toLowerCase();
+      if (coverageMap.has(key)) {
+         const val = coverageMap.get(key)!;
+         if (val.cov === true) { isCovered = true; coverageDec = val.dec; break; }
+         if (val.cov === undefined) { isCovered = undefined; coverageDec = val.dec; }
+         if (val.cov === false && isCovered !== true && isCovered !== undefined) { isCovered = false; coverageDec = val.dec; }
+      }
+    }
 
     return {
       ...pain,
       targetCovered: isCovered,
+      coverageDecision: coverageDec,
+      targetCoverageAuthorityId: randomUUID(),
     };
   });
 }

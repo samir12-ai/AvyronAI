@@ -50,6 +50,13 @@
       "when": 1787035968760,
       "tag": "0006_curvy_morph",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787326802628,
+      "tag": "0007_new_business_architecture",
+      "breakpoints": true
     }
   ]
 }

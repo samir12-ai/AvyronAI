@@ -7,399 +7,52 @@ import {
   Pressable,
   ActivityIndicator,
   useColorScheme,
-  ScrollView,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import Colors from '@/constants/colors';
-import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
+import { getApiUrl, safeApiJson, authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 
-const FUNNEL_OBJECTIVES = [
-  { value: 'AWARENESS', label: 'Awareness', icon: 'eye-outline' as const },
-  { value: 'LEADS', label: 'Leads', icon: 'people-outline' as const },
-  { value: 'SALES', label: 'Sales', icon: 'cart-outline' as const },
-  { value: 'AUTHORITY', label: 'Authority', icon: 'shield-checkmark-outline' as const },
-] as const;
-
-const CONVERSION_CHANNELS = [
-  { value: 'WHATSAPP', label: 'WhatsApp', icon: 'chatbubble-outline' as const },
-  { value: 'WEBSITE', label: 'Website', icon: 'globe-outline' as const },
-  { value: 'DM', label: 'Direct Message', icon: 'mail-outline' as const },
-  { value: 'FORM', label: 'Form', icon: 'document-text-outline' as const },
-] as const;
-
-const GOAL_TIMELINES = [
-  { value: '30', label: '30 days', icon: 'timer-outline' as const },
-  { value: '60', label: '60 days', icon: 'time-outline' as const },
-  { value: '90', label: '90 days', icon: 'calendar-outline' as const },
-  { value: '180', label: '6 months', icon: 'calendar-number-outline' as const },
-] as const;
-
-interface BusinessData {
-  businessModel: 'service' | 'product' | 'mixed';
-  heroProduct: string;
-  productSpecs: string;
-  endConsumerUseCase: string;
-  replacedCompetitor: string;
-  businessLocation: string;
-  businessType: string;
-  coreOffer: string;
-  priceRange: string;
-  targetAudienceAge: string;
-  targetAudienceSegment: string;
-  monthlyBudget: string;
-  funnelObjective: string;
-  primaryConversionChannel: string;
-  productCategory: string;
-  coreProblemSolved: string;
-  uniqueMechanism: string;
-  strategicAdvantage: string;
-  targetDecisionMaker: string;
-  goalTarget: string;
-  goalTimeline: string;
-  goalDescription: string;
+export interface BusinessSetupInput {
+  websiteUrl: string;
+  campaignOfferingName: string;
+  offeringFeaturesAndNotes: string;
 }
 
-const EMPTY_DATA: BusinessData = {
-  businessModel: 'service',
-  heroProduct: '',
-  productSpecs: '',
-  endConsumerUseCase: '',
-  replacedCompetitor: '',
-  businessLocation: '',
-  businessType: '',
-  coreOffer: '',
-  priceRange: '',
-  targetAudienceAge: '',
-  targetAudienceSegment: '',
-  monthlyBudget: '',
-  funnelObjective: '',
-  primaryConversionChannel: '',
-  productCategory: '',
-  coreProblemSolved: '',
-  uniqueMechanism: '',
-  strategicAdvantage: '',
-  targetDecisionMaker: '',
-  goalTarget: '',
-  goalTimeline: '',
-  goalDescription: '',
+const EMPTY_DATA: BusinessSetupInput = {
+  websiteUrl: '',
+  campaignOfferingName: '',
+  offeringFeaturesAndNotes: '',
 };
 
-const PERF_FORMATS = [
-  { key: 'reel', label: 'Reel', icon: 'film-outline' as const },
-  { key: 'carousel', label: 'Carousel', icon: 'albums-outline' as const },
-  { key: 'story', label: 'Story', icon: 'aperture-outline' as const },
-  { key: 'post', label: 'Post', icon: 'image-outline' as const },
-] as const;
-
-interface PerfEntry {
-  avgReach: string;
-  savesRate: string;
-  avgEngagementRate: string;
-}
-
-const EMPTY_PERF: PerfEntry = { avgReach: '', savesRate: '', avgEngagementRate: '' };
-
-function ContentPerformanceSection({ campaignId, colors, isDark }: { campaignId: string; colors: any; isDark: boolean }) {
-  const [summaryByFormat, setSummaryByFormat] = useState<Record<string, any>>({});
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [editMode, setEditMode] = useState(false);
-  const [entries, setEntries] = useState<Record<string, PerfEntry>>({
-    reel: { ...EMPTY_PERF },
-    carousel: { ...EMPTY_PERF },
-    story: { ...EMPTY_PERF },
-    post: { ...EMPTY_PERF },
-  });
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState('');
-
-  const loadSummary = useCallback(async () => {
-    try {
-      const res = await authFetch(getApiUrl(`/api/performance/summary/${campaignId}`));
-      const json = await safeApiJson(res);
-      const byFmt = json.summaryByFormat ?? {};
-      setSummaryByFormat(byFmt);
-      const sorted = Object.values(byFmt)
-        .filter(Boolean)
-        .sort((a: any, b: any) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime());
-      if (sorted.length > 0 && (sorted[0] as any).lastUpdated) {
-        setLastUpdated(new Date((sorted[0] as any).lastUpdated).toLocaleDateString());
-      }
-      const prefilled: Record<string, PerfEntry> = { reel: { ...EMPTY_PERF }, carousel: { ...EMPTY_PERF }, story: { ...EMPTY_PERF }, post: { ...EMPTY_PERF } };
-      for (const [fmt, data] of Object.entries(byFmt)) {
-        if (data) {
-          prefilled[fmt] = {
-            avgReach: (data as any).avgReach ? String(Math.round((data as any).avgReach)) : '',
-            savesRate: (data as any).savesRate ? String(Math.round((data as any).savesRate * 100)) : '',
-            avgEngagementRate: (data as any).avgEngagementRate ? String(Math.round((data as any).avgEngagementRate * 100)) : '',
-          };
-        }
-      }
-      setEntries(prefilled);
-    } catch {}
-    setLoading(false);
-  }, [campaignId]);
-
-  useEffect(() => { loadSummary(); }, [loadSummary]);
-
-  const updateEntry = (fmt: string, field: keyof PerfEntry, value: string) => {
-    setEntries(prev => ({ ...prev, [fmt]: { ...prev[fmt], [field]: value } }));
-    setSaved(false);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    setError('');
-    try {
-      const today = new Date();
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - 6);
-      const periodLabel = `Week of ${weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-
-      const promises = PERF_FORMATS.map(({ key }) => {
-        const e = entries[key];
-        if (!e.avgReach && !e.savesRate && !e.avgEngagementRate) return null;
-        return authFetch(getApiUrl('/api/performance/ingest'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            campaignId,
-            contentType: key,
-            periodLabel,
-            periodStart: weekStart.toISOString(),
-            periodEnd: today.toISOString(),
-            avgReach: parseFloat(e.avgReach) || 0,
-            savesRate: parseFloat(e.savesRate) / 100 || 0,
-            avgEngagementRate: parseFloat(e.avgEngagementRate) / 100 || 0,
-            totalPublished: 0,
-            source: 'manual_correction',
-          }),
-        });
-      }).filter(Boolean);
-
-      if (promises.length === 0) { setError('Enter at least one format to correct'); setSaving(false); return; }
-      const responses = await Promise.all(promises);
-      const failed = (responses as any[]).filter((r) => r && !r.ok);
-      if (failed.length > 0) {
-        const firstErr = await failed[0].json().catch(() => ({}));
-        throw new Error(firstErr.error || 'One or more formats failed to save');
-      }
-      setSaved(true);
-      setEditMode(false);
-      await loadSummary();
-      Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (err: any) {
-      setError(err.message || 'Failed to save');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const hasAnyData = Object.values(summaryByFormat).some(Boolean);
-  const amber = '#F59E0B';
-
-  return (
-    <View style={[s.channelsSection, { borderColor: amber + '30', backgroundColor: isDark ? '#1A1300' : '#FFFBEB', marginTop: 16, marginBottom: 4 }]}>
-      <View style={[s.goalSectionHeader, { justifyContent: 'space-between' }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Ionicons name="bar-chart-outline" size={16} color={amber} />
-          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>Content Performance</Text>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {hasAnyData && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#10B981' }} />
-              <Text style={{ color: '#10B981', fontSize: 10, fontWeight: '600' }}>AUTO</Text>
-            </View>
-          )}
-          <Pressable
-            onPress={() => { setEditMode(v => !v); setSaved(false); setError(''); }}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: editMode ? (amber + '30') : (isDark ? '#1E2736' : '#F1F5F9') }}
-          >
-            <Ionicons name={editMode ? 'close' : 'pencil'} size={11} color={editMode ? amber : colors.textMuted} />
-            <Text style={{ fontSize: 11, color: editMode ? amber : colors.textMuted, fontWeight: '600' }}>
-              {editMode ? 'Cancel' : 'Correct'}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-        {editMode
-          ? 'Override scraped values below if the data looks incorrect.'
-          : 'Scraped automatically from your channels each week. Tap Correct only if the data is wrong.'}
-        {!editMode && lastUpdated ? ` Last updated: ${lastUpdated}.` : ''}
-      </Text>
-
-      {loading ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 }}>
-          <ActivityIndicator size="small" color={amber} />
-          <Text style={{ color: colors.textMuted, fontSize: 13 }}>Loading performance data...</Text>
-        </View>
-      ) : !hasAnyData && !editMode ? (
-        <View style={{ alignItems: 'center', paddingVertical: 20, gap: 6 }}>
-          <Ionicons name="time-outline" size={28} color={colors.textMuted} />
-          <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>Awaiting first scrape</Text>
-          <Text style={{ color: colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 17 }}>
-            The system will automatically populate this after your channels are connected and the scraping pipeline runs.
-          </Text>
-        </View>
-      ) : !editMode ? (
-        <View style={{ gap: 8, marginTop: 4 }}>
-          {PERF_FORMATS.map(({ key, label, icon }) => {
-            const d = summaryByFormat[key];
-            return (
-              <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: isDark ? '#1E2736' : '#F1F5F9' }}>
-                <Ionicons name={icon} size={13} color={amber} />
-                <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600', width: 60 }}>{label}</Text>
-                {d ? (
-                  <View style={{ flex: 1, flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.textMuted, fontSize: 10 }}>Reach</Text>
-                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
-                        {d.avgReach >= 1000 ? `${(d.avgReach / 1000).toFixed(1)}K` : String(Math.round(d.avgReach))}
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.textMuted, fontSize: 10 }}>Saves</Text>
-                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
-                        {(d.savesRate * 100).toFixed(1)}%
-                      </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ color: colors.textMuted, fontSize: 10 }}>Eng.</Text>
-                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
-                        {(d.avgEngagementRate * 100).toFixed(1)}%
-                      </Text>
-                    </View>
-                  </View>
-                ) : (
-                  <Text style={{ color: colors.textMuted, fontSize: 12, fontStyle: 'italic' }}>No data yet</Text>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {editMode && (
-        <View style={{ marginTop: 8, gap: 10 }}>
-          {PERF_FORMATS.map(({ key, label, icon }) => (
-            <View key={key} style={{ marginBottom: 4 }}>
-              <View style={[s.fieldLabelRow, { marginBottom: 5 }]}>
-                <Ionicons name={icon} size={13} color={amber} />
-                <Text style={[s.fieldLabel, { color: colors.text, fontSize: 12 }]}>{label}</Text>
-              </View>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                <TextInput
-                  style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 8 : 6, fontSize: 13 }]}
-                  placeholder="Reach"
-                  placeholderTextColor={colors.textMuted}
-                  value={entries[key].avgReach}
-                  onChangeText={v => updateEntry(key, 'avgReach', v)}
-                  keyboardType="numeric"
-                />
-                <TextInput
-                  style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 8 : 6, fontSize: 13 }]}
-                  placeholder="Saves %"
-                  placeholderTextColor={colors.textMuted}
-                  value={entries[key].savesRate}
-                  onChangeText={v => updateEntry(key, 'savesRate', v)}
-                  keyboardType="numeric"
-                />
-                <TextInput
-                  style={[s.input, { flex: 1, backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.inputBorder, paddingVertical: Platform.OS === 'ios' ? 8 : 6, fontSize: 13 }]}
-                  placeholder="Eng. %"
-                  placeholderTextColor={colors.textMuted}
-                  value={entries[key].avgEngagementRate}
-                  onChangeText={v => updateEntry(key, 'avgEngagementRate', v)}
-                  keyboardType="numeric"
-                />
-              </View>
-            </View>
-          ))}
-
-          {error ? (
-            <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30', marginBottom: 4 }]}>
-              <Ionicons name="warning-outline" size={14} color={colors.error} />
-              <Text style={[s.errorText, { color: colors.error }]}>{error}</Text>
-            </View>
-          ) : null}
-
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            style={[s.channelsSaveBtn, { opacity: saving ? 0.5 : 1 }]}
-          >
-            <LinearGradient
-              colors={saved ? ['#10B981', '#059669'] : [amber, '#D97706']}
-              style={s.channelsSaveBtnGrad}
-            >
-              {saving ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <>
-                  <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
-                  <Text style={s.channelsSaveBtnText}>Save Corrections</Text>
-                </>
-              )}
-            </LinearGradient>
-          </Pressable>
-        </View>
-      )}
-    </View>
-  );
-}
-
 interface Props {
-  onComplete?: (data: BusinessData) => void;
+  onComplete?: (data: BusinessSetupInput) => void;
   onDataChange?: (isComplete: boolean) => void;
 }
 
 export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
-  const colorScheme = useColorScheme();
-  const isDark = true; // forced dark mode
+  const isDark = true;
   const colors = isDark ? Colors.dark : Colors.light;
   const { selectedCampaign } = useCampaign();
-
-  const [data, setData] = useState<BusinessData>(EMPTY_DATA);
+  
+  const [data, setData] = useState<BusinessSetupInput>(EMPTY_DATA);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState('');
 
-  const [channels, setChannels] = useState({ instagram: '', website: '' });
-  const [channelsSaving, setChannelsSaving] = useState(false);
-  const [channelsSaved, setChannelsSaved] = useState(false);
-  const [channelsError, setChannelsError] = useState('');
-
   const campaignId = selectedCampaign?.selectedCampaignId;
 
-  const CORE_FIELDS: (keyof BusinessData)[] = [
-    'businessLocation', 'businessType', 'priceRange',
-    'targetAudienceAge', 'targetAudienceSegment', 'monthlyBudget',
-    'funnelObjective', 'primaryConversionChannel',
-  ];
-  const GOAL_FIELDS: (keyof BusinessData)[] = ['goalTarget', 'goalTimeline', 'goalDescription'];
-
   const isComplete = useCallback(() => {
-    const baseComplete = CORE_FIELDS.every(f => data[f].trim().length > 0);
-    if (!baseComplete) return false;
-    if (data.businessModel === 'product') {
-      return data.heroProduct.trim().length > 0 && data.productSpecs.trim().length > 0;
-    } else if (data.businessModel === 'mixed') {
-      return (data.heroProduct.trim().length > 0 || data.coreOffer.trim().length > 0);
-    } else {
-      return data.coreOffer.trim().length > 0;
-    }
+    return (
+      data.websiteUrl.trim().length > 0 &&
+      data.campaignOfferingName.trim().length > 0 &&
+      data.offeringFeaturesAndNotes.trim().length > 0
+    );
   }, [data]);
-
-  const goalsFilled = GOAL_FIELDS.filter(f => data[f].trim().length > 0).length;
 
   useEffect(() => {
     if (!campaignId) {
@@ -410,33 +63,13 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     (async () => {
       setFetching(true);
       try {
-        const res = await authFetch(getApiUrl(`/api/business-data/${campaignId}`));
+        const res = await authFetch(getApiUrl(`/api/business-setup/${campaignId}`));
         const json = await safeApiJson(res);
         if (!cancelled && json.exists && json.data) {
-          const d = json.data;
           setData({
-            businessModel: d.businessModel || (d.heroProduct && d.coreOffer ? 'mixed' : (d.heroProduct ? 'product' : 'service')),
-            heroProduct: d.heroProduct || '',
-            productSpecs: d.productSpecs || '',
-            endConsumerUseCase: d.endConsumerUseCase || '',
-            replacedCompetitor: d.replacedCompetitor || '',
-            businessLocation: d.businessLocation || '',
-            businessType: d.businessType || '',
-            coreOffer: d.coreOffer || '',
-            priceRange: d.priceRange || '',
-            targetAudienceAge: d.targetAudienceAge || '',
-            targetAudienceSegment: d.targetAudienceSegment || '',
-            monthlyBudget: d.monthlyBudget || '',
-            funnelObjective: d.funnelObjective || '',
-            primaryConversionChannel: d.primaryConversionChannel || '',
-            productCategory: d.productCategory || '',
-            coreProblemSolved: d.coreProblemSolved || '',
-            uniqueMechanism: d.uniqueMechanism || '',
-            strategicAdvantage: d.strategicAdvantage || '',
-            targetDecisionMaker: d.targetDecisionMaker || '',
-            goalTarget: d.goalTarget || '',
-            goalTimeline: d.goalTimeline || '',
-            goalDescription: d.goalDescription || '',
+            websiteUrl: json.data.websiteUrl || '',
+            campaignOfferingName: json.data.campaignOfferingName || '',
+            offeringFeaturesAndNotes: json.data.offeringFeaturesAndNotes || '',
           });
           setSaved(true);
         }
@@ -453,55 +86,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     onDataChange?.(isComplete() && saved);
   }, [data, saved]);
 
-  useEffect(() => {
-    if (!campaignId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}/user-channels`));
-        const json = await safeApiJson(res);
-        if (!cancelled && json.profiles && Array.isArray(json.profiles)) {
-          const ig = json.profiles.find((p: any) => p.platform === 'instagram');
-          const web = json.profiles.find((p: any) => p.platform === 'website');
-          setChannels({
-            instagram: ig?.handle ? `@${ig.handle}` : '',
-            website: web?.url || '',
-          });
-          if (ig?.handle || web?.url) setChannelsSaved(true);
-        }
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [campaignId]);
-
-  const handleSaveChannels = useCallback(async () => {
-    if (!campaignId) return;
-    setChannelsSaving(true);
-    setChannelsError('');
-    try {
-      const res = await authFetch(getApiUrl(`/api/campaigns/${campaignId}/user-channels`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          instagramHandle: channels.instagram.replace(/^@/, '').trim() || null,
-          websiteUrl: channels.website.trim() || null,
-        }),
-      });
-      const json = await safeApiJson(res);
-      if (!res.ok || !json.success) {
-        setChannelsError(json.message || json.error || 'Failed to save');
-        return;
-      }
-      setChannelsSaved(true);
-      Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch (err: any) {
-      setChannelsError(err.message || 'Network error');
-    } finally {
-      setChannelsSaving(false);
-    }
-  }, [campaignId, channels]);
-
-  const updateField = useCallback((field: keyof BusinessData, value: string) => {
+  const updateField = useCallback((field: keyof BusinessSetupInput, value: string) => {
     setData(prev => ({ ...prev, [field]: value }));
     setSaved(false);
   }, []);
@@ -519,8 +104,9 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     setLoading(true);
     setError('');
     try {
-      const res = await authFetch(getApiUrl(`/api/business-data/${campaignId}`), {
-        method: 'PUT',
+      // POST to new business-setup route
+      const res = await authFetch(getApiUrl(`/api/business-setup/${campaignId}`), {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
@@ -530,7 +116,9 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         return;
       }
       setSaved(true);
-      Platform.OS !== 'web' && Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
       onComplete?.(data);
     } catch (err: any) {
       setError(err.message || 'Network error');
@@ -559,7 +147,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
     );
   }
 
-  const renderTextField = (field: keyof BusinessData, label: string, placeholder: string, icon: any, multiline?: boolean) => {
+  const renderTextField = (field: keyof BusinessSetupInput, label: string, placeholder: string, icon: any, multiline?: boolean) => {
     const val = data[field];
     const filled = val.trim().length > 0;
     return (
@@ -577,65 +165,19 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
               color: colors.text,
               borderColor: filled ? colors.success + '40' : colors.inputBorder,
             },
-            multiline && { height: 72, textAlignVertical: 'top' as const },
+            multiline && { height: 96, textAlignVertical: 'top' as const },
           ]}
           placeholder={placeholder}
           placeholderTextColor={colors.textMuted}
           value={val}
           onChangeText={(v) => updateField(field, v)}
           multiline={multiline}
-          autoCapitalize="sentences"
+          autoCapitalize="none"
+          autoCorrect={false}
         />
       </View>
     );
   };
-
-  const renderChipSelector = (
-    field: keyof BusinessData,
-    label: string,
-    options: readonly { value: string; label: string; icon: any }[],
-  ) => {
-    const selected = data[field];
-    return (
-      <View style={s.fieldWrap}>
-        <View style={s.fieldLabelRow}>
-          <Ionicons name="options-outline" size={15} color={selected ? colors.success : colors.textMuted} />
-          <Text style={[s.fieldLabel, { color: colors.text }]}>{label}</Text>
-          {selected.length > 0 && <Ionicons name="checkmark-circle" size={14} color={colors.success} />}
-        </View>
-        <View style={s.chipRow}>
-          {options.map(opt => {
-            const isSelected = selected === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => {
-                  updateField(field, opt.value);
-                  Platform.OS !== 'web' && Haptics.selectionAsync();
-                }}
-                style={[
-                  s.chip,
-                  {
-                    backgroundColor: isSelected ? colors.primary + '18' : colors.inputBackground,
-                    borderColor: isSelected ? colors.primary : colors.inputBorder,
-                  },
-                ]}
-              >
-                <Ionicons name={opt.icon} size={14} color={isSelected ? colors.primary : colors.textMuted} />
-                <Text style={[s.chipText, { color: isSelected ? colors.primary : colors.textSecondary }]}>
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-    );
-  };
-
-  const coreFilledCount = CORE_FIELDS.filter(f => data[f].trim().length > 0).length;
-  const filledCount = coreFilledCount + goalsFilled;
-  const totalFields = 12;
 
   return (
     <View style={[s.container, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
@@ -646,17 +188,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         <View style={{ flex: 1 }}>
           <Text style={[s.title, { color: colors.text }]}>Business Profile</Text>
           <Text style={[s.subtitle, { color: colors.textSecondary }]}>
-            Required before plan creation
-          </Text>
-        </View>
-        <View style={[s.progressBadge, {
-          backgroundColor: filledCount === totalFields ? colors.success + '18' : colors.warning + '18',
-          borderColor: filledCount === totalFields ? colors.success + '40' : colors.warning + '40',
-        }]}>
-          <Text style={[s.progressText, {
-            color: filledCount === totalFields ? colors.success : colors.warning,
-          }]}>
-            {filledCount}/{totalFields}
+            Avyron uses this to discover and bind your strategy.
           </Text>
         </View>
       </View>
@@ -668,161 +200,9 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
         </View>
       )}
 
-      <View style={[s.fieldWrap, { marginBottom: 16 }]}>
-        <Text style={[s.fieldLabel, { color: colors.text, marginBottom: 8 }]}>Business Model</Text>
-        <View style={{ flexDirection: 'row', backgroundColor: colors.inputBackground, borderRadius: 8, padding: 4, borderWidth: 1, borderColor: colors.inputBorder }}>
-          <Pressable
-            onPress={() => updateField('businessModel', 'service')}
-            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6, backgroundColor: data.businessModel === 'service' ? colors.primary + '20' : 'transparent' }}
-          >
-            <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'service' ? colors.primary : colors.textMuted }}>Service</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => updateField('businessModel', 'product')}
-            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6, backgroundColor: data.businessModel === 'product' ? colors.primary + '20' : 'transparent' }}
-          >
-            <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'product' ? colors.primary : colors.textMuted }}>Product</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => updateField('businessModel', 'mixed')}
-            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6, backgroundColor: data.businessModel === 'mixed' ? colors.primary + '20' : 'transparent' }}
-          >
-            <Text style={{ fontSize: 13, fontWeight: '600', color: data.businessModel === 'mixed' ? colors.primary : colors.textMuted }}>Mixed</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      {(data.businessModel === 'product' || data.businessModel === 'mixed') && (
-        <>
-          {renderTextField('heroProduct', 'Hero Product', 'e.g. Smart Watch Pro, Organic Coffee Beans', 'cube-outline')}
-          {renderTextField('productSpecs', 'Product Specs / Features', 'e.g. 48hr battery, AMOLED display...', 'list-outline', true)}
-          {renderTextField('endConsumerUseCase', 'End Consumer Use Case', 'e.g. Fitness tracking, morning energy...', 'person-outline', true)}
-          {renderTextField('replacedCompetitor', 'Replaced Competitor', 'e.g. Apple Watch, Starbucks', 'swap-horizontal-outline')}
-        </>
-      )}
-
-      {(data.businessModel === 'service' || data.businessModel === 'mixed') && (
-        <>
-          {renderTextField('coreOffer', 'Core Offer / Service', 'e.g. Premium photography packages, Sourcing and distribution', 'pricetag-outline', true)}
-        </>
-      )}
-
-      {renderTextField('businessLocation', 'Business Location', 'e.g. Dubai, UAE', 'location-outline')}
-      {renderTextField('businessType', 'Business Type', 'e.g. E-commerce, SaaS, Agency', 'briefcase-outline')}
-      {renderTextField('priceRange', 'Price Range', 'e.g. $500 - $2,000', 'cash-outline')}
-      {renderTextField('targetAudienceAge', 'Target Audience Age', 'e.g. 25-45', 'people-outline')}
-      {renderTextField('targetAudienceSegment', 'Target Audience Segment', 'e.g. Small business owners, new mothers', 'person-outline', true)}
-      {renderTextField('monthlyBudget', 'Monthly Budget', 'e.g. $1,000', 'wallet-outline')}
-
-      {renderChipSelector('funnelObjective', 'Funnel Objective', FUNNEL_OBJECTIVES)}
-      {renderChipSelector('primaryConversionChannel', 'Primary Conversion Channel', CONVERSION_CHANNELS)}
-
-      <View style={[s.goalSection, { borderColor: '#D946EF30' }]}>
-        <View style={s.goalSectionHeader}>
-          <Ionicons name="flask-outline" size={16} color="#D946EF" />
-          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Product Details</Text>
-        </View>
-        <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-          Define your product so all engines generate consistent positioning and offers
-        </Text>
-        {renderTextField('productCategory', 'Product Category', 'e.g. Online coaching, SaaS tool, Physical product', 'grid-outline')}
-        {renderTextField('coreProblemSolved', 'Core Problem Solved', 'e.g. Small businesses struggle to get consistent leads', 'help-circle-outline', true)}
-        {renderTextField('uniqueMechanism', 'Unique Mechanism', 'e.g. AI-powered lead scoring system', 'construct-outline', true)}
-        {renderTextField('strategicAdvantage', 'Strategic Advantage / Differentiation', 'e.g. Only platform with real-time competitor monitoring', 'trophy-outline', true)}
-        {renderTextField('targetDecisionMaker', 'Target Decision Maker', 'e.g. Marketing directors at mid-size agencies', 'person-circle-outline')}
-      </View>
-
-      <View style={[s.goalSection, { borderColor: colors.inputBorder + '60' }]}>
-        <View style={s.goalSectionHeader}>
-          <Ionicons name="flag-outline" size={16} color={goalsFilled === 3 ? colors.success : '#6366F1'} />
-          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Goal Planning</Text>
-          {goalsFilled === 3 && <Ionicons name="checkmark-circle" size={14} color={colors.success} />}
-        </View>
-        <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-          Set a specific target so Avyron can calculate feasibility and build your funnel math
-        </Text>
-        {renderTextField('goalTarget', 'Goal Target Number', 'e.g. 50 new clients, $10,000 revenue, 500 leads', 'trending-up-outline')}
-        {renderChipSelector('goalTimeline', 'Goal Timeline', GOAL_TIMELINES)}
-        {renderTextField('goalDescription', 'Goal Description', 'e.g. Get 50 new coaching clients in 90 days through Instagram', 'document-text-outline', true)}
-      </View>
-
-      <View style={[s.channelsSection, { borderColor: '#3B82F630', backgroundColor: isDark ? '#0A1628' : '#EFF6FF' }]}>
-        <View style={s.goalSectionHeader}>
-          <Ionicons name="analytics-outline" size={16} color="#3B82F6" />
-          <Text style={[s.goalSectionTitle, { color: colors.text }]}>Your Channels</Text>
-          {channelsSaved && (channels.instagram || channels.website) && (
-            <Ionicons name="checkmark-circle" size={14} color={colors.success} />
-          )}
-        </View>
-        <Text style={[s.goalSectionSubtitle, { color: colors.textSecondary }]}>
-          Avyron will scrape your own Instagram and website weekly to compare your performance against market shifts
-        </Text>
-
-        <View style={s.channelInputRow}>
-          <View style={[s.channelIconWrap, { backgroundColor: '#E1306C15' }]}>
-            <Ionicons name="logo-instagram" size={16} color="#E1306C" />
-          </View>
-          <TextInput
-            style={[s.channelInput, { color: colors.text, borderColor: isDark ? '#3B82F630' : '#CBD5E1', backgroundColor: isDark ? '#0F1E30' : '#FFFFFF' }]}
-            placeholder="@yourhandle"
-            placeholderTextColor={colors.textMuted}
-            value={channels.instagram}
-            onChangeText={(t) => { setChannels(prev => ({ ...prev, instagram: t })); setChannelsSaved(false); }}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
-
-        <View style={s.channelInputRow}>
-          <View style={[s.channelIconWrap, { backgroundColor: '#3B82F615' }]}>
-            <Ionicons name="globe-outline" size={16} color="#3B82F6" />
-          </View>
-          <TextInput
-            style={[s.channelInput, { color: colors.text, borderColor: isDark ? '#3B82F630' : '#CBD5E1', backgroundColor: isDark ? '#0F1E30' : '#FFFFFF' }]}
-            placeholder="https://yourwebsite.com"
-            placeholderTextColor={colors.textMuted}
-            value={channels.website}
-            onChangeText={(t) => { setChannels(prev => ({ ...prev, website: t })); setChannelsSaved(false); }}
-            autoCapitalize="none"
-            keyboardType="url"
-            autoCorrect={false}
-          />
-        </View>
-
-        {channelsError ? (
-          <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30', marginTop: 8 }]}>
-            <Ionicons name="warning-outline" size={14} color={colors.error} />
-            <Text style={[s.errorText, { color: colors.error }]}>{channelsError}</Text>
-          </View>
-        ) : null}
-
-        <Pressable
-          onPress={handleSaveChannels}
-          disabled={channelsSaving || (!channels.instagram && !channels.website)}
-          style={[s.channelsSaveBtn, { opacity: (channelsSaving || (!channels.instagram && !channels.website)) ? 0.5 : 1 }]}
-        >
-          <LinearGradient
-            colors={channelsSaved && (channels.instagram || channels.website) ? ['#10B981', '#059669'] : ['#3B82F6', '#6366F1']}
-            style={s.channelsSaveBtnGrad}
-          >
-            {channelsSaving ? (
-              <ActivityIndicator color="#fff" size="small" />
-            ) : channelsSaved && (channels.instagram || channels.website) ? (
-              <>
-                <Ionicons name="checkmark-circle" size={16} color="#fff" />
-                <Text style={s.channelsSaveBtnText}>Channels Saved</Text>
-              </>
-            ) : (
-              <>
-                <Ionicons name="save-outline" size={16} color="#fff" />
-                <Text style={s.channelsSaveBtnText}>Save Channels</Text>
-              </>
-            )}
-          </LinearGradient>
-        </Pressable>
-      </View>
-
-      <ContentPerformanceSection campaignId={campaignId} colors={colors} isDark={isDark} />
+      {renderTextField('websiteUrl', 'Website URL *', 'https://yourwebsite.com', 'globe-outline')}
+      {renderTextField('campaignOfferingName', 'Primary Product / Service *', 'e.g. Refurbished iPhone 15 Pro, Hair Transplant', 'cube-outline')}
+      {renderTextField('offeringFeaturesAndNotes', 'Features / Notes *', 'Any supplementary details, technical constraints, or offline notes for this offering...', 'document-text-outline', true)}
 
       {error ? (
         <View style={[s.errorWrap, { backgroundColor: colors.error + '12', borderColor: colors.error + '30' }]}>
@@ -850,7 +230,7 @@ export default function BusinessDataForm({ onComplete, onDataChange }: Props) {
           ) : (
             <>
               <Ionicons name="save-outline" size={18} color="#fff" />
-              <Text style={s.saveBtnText}>Save Business Data</Text>
+              <Text style={s.saveBtnText}>Analyze Business</Text>
             </>
           )}
         </LinearGradient>
@@ -887,16 +267,6 @@ const s = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  progressBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  progressText: {
-    fontSize: 12,
-    fontWeight: '700' as const,
-  },
   savedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -932,24 +302,6 @@ const s = StyleSheet.create({
     paddingVertical: Platform.OS === 'ios' ? 12 : 10,
     fontSize: 14,
   },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  chipText: {
-    fontSize: 13,
-    fontWeight: '500' as const,
-  },
   errorWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -980,28 +332,6 @@ const s = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700' as const,
   },
-  goalSection: {
-    borderTopWidth: 1,
-    paddingTop: 16,
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  goalSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  goalSectionTitle: {
-    fontSize: 14,
-    fontWeight: '700' as const,
-    flex: 1,
-  },
-  goalSectionSubtitle: {
-    fontSize: 12,
-    lineHeight: 17,
-    marginBottom: 14,
-  },
   emptyWrap: {
     borderRadius: 16,
     borderWidth: 1,
@@ -1013,49 +343,5 @@ const s = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     textAlign: 'center' as const,
-  },
-  channelsSection: {
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 14,
-    marginTop: 16,
-    marginBottom: 4,
-  },
-  channelInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
-  },
-  channelIconWrap: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  channelInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 11 : 9,
-    fontSize: 14,
-  },
-  channelsSaveBtn: {
-    marginTop: 6,
-  },
-  channelsSaveBtnGrad: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 11,
-    borderRadius: 10,
-  },
-  channelsSaveBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700' as const,
   },
 });

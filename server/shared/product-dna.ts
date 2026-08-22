@@ -19,8 +19,8 @@
  *   - zero active readers remain
  */
 import { db } from "../db";
-import { businessDataLayer } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { businessUnderstandingSnapshots } from "@shared/schema";
+import { eq, and, desc } from "drizzle-orm";
 
 export interface ProductDNA {
   productCategory: string | null;
@@ -35,26 +35,31 @@ export interface ProductDNA {
 }
 
 export async function loadProductDNA(campaignId: string, accountId: string): Promise<ProductDNA | null> {
-  const [bizData] = await db.select().from(businessDataLayer)
+  const [buSnap] = await db.select({ payload: businessUnderstandingSnapshots.businessUnderstanding })
+    .from(businessUnderstandingSnapshots)
     .where(and(
-      eq(businessDataLayer.campaignId, campaignId),
-      eq(businessDataLayer.accountId, accountId),
+      eq(businessUnderstandingSnapshots.campaignId, campaignId),
+      eq(businessUnderstandingSnapshots.accountId, accountId)
     ))
+    .orderBy(desc(businessUnderstandingSnapshots.createdAt))
     .limit(1);
+    
+  if (buSnap?.payload) {
+    const data = buSnap.payload as any;
+    return {
+      productCategory: data.campaignOffering?.category || "Unknown",
+      coreProblemSolved: "Migrated",
+      uniqueMechanism: "Migrated",
+      strategicAdvantage: "Migrated",
+      targetDecisionMaker: data.targetUnderstanding?.likelyDecisionMakers?.[0] || "Unknown",
+      businessType: data.businessModel || "B2B SaaS",
+      coreOffer: data.campaignOffering?.offeringName || "Products",
+      targetAudienceSegment: data.targetUnderstanding?.likelyUsers?.[0] || "Market",
+      priceRange: data.campaignOffering?.pricingModel || "Standard"
+    };
+  }
 
-  if (!bizData) return null;
-
-  return {
-    productCategory: bizData.productCategory || null,
-    coreProblemSolved: bizData.coreProblemSolved || null,
-    uniqueMechanism: bizData.uniqueMechanism || null,
-    strategicAdvantage: bizData.strategicAdvantage || null,
-    targetDecisionMaker: bizData.targetDecisionMaker || null,
-    businessType: bizData.businessType,
-    coreOffer: bizData.coreOffer,
-    targetAudienceSegment: bizData.targetAudienceSegment,
-    priceRange: bizData.priceRange,
-  };
+  return null;
 }
 
 /**

@@ -128,6 +128,7 @@ export interface DominanceResult {
   dominanceLevel: string;
   weaknesses: string[];
   strengths: string[];
+  canonicalFacts?: { miAuthorityId: string; factType: string; fact: string }[];
   engagementWeightBiasRisk?: string | null;
   dominanceModeMetadata: DominanceModeMetadata;
 }
@@ -215,6 +216,7 @@ export interface MIv3Output {
   trajectoryDirection: string;
   narrativeSaturationLevel: number;
   revivalPotential: number;
+  canonicalNarrativeFacts?: { miAuthorityId: string; factType: string; fact: string }[];
   marketDiagnosis: string | null;
   threatSignals: string[];
   opportunitySignals: string[];

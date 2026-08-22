@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { CompetitorSignalResult, ConfidenceResult, DominanceResult, DominanceModeMetadata, GoalMode } from "./types";
 import { GOAL_MODE_WEIGHTS, ENGAGEMENT_BIAS_THRESHOLD } from "./constants";
 
@@ -87,13 +88,21 @@ export function computeDominanceForCompetitor(
     weights: { ...weights },
   };
 
+  const weaknesses = identifyWeaknesses(signal);
+  const strengths = identifyStrengths(signal);
+  const canonicalFacts = [
+    ...strengths.map(fact => ({ miAuthorityId: randomUUID(), factType: "strength", fact })),
+    ...weaknesses.map(fact => ({ miAuthorityId: randomUUID(), factType: "weakness", fact }))
+  ];
+
   return {
     competitorId: signal.competitorId,
     competitorName: signal.competitorName,
     dominanceScore: score,
     dominanceLevel: getDominanceLevel(score),
-    weaknesses: identifyWeaknesses(signal),
-    strengths: identifyStrengths(signal),
+    weaknesses,
+    strengths,
+    canonicalFacts,
     engagementWeightBiasRisk: engagementBiasRisk,
     dominanceModeMetadata,
   };

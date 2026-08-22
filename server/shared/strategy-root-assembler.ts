@@ -19,7 +19,7 @@ import { db } from "../db";
 import { audienceSnapshots } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import type { StrategyRootInput } from "./strategy-root";
-import { buildAudiencePainRegistry } from "./audience-pain-registry";
+import { buildAudiencePainRegistry, extractCanonicalSegmentPains } from "./audience-pain-registry";
 
 function safeJsonParse<T = any>(text: any, fallback: T): T {
   if (text == null) return fallback;
@@ -217,10 +217,16 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
       Array.isArray(painRegistry) && painRegistry.length > 0 &&
       painRegistry.every((p: any) => p?.lineage?.accountId === accountId && p?.lineage?.audienceSnapshotId === audienceSnapshotId)
         ? painRegistry
-        : buildAudiencePainRegistry(audiencePains, {
-            accountId,
-            audienceSnapshotId,
-          }),
+        : buildAudiencePainRegistry(
+            extractCanonicalSegmentPains((audienceOverride as any)?.audienceSegments).length > 0
+              ? extractCanonicalSegmentPains((audienceOverride as any)?.audienceSegments)
+              : audiencePains,
+            {
+              accountId,
+              audienceSnapshotId,
+            },
+            (audienceOverride as any)?.audienceSegments ?? [],
+          ),
     approvedDesires: audienceDesires,
     approvedTransformation: audienceTransformation,
     approvedClaim: mechClaim,

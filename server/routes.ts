@@ -24,6 +24,7 @@ import { registerDataSourceRoutes } from "./data-source/routes";
 import { registerMetaStatusRoutes, requireMetaReal, getDecryptedPageToken } from "./meta-status";
 import { registerAuditRoutes } from "./audit-routes";
 import { registerBusinessDataRoutes } from "./business-data-routes";
+import { registerBusinessSetupRoutes } from "./business-setup-routes";
 import { registerDashboardRoutes } from "./dashboard-routes";
 import { registerPerceptionRoutes } from "./perception-routes";
 import { registerMonitorEarlyWarningRoutes } from "./monitor/early-warning/routes";
@@ -1528,6 +1529,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerMetaStatusRoutes(app);
   registerAuditRoutes(app);
   registerBusinessDataRoutes(app);
+  registerBusinessSetupRoutes(app);
   registerDashboardRoutes(app);
   registerPerceptionRoutes(app);
   registerMonitorEarlyWarningRoutes(app);

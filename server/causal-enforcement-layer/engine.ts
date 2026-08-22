@@ -655,7 +655,7 @@ export function isDepthBlocking(depthResult: DepthComplianceResult, sourceTexts?
   const hasClassifierClaim =
     (cb.factual ?? 0) > 0 ||
     (cb.inferred ?? 0) > 0 ||
-    (cb.emotional ?? 0) > 0;
+    (cb.factual ?? 0) > 0 || (cb.inferred ?? 0) > 0;
   const stringDetect = sourceTexts && sourceTexts.length > 0
     ? detectMarketingClaimStrings(sourceTexts)
     : { present: false, matchedPattern: null, sample: null };

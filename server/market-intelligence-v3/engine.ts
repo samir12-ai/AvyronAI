@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { db } from "../db";
 import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
@@ -1550,6 +1551,9 @@ export class MarketIntelligenceV3 {
       trajectoryDirection,
       narrativeSaturationLevel: trajectory.angleSaturationLevel,
       revivalPotential: trajectory.revivalPotential,
+      canonicalNarrativeFacts: [
+        { miAuthorityId: randomUUID(), factType: "narrativeSynthesis", fact: typeof marketDiagnosis === 'string' ? marketDiagnosis : "Generic Narrative" }
+      ],
       marketDiagnosis,
       threatSignals,
       opportunitySignals,
@@ -1648,6 +1652,7 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     trajectoryDirection: snapshot.previousDirection || "STABLE",
     narrativeSaturationLevel: trajectoryData.angleSaturationLevel || 0,
     revivalPotential: trajectoryData.revivalPotential || 0,
+    canonicalNarrativeFacts: snapshot.marketDiagnosis ? [{ miAuthorityId: randomUUID(), factType: "narrativeSynthesis", fact: snapshot.marketDiagnosis }] : [],
     marketDiagnosis: snapshot.marketDiagnosis || null,
     threatSignals,
     opportunitySignals,

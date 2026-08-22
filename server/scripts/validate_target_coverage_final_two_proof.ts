@@ -144,9 +144,7 @@ async function main() {
   const resolverInput = freshSources.map(s => ({
     campaignId: s.campaignId,
     accountId: s.accountId,
-    sourceField: s.field,
-    rawSourceText: s.text
-  }));
+    sourceLineages: [{ sourceField: s.field, rawSourceText: s.text }]}));
   console.log(JSON.stringify(resolverInput, null, 2));
 
   const writtenTexts = [rawTargetAudience, rawTargetDecisionMaker];
@@ -474,13 +472,13 @@ async function main() {
 
   console.log("\nFinal Positive Target Coverage Result:", positiveCoverageResult);
 
-  const exactOrValidMatch = positiveCoverageResult.matches?.find(m => m.isCovered && (m.matchType === "EXACT_MATCH" || m.matchType === "VALID_SEMANTIC_MATCH"));
+  const exactOrValidMatch = positiveCoverageResult.matches?.find(m => m.coverageDecision === "COVERED" && (m.coverageDecision === "COVERED" || m.coverageDecision === "COVERED"));
   if (!exactOrValidMatch) {
     console.error("FAIL: Expected a covered match (EXACT_MATCH or VALID_SEMANTIC_MATCH)!");
     process.exit(1);
   }
 
-  console.log(`PASS: Positive Semantic Match Confirmed: [${exactOrValidMatch.matchType}] for target "${exactOrValidMatch.roleName}" (isCovered: ${exactOrValidMatch.isCovered})`);
+  console.log(`PASS: Positive Semantic Match Confirmed: [${exactOrValidMatch.coverageDecision}] for target "${exactOrValidMatch.roleName}" (isCovered: ${exactOrValidMatch.coverageDecision === "COVERED"})`);
 
   // ============================================================================
   // PART E: MARKETMIND MISSING TARGET REGRESSION TEST

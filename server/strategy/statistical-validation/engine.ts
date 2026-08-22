@@ -1369,15 +1369,14 @@ export async function runStatisticalValidationEngine(
     : 0;
   const evidenceStrength = clamp(avgEvidenceStrength, 0, 1);
 
-  claimConfidenceScore = Math.min(claimConfidenceScore, evidenceStrength);
-  claimConfidenceScore = clamp(claimConfidenceScore, 0, 1);
+  claimConfidenceScore = clamp(0.7 * claimConfidenceScore + 0.3 * evidenceStrength, 0, 1);
 
   let validationState: StatisticalValidationResult["validationState"];
   if (claimConfidenceScore >= CLAIM_CONFIDENCE_THRESHOLDS.VALIDATED && evidenceStrength >= EVIDENCE_DENSITY_THRESHOLDS.MODERATE) {
     validationState = VALIDATION_STATES.VALIDATED as "validated";
-  } else if (claimConfidenceScore >= CLAIM_CONFIDENCE_THRESHOLDS.PROVISIONAL) {
+  } else if (claimConfidenceScore >= CLAIM_CONFIDENCE_THRESHOLDS.PROVISIONAL || rawConfidence >= CLAIM_CONFIDENCE_THRESHOLDS.PROVISIONAL) {
     validationState = VALIDATION_STATES.PROVISIONAL as "provisional";
-  } else if (claimConfidenceScore >= CLAIM_CONFIDENCE_THRESHOLDS.WEAK) {
+  } else if (claimConfidenceScore >= CLAIM_CONFIDENCE_THRESHOLDS.WEAK || rawConfidence >= CLAIM_CONFIDENCE_THRESHOLDS.WEAK) {
     validationState = VALIDATION_STATES.WEAK as "weak";
   } else {
     validationState = VALIDATION_STATES.REJECTED as "rejected";

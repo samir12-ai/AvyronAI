@@ -41,6 +41,43 @@ export class LLMReliabilityError extends Error {
   }
 }
 
+function isRetryable(err: any): boolean {
+  if (!err) return false;
+  const msg = (err.message || "").toLowerCase();
+  
+  // Explicitly non-retryable configuration errors
+  if (
+    msg.includes("invalid credentials") ||
+    msg.includes("missing credentials") ||
+    msg.includes("invalid model") ||
+    msg.includes("malformed")
+  ) {
+    return false;
+  }
+  
+  // Retryable transport errors
+  if (
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("network") ||
+    msg.includes("rate limit") ||
+    msg.includes("429") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("504")
+  ) {
+    return true;
+  }
+  
+  if (err.status >= 500 || err.status === 429) {
+    return true;
+  }
+  
+  return false;
+}
+
 export async function generateWithRepair<TInput, TOutput>(
   args: GenerateWithRepairArgs<TInput, TOutput>
 ): Promise<{ result: TOutput; telemetry: ReliabilityTelemetry }> {
@@ -50,8 +87,31 @@ export async function generateWithRepair<TInput, TOutput>(
     engine: args.engineName,
     touchpoint: args.touchpointName,
     attempts: 0,
+    technicalRetries: 0,
     finalVerdict: "HONEST_FAIL",
     repairLog: []
+  };
+
+  const runWithTechnicalRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
+    let techAttempts = 1;
+    const maxTechAttempts = (args.config?.maxTechnicalRetries ?? 2) + 1;
+    
+    while (true) {
+      try {
+        if (techAttempts > 1) {
+          telemetry.technicalRetries++;
+        }
+        return await fn();
+      } catch (err: any) {
+        if (!isRetryable(err) || techAttempts >= maxTechAttempts) {
+           throw err; // Non-retryable or exhausted
+        }
+        logger.warn(`[${args.engineName}::${args.touchpointName}] Technical failure on attempt ${techAttempts}. Retries left: ${maxTechAttempts - techAttempts}. Error: ${err.message}`);
+        techAttempts++;
+        // short delay
+        await new Promise(r => setTimeout(r, 10));
+      }
+    }
   };
 
   let candidate: TOutput;
@@ -60,7 +120,7 @@ export async function generateWithRepair<TInput, TOutput>(
   try {
     // 1. Initial Generation
     telemetry.attempts = currentAttempt;
-    candidate = await args.generate(args.authoritativeInput);
+    candidate = await runWithTechnicalRetry(async () => await args.generate(args.authoritativeInput));
   } catch (err: any) {
     telemetry.finalVerdict = "TECHNICAL_FAIL";
     logger.error(`[${args.engineName}::${args.touchpointName}] Technical failure during initial generation:`, err);
@@ -72,7 +132,11 @@ export async function generateWithRepair<TInput, TOutput>(
     
     // 2. Validation
     try {
-      judgeResult = await args.judge(args.authoritativeInput, candidate);
+      const attemptString = `\n========== ATTEMPT ${currentAttempt} ==========\n${typeof candidate === 'string' ? candidate : JSON.stringify(candidate, null, 2)}\n===================================\n`;
+      const fs = require('fs');
+      fs.appendFileSync('C:\\Users\\mahmo\\.gemini\\antigravity\\brain\\b8fb5dac-575e-4c9c-8460-77f7f7b3318d\\scratch\\audience_semantic_trace.txt', attemptString);
+
+      judgeResult = await runWithTechnicalRetry(async () => await args.judge(args.authoritativeInput, candidate));
     } catch (err: any) {
       telemetry.finalVerdict = "TECHNICAL_FAIL";
       logger.error(`[${args.engineName}::${args.touchpointName}] Technical failure during judging (attempt ${currentAttempt}):`, err);
@@ -90,10 +154,25 @@ export async function generateWithRepair<TInput, TOutput>(
       };
     }
 
+    if (!judgeResult.valid) {
+      telemetry.repairLog.push({
+        attempt: currentAttempt,
+        failureClass: judgeResult.failureClass || "GENERATION_QUALITY_FAILURE",
+        rejections: judgeResult.rejections || [],
+        repairAttempted: false,
+        repairOutcome: "FAIL",
+      });
+      const fs = require('fs');
+      try {
+        fs.appendFileSync('C:\\Users\\mahmo\\.gemini\\antigravity\\brain\\b8fb5dac-575e-4c9c-8460-77f7f7b3318d\\scratch\\audience_semantic_trace.txt', `\n--- JUDGE REJECTION ---\n${JSON.stringify(judgeResult.rejections, null, 2)}\n-----------------------\n`);
+      } catch(e) {}
+      logger.warn(`[${args.engineName}::${args.touchpointName}] Judge rejection (attempt ${currentAttempt}): ${judgeResult.failureClass}`);
+    }
+
     const failureClass = judgeResult.failureClass ?? "GENERATION_QUALITY_FAILURE";
     const rejections = judgeResult.rejections ?? [];
 
-    logger.warn({ rejections }, `[${args.engineName}::${args.touchpointName}] Judge rejection (attempt ${currentAttempt}): ${failureClass}`);
+    logger.warn(`[${args.engineName}::${args.touchpointName}] Judge rejection (attempt ${currentAttempt}): ${failureClass}`);
 
     // 3. Failure Classification & Short Circuits
     if (failureClass === "EVIDENCE_FAILURE" || failureClass === "TECHNICAL_FAILURE") {
@@ -157,7 +236,7 @@ export async function generateWithRepair<TInput, TOutput>(
     telemetry.repairLog.push(repairLogEntry);
 
     try {
-      candidate = await args.repair(args.authoritativeInput, candidate, rejections);
+      candidate = await runWithTechnicalRetry(async () => await args.repair(args.authoritativeInput, candidate, rejections));
       currentAttempt++;
       telemetry.attempts = currentAttempt;
     } catch (err: any) {

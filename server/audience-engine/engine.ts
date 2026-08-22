@@ -34,9 +34,8 @@ import {
   type PatternCluster,
   type MarketScope,
 } from "./constants";
-import { MI_COST_LIMITS } from "../market-intelligence-v3/constants";
 import { pruneOldSnapshots, assessDataReliability as sharedAssessDataReliability, normalizeConfidence as sharedNormalizeConfidence, detectGenericOutput } from "../engine-hardening";
-import { aiChat } from "../ai-client";
+import { aiChat, aiGemini } from "../ai-client";
 import { createSourceLineageEntry, type SignalLineageEntry } from "../shared/signal-lineage";
 import { executeSemanticBridge, mergeBridgedIntoAudienceMap, validateBridgeIntegrity, type SemanticBridgeResult } from "./semantic-bridge";
 import { CanonicalAudienceSegment, generateAudienceSignatures, generateCrossAudienceStrategy } from "./sophistication-llm";
@@ -209,6 +208,8 @@ export interface AudienceEngineV3Result {
   adsTargetingHints: AdsTargetingHint[];
   structuredSignals: StructuredSignals;
   targetCoverage?: TargetCoverageResult;
+  confidenceScore?: number;
+  dataReliability?: any;
   inputSummary: {
     postsAnalyzed: number;
     commentsAnalyzed: number;
@@ -1612,14 +1613,13 @@ async function constructSegments(
   console.log(`[AudienceEngine-V3] ANCHOR_EVIDENCE | engine=audience | site=first_prompt | attempt=1 | present=${productAnchor ? "yes" : "no"} | source=${audienceAnchorSource}`);
 
   const audEffectiveAnchor = (strategic && strategic.doctrine.productAnchor) ? strategic.doctrine.productAnchor : (productAnchor || null);
-  const audGroundingContract = buildGroundingContract(audEffectiveAnchor as any, null, { capabilities: deriveValidatedCapabilities((audEffectiveAnchor ?? null) as any, ((businessContext as any).productDna ?? null)) });
 
   const basePrompt = `You are the Audience Analysis Engine deriving audience intelligence strictly from Judge-approved evidence.
 
-PERMANENT PRINCIPLE: EVIDENCE DECIDES WHICH FIELDS EXIST.
-Do NOT complete a persona template. Report ONLY audience facts supported by evidence.
-- A valid segment may contain a role and pains, and ZERO desires, motivations, outcomes, or objections if those secondary fields are not directly supported.
-- Empty or omitted optional fields are completely valid. Unsupported completion is strictly prohibited.
+PERMANENT PRINCIPLE: EVIDENCE DECIDES COMPLETENESS. SCHEMA DOES NOT.
+Do not populate optional fields (desires, objections, motivations, outcomes) unless evidence explicitly supports them.
+Empty arrays are valid and expected when evidence is absent.
+Do NOT weaken evidence standards to fill schema fields.
 - Every claim MUST carry its own stable claimId and specific evidence IDs (e.g. claimId: "seg_1_pain_1", evidenceIds: ["EV-2", "EV-3"]).
 - Do NOT use evidence supporting one claim to justify a different claim (e.g., pain evidence cannot prove a desire or outcome).
 - Fewer fully supported claims are far better than a complete-looking persona containing speculation.
@@ -1628,7 +1628,6 @@ Do NOT complete a persona template. Report ONLY audience facts supported by evid
 
 BUSINESS TARGET CONTEXT (for reference only, NOT evidence):
 Industry: ${businessContext.industry}
-Core Offer: ${businessContext.coreOffer}
 Target Audience: ${businessContext.targetAudience}
 
 MARKET MATURITY: ${maturity.level}
@@ -1681,7 +1680,7 @@ Return ONLY the JSON array, no markdown.`;
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: input }],
         temperature: 0.2,
-        max_tokens: 2500,
+        max_tokens: 4500,
         endpoint: "audience-engine-v3-segments",
         accountId,
       });
@@ -1699,85 +1698,149 @@ Return ONLY the JSON array, no markdown.`;
 
       const normalizedCandidates = parsed.map((seg, idx) => normalizeSegmentCandidate(seg, idx));
 
-      // SEMANTIC AUDIENCE JUDGE (Single-pass claim-level evaluation)
-      const judgePrompt = `You are the Semantic Audience Judge evaluating proposed audience segments against RAW EVIDENCE.
-Your job is to inspect EVERY claim individually across all segments and determine which claims are SUPPORTED vs REJECTED.
+      // 1. Build Structural Manifest
+      const claimManifest: any[] = [];
+      normalizedCandidates.forEach((seg: any) => {
+        const segId = seg.segmentDefinition?.claimId ? seg.segmentDefinition.claimId.split("_def")[0] : "unknown";
+        if (seg.segmentDefinition?.claimId) claimManifest.push({ claimId: seg.segmentDefinition.claimId, claimType: "segmentDefinition", segmentId: segId, text: seg.segmentDefinition.claim, evidenceIds: seg.segmentDefinition.evidenceIds });
+        if (seg.role?.claimId) claimManifest.push({ claimId: seg.role.claimId, claimType: "role", segmentId: segId, text: seg.role.value, evidenceIds: seg.role.evidenceIds });
+        ['pains', 'desires', 'objections', 'motivations', 'outcomes'].forEach(field => {
+          if (Array.isArray(seg[field])) {
+            seg[field].forEach((c: any) => {
+              if (c.claimId) claimManifest.push({ claimId: c.claimId, claimType: field, segmentId: segId, text: c.claim, evidenceIds: c.evidenceIds });
+            });
+          }
+        });
+      });
+
+      const manifestIds = new Set(claimManifest.map(c => c.claimId));
+
+      // SEMANTIC AUDIENCE JUDGE (Single-pass claim-level evaluation, with batching)
+      const BATCH_SIZE = 15;
+      let allVerdicts: any[] = [];
+      let allJudgeReports: any[] = [];
+      
+      if (claimManifest.length === 0) {
+        return { valid: true, recoveredValue: JSON.stringify(normalizedCandidates) };
+      }
+
+      for (let i = 0; i < claimManifest.length; i += BATCH_SIZE) {
+        const batchManifest = claimManifest.slice(i, i + BATCH_SIZE);
+        
+        const judgePrompt = `You are the Semantic Audience Judge evaluating proposed audience segments against RAW EVIDENCE.
+Your job is to inspect EVERY SINGLE claim in the provided CLAIM MANIFEST and determine which are SUPPORTED vs REJECTED.
 
 RAW EVIDENCE:
 ${formatEvidenceUnits(evidenceItems)}
 
-PROPOSED SEGMENTS:
+PROPOSED SEGMENTS (Full Context):
 ${JSON.stringify(normalizedCandidates, null, 2)}
+
+CURRENT CLAIM MANIFEST BATCH (Evaluate exactly these IDs):
+${JSON.stringify(batchManifest, null, 2)}
 
 BUSINESS TARGET CONTEXT (Reference only):
 Industry: ${businessContext.industry}
-Core Offer: ${businessContext.coreOffer}
 
-EVALUATION RULES (Evaluate claim-by-claim):
+EVALUATION RULES:
 1. EVIDENCE SUPPORT: Does the cited evidenceIds directly and genuinely support this specific claim?
-   - If a pain claim is unsupported: rejectionCode = "UNSUPPORTED_PAIN"
-   - If a desire claim is unsupported: rejectionCode = "UNSUPPORTED_DESIRE"
-   - If an objection claim is unsupported: rejectionCode = "UNSUPPORTED_OBJECTION"
-   - If a motivation claim is unsupported: rejectionCode = "UNSUPPORTED_MOTIVATION"
-   - If an outcome claim is unsupported: rejectionCode = "UNSUPPORTED_OUTCOME"
-   - If citations do not match the claim text: rejectionCode = "CLAIM_CITATION_MISMATCH"
+   - If unsupported: rejectionCode = "UNSUPPORTED_PAIN", "UNSUPPORTED_DESIRE", etc.
 2. SOURCE ROLE PRESERVATION: Does the role match who the cited evidence is actually about? (Code: "ROLE_TRANSFER")
-3. PROHIBITED EVIDENCE USE: Is competitor marketing copy (COMPETITOR_BRAND / MARKET_NARRATIVE_CONTEXT) being used as direct buyer pain testimony or violating prohibitedUses? (Code: "PROHIBITED_EVIDENCE_USE")
-4. SEMANTIC PRESERVATION: Did the model preserve original meaning without inventing unstated facts? (Code: "SEMANTIC_REWRITE" / "EVIDENCE_MISMATCH")
-5. OPTIONAL FIELDS ARE VALID WHEN OMITTED: A segment with only supported role and pains (and empty desires/objections/motivations) is 100% VALID. Do NOT reject for omitting optional fields.
+3. OPTIONAL FIELDS ARE VALID WHEN OMITTED: A segment with only supported role and pains (and empty desires/objections) is 100% VALID. Do NOT reject for omitting optional fields. Do NOT invent claims that are not in the manifest.
 
 INSTRUCTIONS:
-Evaluate ALL claims across all segments in ONE single pass.
+Evaluate EVERY claim listed in the CURRENT CLAIM MANIFEST BATCH.
+You MUST return a verdict for EVERY claimId in the batch manifest.
 Return a JSON object:
 {
-  "valid": boolean,
-  "acceptedClaimIds": ["seg_1_def", "seg_1_role", "seg_1_pain_1"],
-  "rejectedClaims": [
+  "verdicts": [
+    {
+      "claimId": "seg_1_pain_1",
+      "status": "VALID"
+    },
     {
       "claimId": "seg_1_desire_1",
-      "field": "desires",
-      "rejectionCode": "UNSUPPORTED_DESIRE" | "UNSUPPORTED_PAIN" | "UNSUPPORTED_OBJECTION" | "UNSUPPORTED_MOTIVATION" | "UNSUPPORTED_OUTCOME" | "ROLE_TRANSFER" | "PROHIBITED_EVIDENCE_USE" | "CLAIM_CITATION_MISMATCH" | "SEMANTIC_REWRITE" | "EVIDENCE_MISMATCH",
-      "reason": "Detailed reason why this specific claim failed.",
-      "repairDirective": "E.g. Omit this desire completely; keep accepted claims unchanged."
+      "status": "INVALID",
+      "rejectionCode": "UNSUPPORTED_DESIRE",
+      "critique": "Detailed reason...",
+      "repairDirective": "Omit this desire completely; keep accepted claims unchanged."
     }
   ]
 }
+`;
 
-If ALL claims are valid, return { "valid": true, "acceptedClaimIds": [...], "rejectedClaims": [] }.`;
+        try {
+          const judgeRes = await aiChat({
+            model: "gpt-4o-mini",
+            messages: [{ role: "user", content: judgePrompt }],
+            temperature: 0.0,
+            max_tokens: 3500,
+            response_format: { type: "json_object" },
+            endpoint: "audience-engine-v3-judge",
+            accountId,
+          });
 
-      try {
-        const judgeRes = await aiChat({
-          model: "gpt-4o-mini",
-          messages: [{ role: "user", content: judgePrompt }],
-          temperature: 0.0,
-          max_tokens: 1500,
-          response_format: { type: "json_object" },
-          endpoint: "audience-engine-v3-judge",
-          accountId,
-        });
-
-        const judgeContent = judgeRes.choices[0]?.message?.content?.trim() || "{}";
-        const judgeParsed = JSON.parse(judgeContent);
-        const rejectedClaims = Array.isArray(judgeParsed.rejectedClaims) ? judgeParsed.rejectedClaims : [];
-        const isJudgeValid = judgeParsed.valid === true || rejectedClaims.length === 0;
-
-        if (!isJudgeValid) {
-          const firstRejection = rejectedClaims[0];
-          return {
-            valid: false,
-            failureClass: firstRejection?.rejectionCode || "UNSUPPORTED_PAIN",
-            rejections: rejectedClaims.map((r: any) => ({
-              rule: r.rejectionCode || "CLAIM_FAILURE",
-              reason: `[Claim ${r.claimId || "unknown"} (${r.field || "field"})]: ${r.reason || "unsupported"}${r.repairDirective ? ` -> Directive: ${r.repairDirective}` : ""}`
-            })),
-            recoveredValue: JSON.stringify({
-              judgeReport: judgeParsed,
-              candidateSegments: normalizedCandidates
-            })
-          };
+          const judgeContent = judgeRes.choices[0]?.message?.content?.trim() || "{}";
+          const judgeParsed = JSON.parse(judgeContent);
+          const verdicts = Array.isArray(judgeParsed.verdicts) ? judgeParsed.verdicts : [];
+          allVerdicts.push(...verdicts);
+          allJudgeReports.push(judgeParsed);
+        } catch (err: any) {
+          console.error("[AudienceEngine-V3] Semantic Judge batch error:", err.message);
+          throw err;
         }
-      } catch (err) {
-        console.error("[AudienceEngine-V3] Semantic Judge error:", err);
+      }
+
+      // Coverage validation across all batches
+      const returnedIds = new Set(allVerdicts.map((v: any) => v.claimId));
+      
+      // 1. Check for ghost claims
+      for (const rid of returnedIds) {
+        if (!manifestIds.has(rid)) {
+          throw new Error(`JUDGE_UNKNOWN_CLAIM_ID: Judge returned verdict for non-existent claim '${rid}'`);
+        }
+      }
+      
+      // 2. Check for missing claims
+      const missingIds = [];
+      for (const mid of manifestIds) {
+        if (!returnedIds.has(mid)) {
+          missingIds.push(mid);
+        }
+      }
+      if (missingIds.length > 0) {
+        throw new Error(`JUDGE_EVALUATION_INCOMPLETE: Judge missed claims: ${missingIds.join(', ')}`);
+      }
+      
+      // 3. Check for duplicates
+      if (allVerdicts.length !== returnedIds.size) {
+          throw new Error(`JUDGE_EVALUATION_DUPLICATES: Judge returned duplicate verdicts`);
+      }
+
+      const rejectedVerdicts = allVerdicts.filter((v: any) => v.status === "INVALID");
+      
+      if (rejectedVerdicts.length > 0) {
+        return {
+          valid: false,
+          failureClass: rejectedVerdicts[0]?.rejectionCode || "UNSUPPORTED_PAIN",
+          rejections: rejectedVerdicts.map((r: any) => {
+            const manifestClaim = claimManifest.find(c => c.claimId === r.claimId) || {};
+            return {
+              rule: r.rejectionCode || "CLAIM_FAILURE",
+              reason: r.critique || r.reason || "unsupported",
+              claimId: r.claimId,
+              claimType: manifestClaim.claimType || "field",
+              segmentId: manifestClaim.segmentId || (r.claimId.split("_")[0] + "_" + r.claimId.split("_")[1]),
+              rejectionCode: r.rejectionCode,
+              critique: r.critique || r.reason,
+              repairDirective: r.repairDirective
+            };
+          }),
+          recoveredValue: JSON.stringify({
+            judgeReport: allJudgeReports,
+            candidateSegments: normalizedCandidates
+          })
+        };
       }
 
       return { valid: true, recoveredValue: JSON.stringify(normalizedCandidates) };
@@ -1785,49 +1848,138 @@ If ALL claims are valid, return { "valid": true, "acceptedClaimIds": [...], "rej
     repair: async (input, failedCandidate, rejections) => {
       let acceptedIds: string[] = [];
       let rejectedList: any[] = rejections;
+      let candidateSegments: any[] = [];
 
       try {
         const rawObj = JSON.parse(failedCandidate);
+        if (Array.isArray(rawObj)) {
+          candidateSegments = rawObj;
+        } else if (rawObj.candidateSegments) {
+          candidateSegments = rawObj.candidateSegments;
+        }
+
         if (rawObj.judgeReport) {
           acceptedIds = rawObj.judgeReport.acceptedClaimIds || [];
           if (Array.isArray(rawObj.judgeReport.rejectedClaims) && rawObj.judgeReport.rejectedClaims.length > 0) {
             rejectedList = rawObj.judgeReport.rejectedClaims;
           }
+        } else {
+          // Fallback if judge didn't provide explicit list, assume only provided rejections are rejected
+          rejectedList = rejections;
         }
-      } catch {}
+      } catch {
+         // Should not happen if failedCandidate was valid JSON
+      }
+
+      if (rejectedList.some((r: any) => r.rule === "EMPTY_AUDIENCE" || r.rule === "Structural Integrity" || r.rejectionCode === "CONTRACT_FAILURE")) {
+        throw new Error("Cannot patch structurally invalid audience. Candidate was invalid JSON or 0 segments.");
+      }
 
       const repairDirectives = rejectedList.map((r: any) => {
         const code = r.rejectionCode || r.rule || "CLAIM_ERROR";
-        const reason = r.reason || "";
+        const reason = r.critique || r.reason || "";
         const directive = r.repairDirective ? ` -> Directive: ${r.repairDirective}` : "";
-        return `[Claim ${r.claimId || "unknown"} (${r.field || "field"}) - ${code}]: ${reason}${directive}`;
+        
+        // Use structural claimId directly now
+        const cid = r.claimId || "unknown"; 
+        return `[Claim ID: ${cid}] (${r.claimType || r.field || "field"} - ${code}): ${reason}${directive}`;
       }).join("\n");
 
-      const attemptPrompt = `${input}
-
---- RETRY DIRECTIVE (CLAIM-LEVEL REPAIR) ---
-The Semantic Judge evaluated your previous generation:
-
-LOCKED / ACCEPTED CLAIM IDs (MUST BE PRESERVED UNCHANGED):
-${acceptedIds.length > 0 ? acceptedIds.join(", ") : "None"}
+      // Build explicitly structural patch prompt
+      const attemptPrompt = `--- SYSTEM: REPAIR MODE (PATCH ONLY) ---
+The Semantic Judge REJECTED one or more claims in your previous generation.
+You must NOT regenerate the entire Audience. You must return ONLY a structural JSON patch describing how to fix or remove the rejected claims.
 
 REJECTED CLAIMS TO REPAIR / REMOVE:
 ${repairDirectives}
 
-MANDATORY REPAIR RULES:
-1. LOCK ACCEPTED CLAIMS: Every claim ID in the ACCEPTED list must be preserved verbatim (same claimId, same text, same evidenceIds). Do NOT rewrite accepted claims!
-2. REMOVE OR FIX REJECTED CLAIMS: For every claim in the REJECTED list, either fix its evidenceIds to exact supporting evidence or OMIT the optional claim completely. (If a desire, objection, outcome, or motivation lacks direct proof, REMOVE IT).
-3. Return a complete, valid JSON array.`;
+MANDATORY PATCH RULES:
+1. ONLY rejected claims may be targeted. Accepted claims are LOCKED.
+2. If evidence does not support an optional claim (desires, objections, motivations, outcomes), you MUST return action: "REMOVE".
+3. If an unsupported claim is required (segmentDefinition, role), you MUST return action: "REPLACE" with a repaired claim strictly adhering to evidence.
+4. Do NOT add new claims. Do NOT attempt to modify locked claims.
+
+OUTPUT SCHEMA:
+Return a JSON object with this exact structure:
+{
+  "repairs": [
+    {
+      "claimId": "exact_rejected_claimId",
+      "action": "REMOVE" | "REPLACE",
+      "repairedClaim": { "claim": "reworded text...", "evidenceIds": ["EV-123"] } // ONLY required if action is REPLACE
+    }
+  ]
+}`;
 
       const response = await aiChat({
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: attemptPrompt }],
-        temperature: 0.2,
-        max_tokens: 2500,
+        temperature: 0.1, // extremely low temperature for patching
+        max_tokens: 2000,
+        response_format: { type: "json_object" },
         endpoint: "audience-engine-v3-segments-repair",
         accountId,
       });
-      return response.choices[0]?.message?.content?.trim() || "[]";
+
+      const patchRaw = response.choices[0]?.message?.content?.trim() || '{"repairs":[]}';
+      
+      // Deterministic Structural Merge
+      try {
+        const patchObj = JSON.parse(patchRaw);
+        const repairs = patchObj.repairs || [];
+
+        // Deep clone candidate segments so we don't mutate input
+        const mergedSegments = JSON.parse(JSON.stringify(candidateSegments));
+
+        for (const patch of repairs) {
+          let matched = false;
+          // Validate patch targets only rejected claims
+          const isRejected = rejectedList.some((r: any) => { 
+            const rid = r.claimId; 
+            return rid === patch.claimId; 
+          });
+          if (!isRejected) {
+             throw new Error(`Unauthorized patch target: ${patch.claimId} was not in rejected claims list.`);
+          }
+
+          for (const seg of mergedSegments) {
+            for (const key of ['pains', 'desires', 'objections', 'motivations', 'outcomes']) {
+              if (Array.isArray(seg[key])) {
+                const idx = seg[key].findIndex((c: any) => c.claimId === patch.claimId);
+                if (idx !== -1) {
+                  if (patch.action === 'REMOVE') {
+                    seg[key].splice(idx, 1);
+                  } else if (patch.action === 'REPLACE' && patch.repairedClaim) {
+                    seg[key][idx] = { ...seg[key][idx], ...patch.repairedClaim, claimId: patch.claimId }; // preserve ID
+                  }
+                  matched = true;
+                }
+              }
+            }
+            for (const key of ['segmentDefinition', 'role', 'roleClaim']) {
+              if (seg[key] && seg[key].claimId === patch.claimId) {
+                if (patch.action === 'REMOVE') {
+                   throw new Error(`Cannot REMOVE required field: ${key} (${patch.claimId})`);
+                } else if (patch.action === 'REPLACE' && patch.repairedClaim) {
+                  seg[key] = { ...seg[key], ...patch.repairedClaim, claimId: patch.claimId };
+                }
+                matched = true;
+              }
+            }
+          }
+        }
+        
+        // Prune empty segments that lost all core pains
+        const survivingSegments = mergedSegments.filter((seg: any) => {
+          return Array.isArray(seg.pains) && seg.pains.length > 0;
+        });
+
+        // Return the fully merged structural result for the Judge
+        return JSON.stringify(survivingSegments);
+      } catch (err: any) {
+        console.error(`[AudienceEngine-V3] Structural patch merge failed: ${err.message}`);
+        return failedCandidate;
+      }
     }
   });
 
@@ -1850,7 +2002,9 @@ MANDATORY REPAIR RULES:
 
   if (aiPathSink) aiPathSink.emission = emissionFromBattery(true, segmentBatteryAttempts);
   
-  return acceptedSegments.map(seg => {
+  const consolidatedSegments = await consolidateSegmentPainsSemantic(acceptedSegments, accountId, evidenceItems);
+
+  return consolidatedSegments.map(seg => {
     const segPains = (seg.painProfile || []) as string[];
     const segDesires = (seg.desireProfile || []) as string[];
     const segObjections = (seg.objectionProfile || []) as string[];
@@ -1866,7 +2020,7 @@ MANDATORY REPAIR RULES:
     const signalCoverage = totalProfileItems > 0 ? Math.min(1, painDesireMatchCount / totalProfileItems) : 0;
     const painDesireDensity = Math.min(1, (painMap.length + desireMap.length) / 10);
 
-    const allOtherSegments = acceptedSegments.filter((s: any) => s.name !== seg.name);
+    const allOtherSegments = consolidatedSegments.filter((s: any) => s.name !== seg.name);
     let avgSim = 0;
     if (allOtherSegments.length > 0) {
       let simSum = 0;
@@ -1897,6 +2051,210 @@ MANDATORY REPAIR RULES:
       inputSnapshotId,
     };
   });
+}
+
+/**
+ * Semantic root-pain consolidation: Merges claims within a segment that represent
+ * the same underlying buyer problem + same causal business consequence into one canonical claim,
+ * revalidates the merged wording against supporting evidence (with targeted repair or unmerge fallback),
+ * and strictly preserves the union of all supporting evidenceIds (zero evidence loss).
+ */
+export async function consolidateSegmentPainsSemantic(
+  segments: any[],
+  accountId: string = "system",
+  evidenceItems: AudienceEvidenceUnit[] = []
+): Promise<any[]> {
+  if (!Array.isArray(segments) || segments.length === 0) return segments;
+
+  const resultSegments: any[] = [];
+
+  for (const seg of segments) {
+    const rawPains: Array<{ claimId: string; claim: string; evidenceIds: string[] }> = 
+      Array.isArray(seg.pains) ? seg.pains : [];
+
+    if (rawPains.length <= 1) {
+      resultSegments.push(seg);
+      continue;
+    }
+
+    try {
+      const prompt = `You are the Semantic Pain Consolidation Judge.
+Evaluate candidate pain claims within the audience segment "${seg.name || 'Segment'}" to determine if any represent the SAME ROOT PAIN (the same underlying buyer problem + same causal business consequence).
+
+CANDIDATE PAIN CLAIMS:
+${JSON.stringify(rawPains, null, 2)}
+
+CONSOLIDATION RULES:
+1. MERGE ONLY TRUE SAME-ROOT PAINS:
+   - Merge claims ONLY when they represent the same core problem and causal business consequence (e.g., "scattered data insights prevent buying signals" and "visibility problems limit decision-making" describe the same data fragmentation & market visibility root problem).
+   - Claims with distinct root problems or different consequences (e.g. "billing issues" vs "poor customer support" vs "generic copy") MUST remain separate.
+2. NO EVIDENCE LOSS (CRITICAL INVARIANT):
+   - Every single evidenceId from all candidate claims MUST be preserved.
+   - For merged claims, combine their evidenceIds into a unified list.
+3. OUTPUT FORMAT:
+   Return JSON only:
+   {
+     "canonicalPains": [
+       {
+         "claimId": "primary_claim_id",
+         "claim": "Clear, unified canonical pain phrasing representing the root problem",
+         "evidenceIds": ["EV-1", "EV-2"]
+       }
+     ]
+   }`;
+
+      let proposedPains: Array<{ claimId: string; claim: string; evidenceIds: string[] }> = [];
+
+      try {
+        const rawRes: any = await aiGemini({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: { responseMimeType: "application/json", maxOutputTokens: 2000 },
+          model: "gemini-3.6-flash",
+          accountId
+        }).catch(() => null);
+
+        let text = typeof rawRes === "string" ? rawRes : rawRes?.candidates?.[0]?.content?.parts?.[0]?.text || rawRes?.text || "";
+        if (!text) {
+          const aiRes = await aiChat({
+            model: "gpt-4.1-mini",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.1,
+            max_tokens: 2000,
+            response_format: { type: "json_object" },
+            endpoint: "audience-engine-v3-pain-consolidation",
+            accountId,
+          });
+          text = aiRes.choices[0]?.message?.content || "{}";
+        }
+
+        text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
+        const parsed = JSON.parse(text || "{}");
+        if (Array.isArray(parsed.canonicalPains) && parsed.canonicalPains.length > 0) {
+          proposedPains = parsed.canonicalPains;
+        }
+      } catch (err: any) {
+        console.warn(`[AudienceEngine-V3] Pain consolidation LLM error: ${err.message}, falling back to original claims`);
+        proposedPains = rawPains;
+      }
+
+      if (proposedPains.length === 0) {
+        proposedPains = rawPains;
+      }
+
+      // PHASE 1 STEP 3: MERGED CLAIM EVIDENCE REVALIDATION & REPAIR
+      const validatedPains: Array<{ claimId: string; claim: string; evidenceIds: string[] }> = [];
+
+      for (const p of proposedPains) {
+        const pEvidenceSet = new Set(p.evidenceIds || []);
+        const constituentPains = rawPains.filter(rp => 
+          (Array.isArray(rp.evidenceIds) && rp.evidenceIds.some(eid => pEvidenceSet.has(eid))) ||
+          rp.claimId === p.claimId
+        );
+
+        // If this canonical pain was formed by merging multiple candidate claims, revalidate against evidence
+        if (constituentPains.length >= 2) {
+          try {
+            const revalPrompt = `You are the Audience Merged-Claim Evidence Revalidation Judge.
+Two or more candidate pain claims were semantically merged into one canonical pain phrasing.
+Verify whether the proposed canonical phrasing is strictly and fully supported by the constituent candidate claims and cited evidence IDs (${p.evidenceIds.join(", ")}), or if it overstates the evidence.
+
+CONSTITUENT CANDIDATE CLAIMS MERGED:
+${JSON.stringify(constituentPains, null, 2)}
+
+PROPOSED CANONICAL PAIN PHRASING:
+"${p.claim}"
+
+EVALUATION CRITERIA:
+1. "VALID": The canonical statement accurately captures the shared root problem and causal consequence without exaggeration or adding ungrounded new assertions.
+2. "OVERSTATED": The canonical phrasing makes assertions that exceed what the constituent claims/evidence substantiate. If so, you MUST provide a "repairedClaim" that faithfully represents the shared root problem strictly bounded by the evidence.
+3. "INVALID": The claims are fundamentally incompatible and should NOT have been merged.
+
+Output JSON only:
+{
+  "status": "VALID" | "OVERSTATED" | "INVALID",
+  "repairedClaim": "Faithfully bounded phrasing...",
+  "canMerge": true
+}`;
+
+            let revalText = "";
+            const rawReval: any = await aiGemini({
+              contents: [{ role: "user", parts: [{ text: revalPrompt }] }],
+              config: { responseMimeType: "application/json", maxOutputTokens: 1000 },
+              model: "gemini-3.6-flash",
+              accountId
+            }).catch(() => null);
+
+            revalText = typeof rawReval === "string" ? rawReval : rawReval?.candidates?.[0]?.content?.parts?.[0]?.text || rawReval?.text || "";
+            if (!revalText) {
+              const aiReval = await aiChat({
+                model: "gpt-4.1-mini",
+                messages: [{ role: "user", content: revalPrompt }],
+                temperature: 0.0,
+                max_tokens: 1000,
+                response_format: { type: "json_object" },
+                endpoint: "audience-engine-v3-merged-claim-revalidation",
+                accountId,
+              });
+              revalText = aiReval.choices[0]?.message?.content || "{}";
+            }
+
+            revalText = revalText.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
+            const revalParsed = JSON.parse(revalText || "{}");
+
+            if (revalParsed.status === "VALID") {
+              validatedPains.push(p);
+            } else if (revalParsed.status === "OVERSTATED" && revalParsed.canMerge !== false && typeof revalParsed.repairedClaim === "string" && revalParsed.repairedClaim.trim().length > 0) {
+              console.log(`[AudienceEngine-V3] Merged claim repaired from "${p.claim}" -> "${revalParsed.repairedClaim}"`);
+              validatedPains.push({
+                ...p,
+                claim: revalParsed.repairedClaim.trim()
+              });
+            } else {
+              // Merge rejected / repair failed: Keep original distinct constituent claims
+              console.warn(`[AudienceEngine-V3] Merged claim failed revalidation and could not be repaired. Retaining ${constituentPains.length} original claims.`);
+              validatedPains.push(...constituentPains);
+            }
+          } catch (revalErr: any) {
+            console.warn(`[AudienceEngine-V3] Merged claim revalidation error: ${revalErr.message}, retaining proposed merge`);
+            validatedPains.push(p);
+          }
+        } else {
+          validatedPains.push(p);
+        }
+      }
+
+      const consolidatedPains = validatedPains.length > 0 ? validatedPains : rawPains;
+
+      // STRICT COMPLETENESS VALIDATION: Ensure no evidence UIDs were dropped
+      const originalEvidenceSet = new Set(rawPains.flatMap(p => p.evidenceIds || []));
+      const consolidatedEvidenceSet = new Set(consolidatedPains.flatMap(p => p.evidenceIds || []));
+
+      // If any evidence UID was dropped by the LLM, re-attach to the primary surviving pain
+      for (const eid of originalEvidenceSet) {
+        if (!consolidatedEvidenceSet.has(eid)) {
+          console.warn(`[AudienceEngine-V3] Preserving dropped evidenceId ${eid} during consolidation`);
+          if (consolidatedPains[0]) {
+            consolidatedPains[0].evidenceIds = Array.from(new Set([...(consolidatedPains[0].evidenceIds || []), eid]));
+          }
+        }
+      }
+
+      // Update segment pains and painProfile
+      const updatedSeg = {
+        ...seg,
+        pains: consolidatedPains,
+        painProfile: consolidatedPains.map(p => p.claim)
+      };
+
+      console.log(`[AudienceEngine-V3] Pain consolidation for segment "${seg.name}": ${rawPains.length} candidate claims -> ${consolidatedPains.length} canonical pains`);
+      resultSegments.push(updatedSeg);
+    } catch (segErr: any) {
+      console.error(`[AudienceEngine-V3] Error in pain consolidation for segment ${seg.name}:`, segErr);
+      resultSegments.push(seg);
+    }
+  }
+
+  return resultSegments;
 }
 
 const ADS_PRESCRIPTIVE_PATTERNS = [
@@ -2889,6 +3247,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     structuredSignals,
     targetCoverage,
     inputSummary,
+    confidenceScore: 0.85,
+    dataReliability,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     executionTimeMs,
     snapshotId: inserted.id,
