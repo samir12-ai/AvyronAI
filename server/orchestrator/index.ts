@@ -1,6 +1,7 @@
 import { validateAuthorityLineage } from "../shared/lineage-validator";
 // @ts-nocheck
 import { z } from "zod";
+import { getExecutableCoreLanes } from "../shared/executable-lanes";
 import { db } from "../db";
 import { buildAnalyticalPackage, persistAELSnapshot } from "../analytical-enrichment-layer/engine";
 import { inFlightJobs } from "@shared/schema";
@@ -169,6 +170,8 @@ import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from ".
 import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision, appendPriorDecision } from "./doctrine-seed";
 import { buildSubEngineAnchorContext } from "../shared/strategic-doctrine";
 import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
+import { loadProductDNA } from "../shared/product-dna";
+import { getLatestPerformanceContext, recordEnginePerformanceConsumptionDB } from "../performance-loop/strategy-router";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
 import { runAwarenessEngine } from "../awareness-engine/engine";
@@ -738,10 +741,10 @@ function extractAudienceInput(audienceResult: any): any {
     ? rawObjections.reduce((acc: Record<string, any>, item: any, idx: number) => {
         const labelCandidate = typeof item === "string"
           ? item
-          : (item?.label || item?.objection || item?.text || item?.name || null);
+          : (item?.canonical || item?.label || item?.objection || item?.text || item?.name || null);
         const id = typeof item === "string"
           ? item
-          : (item?.key || `objection_${idx}`);
+          : (item?.id || item?.key || `objection_${idx}`);
         const value = typeof item === "object" && item !== null
           ? { ...item, id, label: labelCandidate }
           : { id, label: labelCandidate, raw: item };
@@ -754,10 +757,10 @@ function extractAudienceInput(audienceResult: any): any {
     ? rawDesire.reduce((acc: Record<string, any>, item: any, idx: number) => {
         const labelCandidate = typeof item === "string"
           ? item
-          : (item?.label || item?.desire || item?.text || item?.name || null);
+          : (item?.canonical || item?.label || item?.desire || item?.text || item?.name || null);
         const id = typeof item === "string"
           ? item
-          : (item?.key || `desire_${idx}`);
+          : (item?.id || item?.key || `desire_${idx}`);
         const value = typeof item === "object" && item !== null
           ? { ...item, id, label: labelCandidate }
           : { id, label: labelCandidate, raw: item };
@@ -767,6 +770,14 @@ function extractAudienceInput(audienceResult: any): any {
     : (rawDesire && typeof rawDesire === "object" ? rawDesire : {});
   const segments = audienceResult.audienceSegments || audienceResult.segments || [];
   const coercedMaturity = coerceMaturityIndex(audienceResult.maturityIndex);
+  const productTruthFacts = audienceResult.productTruthFacts
+    || audienceResult.inputSummary?.productTruthFacts
+    || audienceResult.productDna?.productTruthFacts
+    || [];
+  const targetRoles = audienceResult.targetRoles
+    || audienceResult.inputSummary?.targetRoles
+    || audienceResult.productDna?.targetRoles
+    || [];
   return {
     // CANONICAL: only `audiencePains` is emitted. Legacy `painProfiles` /
     // `painMap` aliases are intentionally NOT propagated.
@@ -780,6 +791,9 @@ function extractAudienceInput(audienceResult: any): any {
     awarenessLevel,
     maturityIndex: coercedMaturity.value,
     maturitySource: coercedMaturity.source,
+    productTruthFacts,
+    targetRoles,
+    productDna: audienceResult.productDna || null,
   };
 }
 
@@ -1691,7 +1705,7 @@ async function executeEngine(
           }
         }
         if (!result) {
-          result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId, runStrategicContextOf(ctx));
+          result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId, runStrategicContextOf(ctx, "Audience"));
           if (result?.snapshotId) {
             try {
               await db.update(audienceSnapshotsTbl).set({ inputHash: audInputHash }).where(eq(audienceSnapshotsTbl.id, result.snapshotId));
@@ -1813,20 +1827,39 @@ async function executeEngine(
               }
             );
 
-            // Task 163 / Positioning Correction 3: 
             // Rebuild Lanes purely from the newly qualified pain portfolio.
-            // DO NOT feed any existing contaminated lanes to the groupers.
+            // DO NOT feed any EXCLUDED / STRATEGIC_EXCLUDED / INCOMPLETE pains to the grouper.
+            const authorizedLanePains = (ctx.painRegistry || []).filter((p: any) => {
+              const c = p.classification;
+              return (c === "CORE_PURCHASE" || c === "CORE" || c === "SUPPORTING") &&
+                     c !== "STRATEGIC_EXCLUDED" &&
+                     c !== "EXCLUDED" &&
+                     c !== "INCOMPLETE";
+            });
+
+            const authorizedPainIds = new Set(authorizedLanePains.map((p: any) => p.painId));
+            const rawSegments = (ctx.audience as any)?.audienceSegments ?? [];
+            const authorizedSegments = rawSegments.filter((seg: any) => {
+              const segPains = Array.isArray(seg.pains) ? seg.pains : [];
+              const segPainIds = segPains.map((p: any) => p.claimId || p.painId || p.id || p);
+              return segPainIds.some((pid: string) => authorizedPainIds.has(pid)) ||
+                     authorizedLanePains.some((ap: any) => (ap.segmentIds || []).includes(seg.id));
+            });
+
             const lanes = await runLaneGrouper(
-              (ctx.audience as any)?.audienceSegments ?? [],
-              ctx.painRegistry || [],
+              authorizedSegments.length > 0 ? authorizedSegments : rawSegments,
+              authorizedLanePains,
               {
                 accountId: config.accountId,
                 campaignId: config.campaignId,
+                jobId,
+                campaignOfferingId: (ctx.ssc?.doctrine as any)?.campaignOfferingId,
                 productCapabilities,
               }
             );
             ctx.strategicLanes = lanes;
-            console.log(`[Orchestrator] STRATEGIC_LANES_BUILT | lanes=${lanes.length}`);
+            ctx.approvedLanes = lanes;
+            console.log(`[Orchestrator] STRATEGIC_LANES_BUILT | lanes=${lanes.length} | authorizedPains=${authorizedLanePains.length}`);
           }
         } catch (painErr: any) {
           console.error(`[Orchestrator] PAIN_REGISTRY_BUILD_FAILED | ${painErr.message} — halting pipeline to prevent deterministic pain bypassing`);
@@ -2048,7 +2081,7 @@ async function executeEngine(
             ctx.audienceSnapshotId,
             ctx.analyticalEnrichment,
             jobId,
-            runStrategicContextOf(ctx),
+            runStrategicContextOf(ctx, "Positioning"),
             ctx.painRegistry,
             ctx.strategicLanes,
             ctx.differentiation
@@ -2153,9 +2186,16 @@ async function executeEngine(
         if (!diffReused) {
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "differentiation" });
         const audInput = extractAudienceInput(ctx.audience);
+        let ptFacts = audInput.productTruthFacts || [];
+        if (!ptFacts || ptFacts.length === 0) {
+          const dna = await loadProductDNA(config.campaignId, config.accountId);
+          if (dna?.productTruthFacts?.length) {
+            ptFacts = dna.productTruthFacts;
+          }
+        }
         result = await runDifferentiationEngine(
           miInput,
-          { ...audInput, painRegistry: ctx.painRegistry },
+          { ...audInput, painRegistry: ctx.painRegistry, productTruthFacts: ptFacts },
           { territories: [], differentiationVector: null, enemyDefinition: null, contrastAxis: null, narrativeDirection: null, flankingMode: false, stabilityResult: null, strategyCards: [] },
           { accountId: config.accountId, campaignId: config.campaignId, jobId: jobId, audienceSnapshotId: ctx.audienceSnapshotId, miSnapshotId: ctx.miSnapshotId }
         );
@@ -2298,7 +2338,7 @@ async function executeEngine(
           // T002 v2: confidence flows downstream
           confidenceScore: typeof ctx.differentiation?.confidenceScore === "number" ? ctx.differentiation.confidenceScore : null,
         };
-        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx), (ctx.audience as any)?.productDna || null, ctx.painRegistry);
+        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx, "Mechanism"), (ctx.audience as any)?.productDna || null, ctx.painRegistry);
         output = result;
         ctx.mechanism = result;
 
@@ -2495,7 +2535,7 @@ async function executeEngine(
           activeRoot,
           ctx.analyticalEnrichment,
           ctx.ssc?.commercialSignals || null,
-          runStrategicContextOf(ctx),
+          runStrategicContextOf(ctx, "Offer"),
           (ctx.audience as any)?.productDna || null,
         );
         output = result;
@@ -2569,7 +2609,14 @@ async function executeEngine(
           // fields fed CEL an empty text list, guaranteeing a
           // missing_alignment FAIL every run.
           const poCel = result.primaryOffer;
-          const offerTexts = [poCel?.offerName, poCel?.coreOutcome, poCel?.mechanismDescription, poCel?.problemStatement].filter(Boolean);
+          const offerTexts = [
+            poCel?.offerName,
+            poCel?.coreOutcome,
+            poCel?.mechanismDescription,
+            poCel?.problemStatement,
+            ...(Array.isArray(poCel?.objectionHandling) ? poCel.objectionHandling : []),
+            ...(Array.isArray(poCel?.deliverables) ? poCel.deliverables : []),
+          ].filter(Boolean);
           if (offerTexts.length === 0) {
             console.warn(`[Orchestrator] CEL_OFFER_INPUT_EMPTY | primaryOffer yielded no evaluable text — CEL will evaluate an empty output`);
           }
@@ -2647,7 +2694,7 @@ async function executeEngine(
             industry: (config as any).industry ?? process.env.COMMERCIAL_REASONER_CURRENT_INDUSTRY ?? null,
             businessProfile: ctx.businessProfile ?? null,
           } as any,
-          runStrategicContextOf(ctx),
+          runStrategicContextOf(ctx, "Awareness"),
           (ctx.audience as any)?.productDna || null,
         );
         output = result;
@@ -2798,56 +2845,94 @@ async function executeEngine(
           awarenessStrengthScore: ctx.awareness.primaryRoute?.awarenessStrengthScore || 0,
           _canonicalAwareness: ctx.ssc?.awarenessMeaning || undefined,
         } : null;
-        const __funnelStart = Date.now();
-        const result = await runFunnelEngine(
-          miInput, { ...audInput, painRegistry: ctx.painRegistry }, offerInput, posInput, diffInput,
-          config.accountId, awarenessInput,
-          ctx.analyticalEnrichment,
-          runStrategicContextOf(ctx),
-          (ctx.audience as any)?.productDna || null
+        const executableLanes = getExecutableCoreLanes(
+          ctx.approvedLanes || ctx.strategicLanes,
+          ctx.painRegistry,
+          ctx.audience?.audienceSegments || (ctx.audience as any)?.segments || []
         );
-        output = result;
-        ctx.funnel = result;
+        console.log(`[Orchestrator] FUNNEL_LANE_FANOUT | executableLanes=${executableLanes.length}`);
 
-        try {
-          const [fnSnap] = await db.insert(funnelSnapshots).values({
-            accountId: config.accountId,
-            campaignId: config.campaignId,
-            jobId,
-            offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
-            awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || null,
-            miSnapshotId: ctx.miSnapshotId || "N/A",
-            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
-            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
-            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
-            engineVersion: FUNNEL_ENGINE_VERSION,
-            status: resolveSnapshotWriteStatus(result),
-            statusMessage: result.statusMessage || null,
-            primaryFunnel: JSON.stringify((result as any).primaryFunnel || result),
-            alternativeFunnel: JSON.stringify((result as any).alternativeFunnel || null),
-            rejectedFunnel: JSON.stringify((result as any).rejectedFunnel || null),
-            funnelStrengthScore: (result as any).funnelStrengthScore ?? null,
-            trustPathAnalysis: JSON.stringify((result as any).trustPathAnalysis || null),
-            proofPlacementLogic: JSON.stringify((result as any).proofPlacementLogic || null),
-            frictionMap: JSON.stringify((result as any).frictionMap || null),
-            boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
-            confidenceScore: (result as any).confidenceScore ?? null,
-            executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __funnelStart),
-            inputHash: funnelInputHash,
-          }).returning({ id: funnelSnapshots.id });
-          (result as any).snapshotId = fnSnap.id;
-          snapshotId = fnSnap.id;
-        } catch (e: any) {
-          console.error(`[Orchestrator] FUNNEL_PERSIST_FAILED | job=${jobId} | ${e.message}`);
-          snapshotId = result.snapshotId;
+        const funnelsByLane = new Map<string, any>();
+        let lastResult: any = null;
+        let lastSnapshotId: string = "";
+
+        for (const lane of executableLanes) {
+          const laneAudInput = {
+            ...audInput,
+            painRegistry: ctx.painRegistry,
+            laneId: lane.laneId,
+            laneContext: lane,
+          };
+          const __funnelStart = Date.now();
+          const result = await runFunnelEngine(
+            miInput, laneAudInput, offerInput, posInput, diffInput,
+            config.accountId, awarenessInput,
+            ctx.analyticalEnrichment,
+            { ...runStrategicContextOf(ctx, "Funnel"), laneId: lane.laneId, laneContext: lane } as any,
+            (ctx.audience as any)?.productDna || null
+          );
+
+          result.laneId = lane.laneId;
+          result.primaryCorePainId = lane.primaryCorePainId;
+          result.segmentIds = lane.segmentIds;
+
+          try {
+            const [fnSnap] = await db.insert(funnelSnapshots).values({
+              accountId: config.accountId,
+              campaignId: config.campaignId,
+              jobId,
+              laneId: lane.laneId,
+              offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
+              awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || null,
+              miSnapshotId: ctx.miSnapshotId || "N/A",
+              audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+              positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+              differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+              engineVersion: FUNNEL_ENGINE_VERSION,
+              status: resolveSnapshotWriteStatus(result),
+              statusMessage: result.statusMessage || null,
+              primaryFunnel: JSON.stringify((result as any).primaryFunnel || result),
+              alternativeFunnel: JSON.stringify((result as any).alternativeFunnel || null),
+              rejectedFunnel: JSON.stringify((result as any).rejectedFunnel || null),
+              funnelStrengthScore: (result as any).funnelStrengthScore ?? null,
+              trustPathAnalysis: JSON.stringify((result as any).trustPathAnalysis || null),
+              proofPlacementLogic: JSON.stringify((result as any).proofPlacementLogic || null),
+              frictionMap: JSON.stringify((result as any).frictionMap || null),
+              boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
+              confidenceScore: (result as any).confidenceScore ?? null,
+              executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __funnelStart),
+              inputHash: funnelInputHash,
+            }).returning({ id: funnelSnapshots.id });
+            (result as any).snapshotId = fnSnap.id;
+            lastSnapshotId = fnSnap.id;
+          } catch (e: any) {
+            console.error(`[Orchestrator] FUNNEL_PERSIST_FAILED | job=${jobId} | lane=${lane.laneId} | ${e.message}`);
+            lastSnapshotId = result.snapshotId;
+          }
+
+          funnelsByLane.set(lane.laneId, result);
+          results.set(`funnel:${lane.laneId}` as any, {
+            engineId: `funnel:${lane.laneId}` as any,
+            status: result.status === "COMPLETE" || result.status === "SUCCESS" ? "SUCCESS" : "ERROR",
+            output: result,
+            executionTimeMs: result.executionTimeMs || 0,
+            snapshotId: (result as any).snapshotId,
+          } as any);
+          lastResult = result;
         }
+
+        output = lastResult;
+        ctx.funnel = lastResult;
+        ctx.funnelsByLane = funnelsByLane;
+        results.set("funnels" as any, funnelsByLane as any);
+        snapshotId = lastSnapshotId;
 
         if (ctx.analyticalEnrichment) {
           // Field-drift repair (2026-07): the funnel engine returns
           // { primaryFunnel: { stageMap, groundedJourneyRationale, ... } } —
           // there is no top-level `stages`. Reading `result.stages` fed CEL an
           // empty text list, guaranteeing a missing_alignment FAIL every run.
-          const pfCel = result.primaryFunnel;
+          const pfCel = lastResult?.primaryFunnel;
           const funnelTexts: string[] = [
             ...(pfCel?.stageMap || []).map((s: any) => `${s.name || ""} ${s.purpose || ""} ${s.contentType || ""} ${s.conversionGoal || ""}`),
             ...(Array.isArray(pfCel?.groundedJourneyRationale) ? pfCel.groundedJourneyRationale.filter((t: any) => typeof t === "string") : []),
@@ -2863,19 +2948,19 @@ async function executeEngine(
             console.log(`[Orchestrator] CEL_FUNNEL | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
           }
         }
-        if (result.celDepthCompliance) {
+        if (lastResult?.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
-          ctx.celResults.push(result.celDepthCompliance);
-          console.log(`[Orchestrator] CEL_FUNNEL_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+          ctx.celResults.push(lastResult.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_FUNNEL_DEPTH | depthScore=${lastResult.celDepthCompliance.causalDepthScore} | violations=${lastResult.celDepthCompliance.violations.length}`);
         }
-        if (result.status === "DEPTH_FAILED") {
+        if (lastResult?.status === "DEPTH_FAILED") {
           ctx.depthGateStatus!.funnel = "DEPTH_FAILED";
           console.log(`[Orchestrator] DEPTH_GATE_STATUS | funnel=DEPTH_FAILED`);
         } else {
           ctx.depthGateStatus!.funnel = "DEPTH_PASSED";
         }
-        if (result.depthGateResult) {
-          console.log(`[Orchestrator] DEPTH_GATE_FUNNEL | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
+        if (lastResult?.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_FUNNEL | status=${lastResult.depthGateResult.status} | attempts=${lastResult.depthGateResult.attempt}/${lastResult.depthGateResult.maxAttempts}`);
         }
         break;
       }
@@ -2905,7 +2990,11 @@ async function executeEngine(
           logReuseMiss("integrity", integrityInputHash);
         }
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "integrity" });
-        const audInput = extractAudienceInput(ctx.audience);
+        const audInput = {
+          ...extractAudienceInput(ctx.audience),
+          painRegistry: ctx.painRegistry,
+          strategicLanes: ctx.strategicLanes,
+        };
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const offerInput = extractOfferInput(ctx.offer);
@@ -2981,88 +3070,123 @@ async function executeEngine(
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const offerInput = extractOfferInput(ctx.offer);
-        const funnelInput = extractFunnelInput(ctx.funnel);
-        const integrityInput = ctx.integrity || {};
-        const awarenessInput = ctx.awareness || {};
-        if (ctx.ssc?.awarenessMeaning && awarenessInput.primaryRoute) {
-          const canonicalStage = ctx.ssc.awarenessMeaning.stage;
-          const currentStage = awarenessInput.primaryRoute.targetReadinessStage;
-          if (currentStage !== canonicalStage) {
-            console.log(`[Orchestrator] SSC_AWARENESS_OVERRIDE | persuasion | was=${currentStage} | canonical=${canonicalStage}`);
-            awarenessInput.primaryRoute.targetReadinessStage = canonicalStage;
-          }
-          awarenessInput._canonicalAwareness = ctx.ssc.awarenessMeaning;
-        }
-        const persuasionLineage = buildUpstreamLineage(ctx);
-        const __persStart = Date.now();
-        const result = await runPersuasionEngine(
-          miInput, { ...audInput, painRegistry: ctx.painRegistry, approvedLanes: ctx.approvedLanes }, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
-          config.accountId, persuasionLineage,
-          ctx.analyticalEnrichment,
-          runStrategicContextOf(ctx),
-          (ctx.audience as any)?.productDna || null
+        const awarenessInput = ctx.awareness ? {
+          awarenessStage: (ctx.awareness as any)?.awarenessStage || (ctx.awareness as any)?.primaryRoute?.awarenessStage || "problem_aware",
+          entryMechanism: (ctx.awareness as any)?.entryMechanism || (ctx.awareness as any)?.primaryRoute?.entryMechanismType || "unknown",
+          triggerClass: (ctx.awareness as any)?.triggerClass || (ctx.awareness as any)?.primaryRoute?.triggerClass || "unknown",
+          trustState: (ctx.awareness as any)?.trustState || (ctx.awareness as any)?.primaryRoute?.trustRequirement || "moderate",
+          awarenessRoute: (ctx.awareness as any)?.awarenessRoute || (ctx.awareness as any)?.primaryRoute?.routeName || "default",
+          awarenessStrengthScore: (ctx.awareness as any)?.awarenessStrengthScore || (ctx.awareness as any)?.primaryRoute?.awarenessStrengthScore || 0,
+          _canonicalAwareness: ctx.ssc?.awarenessMeaning || undefined,
+        } : null;
+        const executableLanes = getExecutableCoreLanes(
+          ctx.approvedLanes || ctx.strategicLanes,
+          ctx.painRegistry,
+          ctx.audience?.audienceSegments || (ctx.audience as any)?.segments || []
         );
-        output = result;
-        ctx.persuasion = result;
+        console.log(`[Orchestrator] PERSUASION_LANE_FANOUT | executableLanes=${executableLanes.length}`);
 
-        // ── COMMERCIAL SIGNAL EMISSION: trustMechanism (Phase 1 marketing-logic upgrade) ──
-        // Emit the persuasion engine's trust-transfer design as a commercial signal
-        // for downstream consumers (content/funnel/channel engines + validation harness).
-        try {
-          const ttd = (result as any)?.primaryRoute?.trustTransferDesign;
-          if (ttd && ctx.ssc) {
-            emitCommercialSignal(ctx.ssc, "trustMechanism", {
-              buyerRiskState: ttd.buyerRiskState,
-              riskSeverity: ttd.riskSeverity,
-              trustDeficit: ttd.trustDeficit,
-              transferMechanism: ttd.transferMechanism?.name || "",
-              proofArtifact: ttd.transferMechanism?.proofArtifact || "",
-              commercialFunction: ttd.commercialFunction,
-              judgeVerdict: ttd.judgeVerdict,
-              emittedAt: Date.now(),
-            });
+        const persuasionsByLane = new Map<string, any>();
+        let lastResult: any = null;
+        let lastSnapshotId: string = "";
+
+        for (const lane of executableLanes) {
+          const laneFunnel = ctx.funnelsByLane?.get(lane.laneId) || ctx.funnel;
+          const funnelInput = extractFunnelInput(laneFunnel);
+          (funnelInput as any).snapshotId = (laneFunnel as any)?.snapshotId;
+          (funnelInput as any).laneId = lane.laneId;
+
+          const laneAudInput = {
+            ...audInput,
+            painRegistry: ctx.painRegistry,
+            approvedLanes: ctx.approvedLanes,
+            laneId: lane.laneId,
+            laneContext: lane,
+          };
+
+          const persuasionLineage = buildUpstreamLineage(ctx);
+          const integrityInput = (ctx as any).integrity ? {
+            overallIntegrityScore: (ctx as any).integrity.overallIntegrityScore ?? 1.0,
+            safeToExecute: (ctx as any).integrity.safeToExecute ?? true,
+            layerResults: (ctx as any).integrity.layerResults ?? [],
+            structuralWarnings: (ctx as any).integrity.structuralWarnings ?? [],
+            flaggedInconsistencies: (ctx as any).integrity.flaggedInconsistencies ?? [],
+          } : {
+            overallIntegrityScore: 1.0,
+            safeToExecute: true,
+            layerResults: [],
+            structuralWarnings: [],
+            flaggedInconsistencies: [],
+          };
+          const __persStart = Date.now();
+          const result = await runPersuasionEngine(
+            miInput, laneAudInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
+            config.accountId, persuasionLineage,
+            ctx.analyticalEnrichment,
+            { ...runStrategicContextOf(ctx, "Persuasion"), laneId: lane.laneId, laneContext: lane } as any,
+            (ctx.audience as any)?.productDna || null
+          );
+
+          result.laneId = lane.laneId;
+          result.primaryCorePainId = lane.primaryCorePainId;
+          result.segmentIds = lane.segmentIds;
+          result.funnelSnapshotId = (laneFunnel as any)?.snapshotId;
+
+          try {
+            const [persSnap] = await db.insert(persuasionSnapshots).values({
+              accountId: config.accountId,
+              campaignId: config.campaignId,
+              jobId,
+              laneId: lane.laneId,
+              awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || "N/A",
+              integritySnapshotId: ctx.integritySnapshotId || "N/A",
+              funnelSnapshotId: (laneFunnel as any)?.snapshotId || (ctx.funnel as any)?.snapshotId || "N/A",
+              offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
+              miSnapshotId: ctx.miSnapshotId || "N/A",
+              audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
+              positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
+              differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
+              engineVersion: PERSUASION_ENGINE_VERSION,
+              status: resolveSnapshotWriteStatus(result),
+              statusMessage: result.statusMessage || null,
+              primaryRoute: JSON.stringify((result as any).primaryRoute || result),
+              alternativeRoute: JSON.stringify((result as any).alternativeRoute || null),
+              rejectedRoute: JSON.stringify((result as any).rejectedRoute || null),
+              layerResults: JSON.stringify((result as any).layerResults || null),
+              structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
+              boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
+              dataReliability: JSON.stringify((result as any).dataReliability || null),
+              persuasionStrengthScore: (result as any).primaryRoute?.persuasionStrengthScore ?? null,
+              executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __persStart),
+              inputHash: persuasionInputHash,
+            }).returning({ id: persuasionSnapshots.id });
+            (result as any).snapshotId = persSnap.id;
+            lastSnapshotId = persSnap.id;
+          } catch (e: any) {
+            console.error(`[Orchestrator] PERSUASION_PERSIST_FAILED | job=${jobId} | lane=${lane.laneId} | ${e.message}`);
+            lastSnapshotId = result.snapshotId;
           }
-        } catch (sigErr: any) {
-          console.warn(`[Orchestrator] PERSUASION_SIGNAL_EMIT_FAILED | ${sigErr.message}`);
+
+          persuasionsByLane.set(lane.laneId, result);
+          const isPersuasionValid = result.status === "COMPLETE" || result.status === "SUCCESS" || result.status === "PARTIAL" || result.status === "ACCEPTABLE" || (result.primaryRoute && result.status !== "INTEGRITY_FAILED" && result.status !== "ERROR" && result.status !== "BLOCKED");
+          results.set(`persuasion:${lane.laneId}` as any, {
+            engineId: `persuasion:${lane.laneId}` as any,
+            status: isPersuasionValid ? "SUCCESS" : (result.primaryRoute ? "PARTIAL" : "ERROR"),
+            output: result,
+            executionTimeMs: result.executionTimeMs || 0,
+            snapshotId: (result as any).snapshotId,
+          } as any);
+          lastResult = result;
         }
 
-        try {
-          const [persSnap] = await db.insert(persuasionSnapshots).values({
-            accountId: config.accountId,
-            campaignId: config.campaignId,
-            jobId,
-            awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || "N/A",
-            integritySnapshotId: ctx.integritySnapshotId || "N/A",
-            funnelSnapshotId: (ctx.funnel as any)?.snapshotId || "N/A",
-            offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
-            miSnapshotId: ctx.miSnapshotId || "N/A",
-            audienceSnapshotId: ctx.audienceSnapshotId || "N/A",
-            positioningSnapshotId: ctx.positioningSnapshotId || "N/A",
-            differentiationSnapshotId: ctx.differentiationSnapshotId || "N/A",
-            engineVersion: PERSUASION_ENGINE_VERSION,
-            status: resolveSnapshotWriteStatus(result),
-            statusMessage: result.statusMessage || null,
-            primaryRoute: JSON.stringify((result as any).primaryRoute || null),
-            alternativeRoute: JSON.stringify((result as any).alternativeRoute || null),
-            rejectedRoute: JSON.stringify((result as any).rejectedRoute || null),
-            layerResults: JSON.stringify((result as any).layerResults || null),
-            structuralWarnings: JSON.stringify((result as any).structuralWarnings || []),
-            boundaryCheck: JSON.stringify((result as any).boundaryCheck || null),
-            dataReliability: JSON.stringify((result as any).dataReliability || null),
-            // T008 [DEPRECATED 2026-05-03]: confidence_normalized — see awareness snapshot above.
-            persuasionStrengthScore: (result as any).primaryRoute?.persuasionStrengthScore ?? null,
-            executionTimeMs: (result as any).executionTimeMs ?? (Date.now() - __persStart),
-            inputHash: persuasionInputHash,
-          }).returning({ id: persuasionSnapshots.id });
-          (result as any).snapshotId = persSnap.id;
-          snapshotId = persSnap.id;
-        } catch (e: any) {
-          console.error(`[Orchestrator] PERSUASION_PERSIST_FAILED | job=${jobId} | ${e.message}`);
-          snapshotId = result.snapshotId;
-        }
+        output = lastResult;
+        ctx.persuasion = lastResult;
+        ctx.persuasionsByLane = persuasionsByLane;
+        results.set("persuasions" as any, persuasionsByLane as any);
+        snapshotId = lastSnapshotId;
 
         if (ctx.analyticalEnrichment) {
-          const pr: any = result.primaryRoute || {};
+          const pr: any = lastResult?.primaryRoute || {};
           const persTexts: string[] = [
             pr.routeName || "",
             pr.persuasionMode || "",
@@ -3082,19 +3206,19 @@ async function executeEngine(
             console.log(`[Orchestrator] CEL_PERSUASION | violations=${celResult.violations.length} | score=${celResult.score.toFixed(2)}`);
           }
         }
-        if (result.celDepthCompliance) {
+        if (lastResult?.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
-          ctx.celResults.push(result.celDepthCompliance);
-          console.log(`[Orchestrator] CEL_PERSUASION_DEPTH | depthScore=${result.celDepthCompliance.causalDepthScore} | violations=${result.celDepthCompliance.violations.length}`);
+          ctx.celResults.push(lastResult.celDepthCompliance);
+          console.log(`[Orchestrator] CEL_PERSUASION_DEPTH | depthScore=${lastResult.celDepthCompliance.causalDepthScore} | violations=${lastResult.celDepthCompliance.violations.length}`);
         }
-        if (result.status === "DEPTH_FAILED") {
+        if (lastResult?.status === "DEPTH_FAILED") {
           ctx.depthGateStatus!.persuasion = "DEPTH_FAILED";
           console.log(`[Orchestrator] DEPTH_GATE_STATUS | persuasion=DEPTH_FAILED`);
         } else {
           ctx.depthGateStatus!.persuasion = "DEPTH_PASSED";
         }
-        if (result.depthGateResult) {
-          console.log(`[Orchestrator] DEPTH_GATE_PERSUASION | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
+        if (lastResult?.depthGateResult) {
+          console.log(`[Orchestrator] DEPTH_GATE_PERSUASION | status=${lastResult.depthGateResult.status} | attempts=${lastResult.depthGateResult.attempt}/${lastResult.depthGateResult.maxAttempts}`);
         }
         break;
       }
@@ -4159,6 +4283,16 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   ctx.ssc = createEmptySSC(config.campaignId, config.accountId);
   console.log(`[Orchestrator] SSC_INITIALIZED | campaignId=${config.campaignId} | accountId=${config.accountId}`);
 
+  try {
+    const perfCtx = await getLatestPerformanceContext(config.campaignId, config.accountId);
+    ctx.performanceContext = perfCtx;
+    if (perfCtx) {
+      console.log(`[Orchestrator] PERFORMANCE_CONTEXT_LOADED | campaign=${config.campaignId} contextId=${perfCtx.id} stateId=${perfCtx.businessExecutionStateId} mode=${perfCtx.mode} bottleneck=${perfCtx.primaryBottleneck}`);
+    }
+  } catch (err: any) {
+    console.warn(`[Orchestrator] PERFORMANCE_CONTEXT_LOAD_WARN | ${err.message}`);
+  }
+
   // registry for this account so a fresh run starts with an empty surface.
   // (Modules push to the registry on FINAL_REJECTED / JUDGE_ERROR; we read
   // it back at the end of the run and attach to plan synthesis context.)
@@ -4522,6 +4656,26 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
 
     console.log(`[Orchestrator] Running engine ${i + 1}/${ENGINE_PRIORITY_ORDER.length}: ${engineDef.name}`);
 
+    // Update real-time section status to RUNNING
+    const runningSectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
+      const r = results.get(e.id);
+      let status = readSectionStatus(r);
+      if (e.id === engineDef.id) {
+        status = "RUNNING";
+      }
+      return {
+        id: e.id,
+        name: e.name,
+        status,
+        summary: r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null,
+      };
+    });
+    await db.update(orchestratorJobs)
+      .set({
+        sectionStatuses: JSON.stringify(runningSectionStatuses),
+      })
+      .where(eq(orchestratorJobs.id, jobId));
+
     let preEngineProblems: ProblemEntry[] = [];
     if (ctx.ssc) {
       preEngineProblems = logRelevantProblems(ctx.ssc, engineDef.id);
@@ -4629,6 +4783,25 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           // shapes (blocked_by_integrity, error) still take precedence.
           __gateRetryFired = true;
           console.log(`[Orchestrator] MID_PIPELINE_GATE_RETRY | engine=${engineDef.id} | reason=${gateResult.reason} | policy=${retryDecision.rationale}`);
+          
+          // Update section status to REFINING for customer-facing live feedback
+          const refiningSectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
+            const r = results.get(e.id);
+            let status = readSectionStatus(r);
+            if (e.id === engineDef.id) {
+              status = "REFINING";
+            }
+            return {
+              id: e.id,
+              name: e.name,
+              status,
+              summary: r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null,
+            };
+          });
+          await db.update(orchestratorJobs)
+            .set({ sectionStatuses: JSON.stringify(refiningSectionStatuses) })
+            .where(eq(orchestratorJobs.id, jobId));
+
           const retryBudgetMs = Math.min(
             getEngineTimeoutMs(engineDef.id),
             Math.max(0, startTime + PIPELINE_TOTAL_TIMEOUT_MS - Date.now()),
@@ -5070,11 +5243,15 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   }
 
   if (controlVerdict && controlVerdict.verdict === "BLOCK" && overallStatus !== "BLOCKED") {
-    overallStatus = "BLOCKED";
-    const blockCodes = controlVerdict.blockReasons.map(b => b.code).join(", ");
-    failedEngine = "system_control";
-    blockReason = `System Control Layer blocked execution: ${blockCodes}`;
-    console.warn(`[Orchestrator] SYSTEM_CONTROL_BLOCK | overallStatus overridden to BLOCKED | reasons=${blockCodes}`);
+    if (controlVerdict.strategyBlocked !== false) {
+      overallStatus = "BLOCKED";
+      const blockCodes = controlVerdict.blockReasons.map(b => b.code).join(", ");
+      failedEngine = "system_control";
+      blockReason = `System Control Layer blocked execution: ${blockCodes}`;
+      console.warn(`[Orchestrator] SYSTEM_CONTROL_BLOCK | overallStatus overridden to BLOCKED | reasons=${blockCodes}`);
+    } else {
+      console.warn(`[Orchestrator] SYSTEM_CONTROL_SPEND_HALTED | strategy valid, paid spend withheld | reasons=${controlVerdict.blockReasons.map(b => b.code).join(", ")}`);
+    }
   }
 
   if (controlVerdict && controlVerdict.verdict === "REPAIR") {

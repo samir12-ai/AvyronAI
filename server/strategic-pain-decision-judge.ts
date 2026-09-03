@@ -189,15 +189,19 @@ EVALUATION DOSSIER:
 STRATEGIC ROLE DEFINITIONS & DOCTRINE:
 - CORE_PURCHASE:
   A material and consequential market pain that is sufficiently connected to the intended audience (including when target is RELATED_BUT_UNPROVEN if product fit is DIRECT_FIT and evidence is material) and legitimately addressable by the offering strongly enough to anchor the primary value proposition.
-  * Note: COVERED + DIRECT_FIT is NOT automatic CORE; pain must be commercially consequential.
+  * LIFECYCLE & PURCHASE-SELECTION REQUIREMENT: To be classified as CORE_PURCHASE, the evidence must support that the pain is materially connected to purchase choice, brand selection, product selection, pre-purchase evaluation, or primary business/operational outcome.
+  * POST-PURCHASE FRICTION DOCTRINE: Post-purchase evidence by itself (e.g. customer support responsiveness, refund processing delays, returns friction, fulfillment/shipping errors, packaging issues) is INSUFFICIENT to establish CORE_PURCHASE. For a post-purchase friction to become CORE_PURCHASE, the evidence must demonstrate an explicit causal pre-purchase bridge (e.g. market reputation regarding bad refund/return handling creates severe buyer hesitation that directly stops purchase decisions). If such a causal pre-purchase bridge is not evidenced, classify as SUPPORTING (or EXCLUDE).
+  * DIRECT_FIT INDEPENDENCE: DIRECT_FIT from Product Assessment is an authoritative input about product capability, but DOES NOT mechanically guarantee CORE_PURCHASE. You must independently evaluate whether the pain represents a primary purchase/strategic anchor or merely a secondary operational friction.
+  * When an offering directly solves or addresses a primary operational bottleneck, manual workload friction, lack of scalable systems, or primary buying constraint for its target audience, classify as CORE_PURCHASE.
+  * Note: COVERED + DIRECT_FIT is NOT automatic CORE; pain must be commercially consequential and purchase-driving.
   * Note: Citation counts are factual observations, not fixed mathematical score thresholds.
   * Note: A pain with 1 or 2 citations CAN be CORE_PURCHASE if the evidence describes a severe, high-stakes commercial consequence.
-  * Note: A pain with many citations does NOT automatically become CORE_PURCHASE if the problem is shallow or minor.
+  * Note: A pain with many citations does NOT automatically become CORE_PURCHASE if the problem is shallow, secondary, or post-purchase friction.
   * Note: RELATED_BUT_UNPROVEN is NOT an automatic veto against CORE; reason over the full dossier.
   * Note: Competitive uniqueness / differentiation belongs to downstream engines, NOT to this decision.
 
 - SUPPORTING:
-  A pain that is legitimately addressable or strategically relevant, but serves as secondary/supporting messaging, objection handling, or lacks the primary commercial purchase consequence needed to anchor the campaign.
+  A pain that is legitimately addressable or strategically relevant, but serves as secondary/supporting messaging, objection handling, after-sale reassurance, or lacks the primary commercial purchase consequence needed to anchor the campaign.
 
 - EXCLUDE:
   The pain is NOT_FIT for the offering, or genuinely NOT_COVERED (different population), or completely out of scope.
@@ -213,40 +217,35 @@ Output JSON format exactly:
   let reason = "Evaluated by Strategic Pain Decision Judge";
   
   try {
-    const rawResult: any = await aiGemini({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json", maxOutputTokens: 2048 },
-      model: "gemini-3.6-flash",
-      accountId: "system"
+    const chatRes = await aiChat({
+      messages: [{ role: "user", content: prompt }],
+      model: "gpt-4.1-mini",
+      max_tokens: 1024,
+      response_format: { type: "json_object" },
+      accountId: "system",
+      endpoint: "strategic-pain-judge"
     });
-    let text = typeof rawResult === "string" ? rawResult : rawResult?.candidates?.[0]?.content?.parts?.[0]?.text || rawResult?.text || "";
-    text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
-    
-    const parsed = JSON.parse(text || "{}");
+    const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
     if (["CORE_PURCHASE", "SUPPORTING", "EXCLUDE", "DROPPED"].includes(parsed.finalClassification)) {
       finalClassification = parsed.finalClassification;
       reason = parsed.reason || reason;
     }
-  } catch (e: any) {
-    console.warn(`[StrategicPainJudge] aiGemini fallback to aiChat: ${e.message}`);
-    try {
-      const chatRes = await aiChat({
-        messages: [{ role: "user", content: prompt }],
-        model: "gpt-4.1-mini",
-        max_tokens: 1024,
-        response_format: { type: "json_object" },
-        accountId: "system",
-        endpoint: "strategic-pain-judge"
-      });
-      const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
-      if (["CORE_PURCHASE", "SUPPORTING", "EXCLUDE", "DROPPED"].includes(parsed.finalClassification)) {
-        finalClassification = parsed.finalClassification;
-        reason = parsed.reason || reason;
-      }
-    } catch (chatErr: any) {
-      reason = "AI Evaluation Failed - defaulted to SUPPORTING";
-      finalClassification = "SUPPORTING";
-    }
+  } catch (chatErr: any) {
+    console.error(`[StrategicPainJudge] Evaluation failed: ${chatErr.message}`);
+    return {
+      painId,
+      status: "INCOMPLETE",
+      finalClassification: "DROPPED",
+      reason: `Strategic Pain Decision evaluation error: ${chatErr.message}`,
+      strategicPainDecisionAuthorityId,
+      parentAuthorityIds: [targetAssessmentAuthorityId, productAssessmentAuthorityId, painId],
+      jobId,
+      targetAssessmentAuthorityId,
+      productAssessmentAuthorityId,
+      targetUnderstandingAuthorityId,
+      campaignOfferingId,
+      productTruthFactIds
+    };
   }
 
   const result: StrategicPainDecisionResult = {

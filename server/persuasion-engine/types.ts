@@ -1,11 +1,13 @@
 export interface StructuredObjection {
+  objectionId?: string;
   objectionStatement: string;
   objectionTrigger: string;
   objectionStage: "awareness" | "consideration" | "decision";
-  objectionType: "trust" | "feasibility" | "cost" | "complexity";
+  objectionType: "trust" | "feasibility" | "cost" | "complexity" | "timing";
   requiredProofType: string;
   persuasionResponse: string;
   source: "audience_objection" | "narrative_extraction" | "pain_inference";
+  proofStatus?: "PROOF_ESTABLISHED" | "PROOF_TO_BUILD";
   confidence: number;
   rootCause?: string;
   userThinking?: string;
@@ -39,6 +41,8 @@ export interface PersuasionAudienceInput {
   audiencePains: any[];
   desireMap: Record<string, any>;
   audienceSegments: any[];
+  laneId?: string;
+  laneContext?: any;
   /**
    * Authoritative pain registry from the orchestrator run context (Task 163).
    * Optional — legacy `audiencePains` stays untouched as the raw input; the
@@ -278,6 +282,10 @@ export interface PersuasionRoute {
     allowed: boolean;
     blockedReasons: string[];
   };
+  laneId?: string;
+  primaryCorePainId?: string;
+  segmentIds?: string[];
+  funnelSnapshotId?: string;
 }
 
 export interface DataReliabilityDiagnostics {
@@ -294,6 +302,10 @@ export interface DataReliabilityDiagnostics {
 }
 
 export interface PersuasionResult {
+  laneId?: string;
+  primaryCorePainId?: string;
+  segmentIds?: string[];
+  funnelSnapshotId?: string;
   status: string;
   statusMessage: string | null;
   primaryRoute: PersuasionRoute;

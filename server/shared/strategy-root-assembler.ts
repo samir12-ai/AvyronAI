@@ -209,24 +209,14 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     primaryAxis: primaryMech?.axisAlignment?.primaryAxis || positioningSnapshot?.contrastAxis || null,
     contrastAxisText: positioningSnapshot?.contrastAxis || null,
     approvedMechanism: primaryMech || null,
-    // The root is the authority boundary for pains. Prefer the run's
-    // pre-built registry VERBATIM (identical records the engines routed
-    // with, including LLM-judged classifications) when its lineage matches;
-    // otherwise rebuild deterministically from the source pains.
+    // The root is the authority boundary for pains. It strictly requires
+    // pre-built, Judge-refined registry records (with matching lineage).
+    // It MUST NOT rebuild an unrefined registry locally via fallback.
     approvedAudiencePains:
       Array.isArray(painRegistry) && painRegistry.length > 0 &&
       painRegistry.every((p: any) => p?.lineage?.accountId === accountId && p?.lineage?.audienceSnapshotId === audienceSnapshotId)
         ? painRegistry
-        : buildAudiencePainRegistry(
-            extractCanonicalSegmentPains((audienceOverride as any)?.audienceSegments).length > 0
-              ? extractCanonicalSegmentPains((audienceOverride as any)?.audienceSegments)
-              : audiencePains,
-            {
-              accountId,
-              audienceSnapshotId,
-            },
-            (audienceOverride as any)?.audienceSegments ?? [],
-          ),
+        : [],
     approvedDesires: audienceDesires,
     approvedTransformation: audienceTransformation,
     approvedClaim: mechClaim,

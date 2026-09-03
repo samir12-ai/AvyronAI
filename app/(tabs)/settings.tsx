@@ -145,6 +145,154 @@ export default function SettingsScreen() {
   const [retMonthlyCustomers, setRetMonthlyCustomers] = useState('');
   const [retDataWindow, setRetDataWindow] = useState('30');
   const [retSaving, setRetSaving] = useState(false);
+
+  // Campaign Competitors State
+  const [campaignCompetitors, setCampaignCompetitors] = useState<Array<{
+    id: string;
+    name: string;
+    websiteUrl: string;
+    platform?: string;
+    profileLink?: string;
+    tier?: string;
+    monitoringStatus?: string;
+    lastFetchedAt?: string | null;
+    nextScheduledAt?: string | null;
+    sources?: Record<string, {
+      platform: string;
+      url: string | null;
+      status: string;
+      verificationMethod?: string;
+      detail?: string;
+    }>;
+  }>>([]);
+  const [refreshingCompId, setRefreshingCompId] = useState<string | null>(null);
+  const [loadingCompetitors, setLoadingCompetitors] = useState(false);
+  const [showAddCompetitorModal, setShowAddCompetitorModal] = useState(false);
+  const [newCompName, setNewCompName] = useState('');
+  const [newCompUrl, setNewCompUrl] = useState('');
+  const [addingComp, setAddingComp] = useState(false);
+
+  const fetchCampaignCompetitors = useCallback(async () => {
+    if (!selectedCampaignId) return;
+    setLoadingCompetitors(true);
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/settings/campaign/${selectedCampaignId}`, apiUrl);
+      const res = await authFetch(url.toString(), { credentials: 'include' });
+      const data = await res.json();
+      if (data.success && data.campaign?.competitors) {
+        setCampaignCompetitors(data.campaign.competitors);
+      }
+    } catch (err) {
+      console.error('Failed to fetch campaign competitors:', err);
+    } finally {
+      setLoadingCompetitors(false);
+    }
+  }, [selectedCampaignId]);
+
+  useEffect(() => {
+    fetchCampaignCompetitors();
+  }, [fetchCampaignCompetitors]);
+
+  const handleAddCompetitor = async () => {
+    if (!newCompName.trim() || !newCompUrl.trim()) {
+      Alert.alert('Missing Fields', 'Please enter both company name and website URL.');
+      return;
+    }
+    setAddingComp(true);
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/settings/campaign/${selectedCampaignId}/add-competitor`, apiUrl);
+      const res = await authFetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: newCompName.trim(),
+          websiteUrl: newCompUrl.trim()
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewCompName('');
+        setNewCompUrl('');
+        setShowAddCompetitorModal(false);
+        await fetchCampaignCompetitors();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Competitor Added', 'Competitor added to campaign monitoring.');
+      } else {
+        Alert.alert('Error', data.error || 'Failed to add competitor.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error');
+    } finally {
+      setAddingComp(false);
+    }
+  };
+
+  const handleRemoveCompetitor = async (competitorId: string, compName: string) => {
+    Alert.alert(
+      'Remove Competitor',
+      `Are you sure you want to stop monitoring ${compName} for this campaign?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const apiUrl = getApiUrl();
+              const url = new URL(`/api/settings/campaign/${selectedCampaignId}/remove-competitor`, apiUrl);
+              const res = await authFetch(url.toString(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ competitorId })
+              });
+              const data = await res.json();
+              if (data.success) {
+                await fetchCampaignCompetitors();
+                if (Platform.OS !== 'web') {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                }
+              } else {
+                Alert.alert('Error', data.error || 'Failed to remove competitor.');
+              }
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Network error');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleRefreshSources = async (competitorId: string) => {
+    if (!selectedCampaignId) return;
+    setRefreshingCompId(competitorId);
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/settings/campaign/${selectedCampaignId}/competitor/${competitorId}/refresh-sources`, apiUrl);
+      const res = await authFetch(url.toString(), {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchCampaignCompetitors();
+        if (Platform.OS !== 'web') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        Alert.alert('Sources Refreshed', 'Competitor multi-source discovery completed.');
+      } else {
+        Alert.alert('Error', data.error || 'Failed to refresh competitor sources.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Network error');
+    } finally {
+      setRefreshingCompId(null);
+    }
+  };
   const [retDerived, setRetDerived] = useState({ ltv: 0, churnRisk: 0, retentionStrength: 0, repeatPurchaseRate: 0 });
 
   const fetchManualMetrics = useCallback(async () => {
@@ -887,6 +1035,161 @@ export default function SettingsScreen() {
         </View>
 
 
+        {/* CAMPAIGN COMPETITORS & MULTI-SOURCE MONITORING */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="shield-half-outline" size={20} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Competitors & Data Sources</Text>
+            </View>
+            <Pressable
+              onPress={() => setShowAddCompetitorModal(true)}
+              style={styles.addCompHeaderBtn}
+              hitSlop={8}
+            >
+              <Ionicons name="add-circle" size={16} color={colors.primary} />
+              <Text style={[styles.addCompHeaderBtnText, { color: colors.primary }]}>Add Competitor</Text>
+            </Pressable>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary, marginBottom: 16 }]}>
+            Verified multi-source intelligence, fallback discovery, and continuous Watchtower monitoring.
+          </Text>
+
+          {loadingCompetitors ? (
+            <View style={styles.compLoadingRow}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={[styles.compLoadingText, { color: colors.textMuted }]}>Loading competitors...</Text>
+            </View>
+          ) : campaignCompetitors.length === 0 ? (
+            <View style={styles.emptyCompsBox}>
+              <Ionicons name="search-outline" size={24} color={colors.textMuted} />
+              <Text style={[styles.emptyCompsText, { color: colors.textMuted }]}>
+                No competitors configured for this campaign yet.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.compListContainer}>
+              {campaignCompetitors.map((comp) => {
+                const isRefreshing = refreshingCompId === comp.id;
+                const sources = comp.sources || {
+                  website: { platform: 'website', url: comp.websiteUrl, status: 'VERIFIED' },
+                  instagram: { platform: 'instagram', url: comp.profileLink, status: comp.profileLink ? 'VERIFIED' : 'NOT_FOUND' },
+                  tiktok: { platform: 'tiktok', url: null, status: 'NOT_FOUND' },
+                  linkedin: { platform: 'linkedin', url: null, status: 'NOT_FOUND' },
+                  x: { platform: 'x', url: null, status: 'NOT_FOUND' },
+                  google_search: { platform: 'google_search', url: null, status: 'ACTIVE' },
+                  reviews: { platform: 'reviews', url: null, status: 'NOT_FOUND' },
+                  blog: { platform: 'blog', url: null, status: 'NOT_FOUND' },
+                };
+
+                const sourceList = [
+                  { key: 'website', label: 'Website', icon: 'globe-outline', ...sources.website },
+                  { key: 'instagram', label: 'Instagram', icon: 'logo-instagram', ...sources.instagram },
+                  { key: 'tiktok', label: 'TikTok', icon: 'musical-notes-outline', ...sources.tiktok },
+                  { key: 'linkedin', label: 'LinkedIn', icon: 'logo-linkedin', ...sources.linkedin },
+                  { key: 'x', label: 'X (Twitter)', icon: 'logo-twitter', ...sources.x },
+                  { key: 'google_search', label: 'Google Search', icon: 'search-outline', ...sources.google_search },
+                  { key: 'reviews', label: 'Reviews', icon: 'star-half-outline', ...sources.reviews },
+                  { key: 'blog', label: 'Blog / Content', icon: 'newspaper-outline', ...sources.blog },
+                ];
+
+                return (
+                  <View key={comp.id} style={[styles.compCardItem, { backgroundColor: isDark ? '#0D0A1A' : '#F8FAFC', borderColor: colors.cardBorder }]}>
+                    <View style={styles.compItemHeader}>
+                      <View style={styles.compNameCol}>
+                        <View style={styles.compNameRow}>
+                          <Text style={[styles.compNameText, { color: colors.text }]}>{comp.name}</Text>
+                          <View style={[styles.compTierBadge, { backgroundColor: comp.tier === 'A' ? colors.primary + '20' : '#47556920' }]}>
+                            <Text style={[styles.compTierText, { color: comp.tier === 'A' ? colors.primary : '#94A3B8' }]}>
+                              Tier {comp.tier || 'B'}
+                            </Text>
+                          </View>
+                          <View style={styles.compActiveDotBadge}>
+                            <View style={[styles.activeDot, { backgroundColor: '#34D399' }]} />
+                            <Text style={styles.compActiveText}>Monitoring</Text>
+                          </View>
+                        </View>
+                        <Text style={[styles.compWebsiteText, { color: colors.textMuted }]}>{comp.websiteUrl}</Text>
+                      </View>
+
+                      <View style={styles.compActionButtons}>
+                        <Pressable
+                          onPress={() => handleRefreshSources(comp.id)}
+                          disabled={isRefreshing}
+                          style={({ pressed }) => [
+                            styles.compRefreshBtn,
+                            { backgroundColor: colors.primary + '15', opacity: (pressed || isRefreshing) ? 0.6 : 1 }
+                          ]}
+                          hitSlop={6}
+                        >
+                          {isRefreshing ? (
+                            <ActivityIndicator size="small" color={colors.primary} />
+                          ) : (
+                            <>
+                              <Ionicons name="refresh" size={13} color={colors.primary} />
+                              <Text style={[styles.compRefreshBtnText, { color: colors.primary }]}>Refresh</Text>
+                            </>
+                          )}
+                        </Pressable>
+
+                        <Pressable
+                          onPress={() => handleRemoveCompetitor(comp.id, comp.name)}
+                          style={styles.compRemoveBtn}
+                          hitSlop={6}
+                        >
+                          <Ionicons name="trash-outline" size={14} color={colors.error} />
+                        </Pressable>
+                      </View>
+                    </View>
+
+                    {/* SOURCE BREAKDOWN GRID */}
+                    <View style={styles.sourcesGrid}>
+                      {sourceList.map((s) => {
+                        const isVerified = s.status === 'VERIFIED' || s.status === 'ACTIVE';
+                        const isUnavailable = s.status === 'PROVIDER_UNAVAILABLE';
+
+                        const badgeColor = isVerified ? '#34D399' : isUnavailable ? '#FBBF24' : '#64748B';
+                        const badgeBg = isVerified ? 'rgba(52,211,153,0.12)' : isUnavailable ? 'rgba(251,191,36,0.12)' : 'rgba(100,116,139,0.1)';
+
+                        return (
+                          <View key={s.key} style={[styles.sourcePill, { backgroundColor: isDark ? '#141026' : '#FFFFFF', borderColor: isVerified ? 'rgba(124,58,237,0.3)' : colors.cardBorder }]}>
+                            <Ionicons name={s.icon as any} size={14} color={isVerified ? colors.primary : colors.textMuted} />
+                            <View style={styles.sourcePillContent}>
+                              <Text style={[styles.sourcePillLabel, { color: colors.text }]}>{s.label}</Text>
+                              {s.url && (
+                                <Text style={styles.sourcePillUrl} numberOfLines={1}>
+                                  {s.url.replace(/^https?:\/\/(www\.)?/, '')}
+                                </Text>
+                              )}
+                            </View>
+                            <View style={[styles.sourceStatusBadge, { backgroundColor: badgeBg }]}>
+                              <Text style={[styles.sourceStatusText, { color: badgeColor }]}>
+                                {s.status === 'VERIFIED' ? 'Verified' : s.status === 'ACTIVE' ? 'Active' : s.status === 'PROVIDER_UNAVAILABLE' ? 'Unavailable' : 'Not Found'}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+
+                    {/* TIMESTAMPS FOOTER */}
+                    <View style={styles.compFooterRow}>
+                      <Text style={[styles.compFooterText, { color: colors.textMuted }]}>
+                        Last fetch: {comp.lastFetchedAt ? new Date(comp.lastFetchedAt).toLocaleDateString() : 'Baseline captured'}
+                      </Text>
+                      {comp.nextScheduledAt && (
+                        <Text style={[styles.compFooterText, { color: colors.textMuted }]}>
+                          Next cycle: {new Date(comp.nextScheduledAt).toLocaleDateString()}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
         <Pressable
           onPress={() => {
             Haptics.selectionAsync();
@@ -1481,4 +1784,187 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
   },
+
+  addCompHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  addCompHeaderBtnText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  compLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 16,
+  },
+  compLoadingText: {
+    fontSize: 13,
+  },
+  emptyCompsBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    gap: 8,
+  },
+  emptyCompsText: {
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  compListContainer: {
+    gap: 16,
+  },
+  compCardItem: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 16,
+    gap: 14,
+  },
+  compItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+  compNameCol: {
+    flex: 1,
+    gap: 4,
+  },
+  compNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  compNameText: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  compTierBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  compTierText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  compActiveDotBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  compActiveText: {
+    fontSize: 11,
+    color: '#34D399',
+    fontFamily: 'Inter_500Medium',
+  },
+  compWebsiteText: {
+    fontSize: 12,
+  },
+  compActionButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  compRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  compRefreshBtnText: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  compRemoveBtn: {
+    padding: 4,
+  },
+  sourcesGrid: {
+    gap: 8,
+  },
+  sourcePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    gap: 10,
+  },
+  sourcePillContent: {
+    flex: 1,
+  },
+  sourcePillLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  sourcePillUrl: {
+    fontSize: 11,
+    color: '#94A3B8',
+  },
+  sourceStatusBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  sourceStatusText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  compFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  compFooterText: {
+    fontSize: 11,
+  },
+  modalInputGroup: {
+    gap: 6,
+    marginBottom: 14,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  textInput: {
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
+  addCompSubmitBtn: {
+    borderRadius: 10,
+    overflow: 'hidden',
+    marginTop: 8,
+  },
+  addCompGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 8,
+  },
+  addCompSubmitText: {
+    color: '#fff',
+    fontSize: 14,
+    fontFamily: 'Inter_600SemiBold',
+  },
+
 });

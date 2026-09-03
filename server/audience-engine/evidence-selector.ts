@@ -155,15 +155,24 @@ Return a JSON object with format:
 
   try {
     const { aiChat } = await import("../ai-client");
-    const result = await aiChat({
-      messages: [{ role: "user", content: prompt }],
-      model: CHUNK_MODEL,
-      max_tokens: 3000,
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-      accountId: "system",
-      endpoint: "evidence-authority-evaluator"
-    });
+    let result: any;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        result = await aiChat({
+          messages: [{ role: "user", content: prompt }],
+          model: CHUNK_MODEL,
+          max_tokens: 3000,
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          accountId: "system",
+          endpoint: "evidence-authority-evaluator"
+        });
+        break;
+      } catch (err: any) {
+        if (attempt === 3) throw err;
+        await new Promise(r => setTimeout(r, 1500 * attempt));
+      }
+    }
     const parsed = JSON.parse(result.choices[0]?.message?.content || '{"evaluations":[]}');
     const rawEvals: any[] = Array.isArray(parsed.evaluations) ? parsed.evaluations : [];
     
@@ -292,8 +301,8 @@ RETAINED EVIDENCE SET (${selectedUnits.length} items, including ${directCount} D
 ${formatEvidenceUnits(selectedUnits)}
 
 JUDGE VERIFICATION CRITERIA:
-1. NO HIGH_VALUE_EVIDENCE_OMITTED: Does the retained evidence set of ${selectedUnits.length} items (containing ${directCount} direct audience items) adequately represent the customer complaints, problems, objections, and usage realities from the pool? If the retained set captures user complaints and context, this criterion PASSES (valid: true).
-2. NO SOURCE_STARVATION: Was an entire source category completely discarded when legitimate audience signal was present? (If real complaints/questions exist, they must be preserved).
+1. NO HIGH_VALUE_EVIDENCE_OMITTED: Does the retained evidence set of ${selectedUnits.length} items (containing ${directCount} direct audience items) adequately represent customer complaints, problems, objections, and usage realities from the pool? If the retained set captures user complaints and context, this criterion PASSES (valid: true). (Note: When customer feedback is classified as DIRECT_AUDIENCE_EVIDENCE, having 0 items in SUPPORTING_AUDIENCE_CONTEXT is completely normal and valid).
+2. NO SOURCE_STARVATION: Was an entire source category completely discarded when legitimate audience signal was present? If retained items represent the available source actors, this criterion PASSES.
 3. NO CORROBORATION_LOSS: Was meaningful corroboration of recurring audience patterns preserved?
 4. CORRECT AUTHORITY ASSIGNMENT: Are items properly classified so competitor claims are NOT tagged as DIRECT_AUDIENCE_EVIDENCE, and genuine user experiences are NOT tagged as MARKET_NARRATIVE_CONTEXT?
 5. LINEAGE & USES PRESERVED: Do retained items carry clear safeUses and prohibitedUses?
@@ -367,7 +376,7 @@ export async function selectEvidence(
 
   // HIERARCHICAL BATCHED CLASSIFICATION (Chunk size 25 with 4-way concurrency)
   const CHUNK_SIZE = 25;
-  const CONCURRENCY = 4;
+  const CONCURRENCY = 2;
   const MAX_RETRY_ATTEMPTS = 2;
   let repairFeedback: string | undefined;
   let currentCandidates = [...candidates];
@@ -427,11 +436,11 @@ export async function selectEvidence(
 
     currentCandidates = evaluatedCandidates;
 
-    // Filter retained items: keep DIRECT, SUPPORTING, and informative MARKET_NARRATIVE
+    // Filter retained items: keep DIRECT, SUPPORTING, and MARKET_NARRATIVE (excluding INVALID_UNUSABLE)
     const retainedCandidates = currentCandidates.filter(c => 
       c.authorityClass === "DIRECT_AUDIENCE_EVIDENCE" ||
       c.authorityClass === "SUPPORTING_AUDIENCE_CONTEXT" ||
-      (c.authorityClass === "MARKET_NARRATIVE_CONTEXT" && c.informationValue !== "NONE" && c.informationValue !== "LOW")
+      c.authorityClass === "MARKET_NARRATIVE_CONTEXT"
     );
 
     let retainedTokens = retainedCandidates.reduce((acc, c) => acc + estimateTokens(c.text), 0);

@@ -111,8 +111,7 @@ Each object must have these keys:
    - 'signal': Translated business-friendly signal (in English, using the same mapping above)
    - 'competitor': The competitor name
    - 'raw_metric': The raw technical metric (in English, e.g., "hashtagDriftScore: 0.72")
-5. 'action_item': Concrete, actionable next steps in English. **CRITICAL BOUNDARY:** Only suggest observed areas for further investigation or analysis (e.g., "Audit your pricing terms against Competitor X", "Analyze narrative convergence in your next messaging review"). NEVER recommend strategic execution actions (e.g., "Launch a discount offer", "Create new product features", "Change your positioning to X").
-`,
+5. 'action_item': Concrete, actionable next steps in English. **CRITICAL BOUNDARY:** Only suggest observed areas for further investigation or analysis (e.g., "Audit your pricing terms against Competitor X", "Analyze narrative convergence in your next messaging review"). NEVER recommend strategic execution actions (e.g., "Launch a discount offer", "Create new product features", "Change your positioning to X").`,
             },
             {
               role: "user",
@@ -210,6 +209,108 @@ export const BusinessRepresentationSchema = z.object({
     })),
     weeklyDnaApplication: z.string().min(1),
   }),
+  buyerConversionJourneys: z.array(z.object({
+    laneId: z.string().optional(),
+    laneLabel: z.string().optional(),
+    primaryPainId: z.string().optional(),
+    segmentIds: z.array(z.string()).optional(),
+    sourceFunnelSnapshotId: z.string().optional(),
+    sourcePersuasionSnapshotId: z.string().optional(),
+    journeyName: z.string(),
+    journeyType: z.string(),
+    whyThisJourney: z.string(),
+    entryTrigger: z.object({
+      mechanismType: z.string(),
+      purpose: z.string(),
+    }),
+    stages: z.array(z.object({
+      stageId: z.string().optional(),
+      stageName: z.string(),
+      goal: z.string(),
+      buyerState: z.string(),
+      coreMessage: z.string(),
+      contentAction: z.string(),
+      proof: z.array(z.union([z.string(), z.record(z.any())])),
+      cta: z.string(),
+    })),
+    persuasionStrategy: z.object({
+      mode: z.string(),
+      modeLabel: z.string(),
+      coreBeliefTransformation: z.object({
+        currentBelief: z.string(),
+        desiredBelief: z.string(),
+        contradictionLogic: z.string().optional(),
+      }),
+      messageSequence: z.array(z.object({
+        step: z.string(),
+        stepLabel: z.string(),
+        rationale: z.string(),
+      })),
+      objections: z.array(z.object({
+        objectionId: z.string().optional(),
+        objection: z.string(),
+        response: z.string(),
+        requiredProof: z.string(),
+        funnelStageId: z.string().optional(),
+      })),
+      trustStrategy: z.object({
+        buyerRiskState: z.string(),
+        trustDeficit: z.string(),
+        transferMechanismName: z.string(),
+        proofArtifact: z.string(),
+        primaryCialdiniPrinciple: z.string(),
+        principleRationale: z.string(),
+      }),
+    }).optional(),
+  })).optional(),
+  buyerConversionJourney: z.object({
+    journeyName: z.string(),
+    journeyType: z.string(),
+    whyThisJourney: z.string(),
+    entryTrigger: z.object({
+      mechanismType: z.string(),
+      purpose: z.string(),
+    }),
+    stages: z.array(z.object({
+      stageId: z.string().optional(),
+      stageName: z.string(),
+      goal: z.string(),
+      buyerState: z.string(),
+      coreMessage: z.string(),
+      contentAction: z.string(),
+      proof: z.array(z.union([z.string(), z.record(z.any())])),
+      cta: z.string(),
+    })),
+  }).optional(),
+  persuasionStrategy: z.object({
+    mode: z.string(),
+    modeLabel: z.string(),
+    coreBeliefTransformation: z.object({
+      currentBelief: z.string(),
+      desiredBelief: z.string(),
+      contradictionLogic: z.string().optional(),
+    }),
+    messageSequence: z.array(z.object({
+      step: z.string(),
+      stepLabel: z.string(),
+      rationale: z.string(),
+    })),
+    objections: z.array(z.object({
+      objectionId: z.string().optional(),
+      objection: z.string(),
+      response: z.string(),
+      requiredProof: z.string(),
+      funnelStageId: z.string().optional(),
+    })),
+    trustStrategy: z.object({
+      buyerRiskState: z.string(),
+      trustDeficit: z.string(),
+      transferMechanismName: z.string(),
+      proofArtifact: z.string(),
+      primaryCialdiniPrinciple: z.string(),
+      principleRationale: z.string(),
+    }),
+  }).optional(),
 });
 
 export type BusinessRepresentation = z.infer<typeof BusinessRepresentationSchema>;
@@ -238,6 +339,9 @@ export async function translateStrategyPlanToBusinessLanguage(
       })),
       weeklyDnaApplication: plan.executionBlueprintDnaLink?.weeklyDnaApplication || "",
     },
+    buyerConversionJourneys: plan.buyerConversionJourneys || undefined,
+    buyerConversionJourney: plan.buyerConversionJourney || undefined,
+    persuasionStrategy: plan.persuasionStrategy || undefined,
   };
 
   try {
@@ -294,7 +398,11 @@ STRICT CONSTITUTIONAL RULES:
         });
 
         const text = response.choices?.[0]?.message?.content ?? "{}";
-        return JSON.parse(text) as BusinessRepresentation;
+        const parsed = JSON.parse(text) as BusinessRepresentation;
+        if (input.buyerConversionJourneys) parsed.buyerConversionJourneys = input.buyerConversionJourneys;
+        if (input.buyerConversionJourney) parsed.buyerConversionJourney = input.buyerConversionJourney;
+        if (input.persuasionStrategy) parsed.persuasionStrategy = input.persuasionStrategy;
+        return parsed;
       },
 
       judge: async (input, candidate) => {
@@ -377,7 +485,11 @@ Errors to fix: ${rejections.join(", ")}`,
         });
 
         const text = response.choices?.[0]?.message?.content ?? "{}";
-        return JSON.parse(text) as BusinessRepresentation;
+        const parsed = JSON.parse(text) as BusinessRepresentation;
+        if (input.buyerConversionJourneys) parsed.buyerConversionJourneys = input.buyerConversionJourneys;
+        if (input.buyerConversionJourney) parsed.buyerConversionJourney = input.buyerConversionJourney;
+        if (input.persuasionStrategy) parsed.persuasionStrategy = input.persuasionStrategy;
+        return parsed;
       },
     });
 
@@ -404,6 +516,9 @@ Errors to fix: ${rejections.join(", ")}`,
         contentPillarToDna: distilledInput.executionBlueprintDnaLink.contentPillarToDna,
         weeklyDnaApplication: distilledInput.executionBlueprintDnaLink.weeklyDnaApplication,
       },
+      buyerConversionJourneys: (distilledInput as any).buyerConversionJourneys,
+      buyerConversionJourney: distilledInput.buyerConversionJourney,
+      persuasionStrategy: distilledInput.persuasionStrategy,
     };
   }
 }

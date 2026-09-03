@@ -27,6 +27,8 @@ import { registerBusinessDataRoutes } from "./business-data-routes";
 import { registerBusinessSetupRoutes } from "./business-setup-routes";
 import { registerDashboardRoutes } from "./dashboard-routes";
 import { registerPerceptionRoutes } from "./perception-routes";
+import { registerAudiencePositioningRoutes } from "./audience-positioning-routes";
+import { registerMarketIntelligenceBundleRoutes } from "./market-intelligence-bundle-routes";
 import { registerMonitorEarlyWarningRoutes } from "./monitor/early-warning/routes";
 import { registerDiagnoseRoutes } from "./diagnose/routes";
 import { registerUIStateRoutes } from "./ui-state-routes";
@@ -45,6 +47,7 @@ import { registerChatRoutes } from "./replit_integrations/chat";
 import { registerContentDnaRoutes } from "./content-dna-routes";
 import { registerPerformanceFeedbackRoutes } from "./performance-feedback/routes";
 import { registerPerformanceConsoleRoute } from "./performance-loop/console-route";
+import { registerWeeklyInventoryRoutes } from "./performance-loop/weekly-inventory-routes";
 import { registerRootBundleRoutes } from "./root-bundle";
 import { registerGoalMathRoutes } from "./goal-math";
 import { registerPlanGateRoutes } from "./plan-gate";
@@ -70,11 +73,31 @@ import { db } from "./db";
 import { metaCredentials } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
+import performanceIntelligenceRouter from "./performance-loop/console-route";
+import { adaptiveReadRouter } from "./adaptive/read-surface";
+import { whatToDoTodayRouter } from "./what-to-do-today/routes";
+import { registerStrategyExperienceRoutes } from "./strategy-experience/routes";
+import { registerReportsRoutes } from "./reports-routes";
+import { registerNotificationsRoutes } from "./notifications-routes";
+import { registerCreativeRoutes } from "./creative-routes";
+import { registerAgentChatRoutes } from "./agent/chat-routes";
+import { registerSetupRoutes } from "./setup/setup-routes";
+import { registerSettingsArchitectureRoutes } from "./setup/settings-routes";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   registerStagingAdminRoutes(app);
+  registerStrategyExperienceRoutes(app);
+  registerReportsRoutes(app);
+  registerNotificationsRoutes(app);
+  registerCreativeRoutes(app);
+  registerAgentChatRoutes(app);
+  registerSetupRoutes(app);
+  registerSettingsArchitectureRoutes(app);
+  app.use("/api/performance-intelligence", performanceIntelligenceRouter);
+  app.use("/api", adaptiveReadRouter);
+  app.use("/api/what-to-do-today", whatToDoTodayRouter);
 
   // F9.10 — public version endpoint. Handler extracted to
   // ./lib/version-handler.ts so behavior tests mount the EXACT same
@@ -1532,6 +1555,8 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerBusinessSetupRoutes(app);
   registerDashboardRoutes(app);
   registerPerceptionRoutes(app);
+  registerAudiencePositioningRoutes(app);
+  registerMarketIntelligenceBundleRoutes(app);
   registerMonitorEarlyWarningRoutes(app);
   registerDiagnoseRoutes(app);
   registerUIStateRoutes(app);
@@ -1550,6 +1575,7 @@ Return ONLY a valid JSON array with exactly 3 audience objects:
   registerContentDnaRoutes(app);
   registerPerformanceFeedbackRoutes(app);
   registerPerformanceConsoleRoute(app);
+  registerWeeklyInventoryRoutes(app);
   registerRootBundleRoutes(app);
   registerGoalMathRoutes(app);
   registerPlanGateRoutes(app);

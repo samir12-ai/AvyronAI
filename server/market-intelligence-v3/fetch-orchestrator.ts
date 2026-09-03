@@ -2,7 +2,7 @@ import { db } from "../db";
 import { miFetchJobs, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, miSnapshots, miSignalLogs, miTelemetry, growthCampaigns, competitorWebData, competitorPostClassifications } from "@shared/schema";
 type CiCompetitorRow = typeof ciCompetitors.$inferSelect;
 import { inArray, eq, and, desc, sql } from "drizzle-orm";
-import { fetchCompetitorData, enrichCompetitorWithComments, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode, type FetchOptions, type ScrapeMode } from "../competitive-intelligence/data-acquisition";
+import { fetchCompetitorData, enrichCompetitorWithComments, enrichCompetitorWithMultiSources, cleanupExpiredSyntheticComments, type FetchResult, type CollectionMode, type FetchOptions, type ScrapeMode } from "../competitive-intelligence/data-acquisition";
 import { computeAllSignals, aggregateMissingFlags, clusterSemanticSignals } from "./signal-engine";
 import { classifyAllIntents, computeDominantMarketIntent } from "./intent-engine";
 import { computeTrajectory, deriveTrajectoryDirection, deriveMarketState } from "./trajectory-engine";
@@ -1017,6 +1017,11 @@ async function executeFetchJob(
       }
 
       await scrapeWebAndBlogForCompetitor(comp, accountId);
+      try {
+        await enrichCompetitorWithMultiSources(comp.id, accountId, campaignId);
+      } catch (multiSrcErr: any) {
+        console.warn(`[FetchOrch] Multi-source enrichment error for ${comp.name}:`, multiSrcErr.message);
+      }
 
       await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
     }

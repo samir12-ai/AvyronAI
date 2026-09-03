@@ -109,9 +109,8 @@ export class WatchtowerController {
           // BUG 3 FIX: clean status mapping — never expose internal flags like EVIDENCE_LINEAGE_INCOMPLETE
           displayStatus: (
             s.status === 'confirmed' ? 'Confirmed' :
-            s.status === 'candidate' ? 'First Observation' :
-            (s.status === 'archived' || s.status === 'dismissed') ? 'Archived' :
-            s.status === 'closed' ? 'Closed' :
+            s.status === 'candidate' ? 'Under Review' :
+            (s.status === 'archived' || s.status === 'dismissed' || s.status === 'closed' || s.status === 'superseded') ? 'Archived' :
             'Unknown'
           ),
           // BUG 1 FIX: displayDescription must equal the same deterministic evidence the detail panel shows
@@ -140,7 +139,7 @@ export class WatchtowerController {
         nextScanTimestamp: summary.nextScanTimestamp || null,
         // BUG 8 FIX: Tab counts ONLY from backend global summary — never compute from paginated feed
         tabCounts: summary.tabCounts || {
-          "All Changes": 0, "High Impact": 0, "Confirmed": 0, "First Observation": 0, "Archived": 0
+          "All Changes": 0, "High Impact": 0, "Confirmed": 0, "Under Review": 0, "First Observation": 0, "Archived": 0
         },
         availableFilters: summary.availableFilters || {
           competitors: [], categories: [], impacts: ['High Impact', 'Medium Impact', 'Low Impact']

@@ -13,9 +13,10 @@ import { computeStrategyHash } from "./root-bundle";
 
 import { resolveAccountId } from "./auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "./auth-helpers";
-interface NormalizedGoal {
+export interface NormalizedGoal {
   goalType: string;
   target: number;
+  targetUnit?: "qualified_leads" | "leads" | "customers" | "reach" | "clicks" | "conversations" | "revenue" | "general";
   label: string;
   timeHorizonDays: number;
   successConstraints: string[];
@@ -31,8 +32,8 @@ const GOAL_TYPE_MAP: Record<string, string> = {
 };
 
 export function normalizeGoal(campaign: any, bizData: any): NormalizedGoal {
-  const objective = campaign?.objective || bizData?.funnelObjective || "AWARENESS";
-  const goalType = GOAL_TYPE_MAP[objective.toUpperCase()] || "reach_growth";
+  const objective = campaign?.objective || bizData?.funnelObjective || "";
+  let goalType = GOAL_TYPE_MAP[objective.toUpperCase()] || "";
   const totalDays = parseInt(bizData?.goalTimeline) || campaign?.totalDays || 90;
 
   const userGoalTarget = bizData?.goalTarget ? parseInt(bizData.goalTarget.replace(/[^0-9]/g, "") || "0") : 0;
@@ -41,36 +42,64 @@ export function normalizeGoal(campaign: any, bizData: any): NormalizedGoal {
   let target = 0;
   let label = "";
 
+  const combinedTargetText = `${bizData?.goalTarget || ""} ${userGoalDesc} ${campaign?.targetMetrics || ""} ${campaign?.objective || ""}`.toLowerCase();
+  let targetUnit: "qualified_leads" | "leads" | "customers" | "reach" | "clicks" | "conversations" | "revenue" | "general" = "general";
+
+  if (combinedTargetText.includes("qualified lead") || combinedTargetText.includes("qualified") || combinedTargetText.includes("mql") || combinedTargetText.includes("sql")) {
+    targetUnit = "qualified_leads";
+    if (!goalType || goalType === "reach_growth") goalType = "lead_generation";
+  } else if (combinedTargetText.includes("lead") || goalType === "lead_generation") {
+    targetUnit = "leads";
+    if (!goalType || goalType === "reach_growth") goalType = "lead_generation";
+  } else if (combinedTargetText.includes("customer") || combinedTargetText.includes("client") || goalType === "customer_acquisition") {
+    targetUnit = "customers";
+    if (!goalType || goalType === "reach_growth") goalType = "customer_acquisition";
+  } else if (combinedTargetText.includes("revenue") || combinedTargetText.includes("$") || goalType === "revenue_growth") {
+    targetUnit = "revenue";
+    if (!goalType || goalType === "reach_growth") goalType = "revenue_growth";
+  } else if (combinedTargetText.includes("reach") || combinedTargetText.includes("impression") || goalType === "reach_growth") {
+    targetUnit = "reach";
+    if (!goalType) goalType = "reach_growth";
+  } else {
+    goalType = goalType || "reach_growth";
+  }
+
   if (userGoalTarget > 0) {
     target = userGoalTarget;
-    label = userGoalDesc || `Achieve ${target} ${goalType.replace(/_/g, " ")} in ${totalDays} days`;
+    label = userGoalDesc || `Achieve ${target} ${targetUnit === "qualified_leads" ? "qualified leads" : goalType.replace(/_/g, " ")} in ${totalDays} days`;
   } else {
     switch (goalType) {
       case "customer_acquisition":
         target = parseInt(campaign?.targetCustomers) || 100;
         label = `Acquire ${target} customers in ${totalDays} days`;
+        targetUnit = "customers";
         break;
       case "lead_generation":
         target = parseInt(campaign?.targetLeads) || 200;
         label = `Generate ${target} leads in ${totalDays} days`;
+        targetUnit = targetUnit === "qualified_leads" ? "qualified_leads" : "leads";
         break;
       case "revenue_growth":
         target = parseInt(campaign?.targetRevenue) || 10000;
         label = `Generate $${target} revenue in ${totalDays} days`;
+        targetUnit = "revenue";
         break;
       case "audience_growth":
         target = parseInt(campaign?.targetFollowers) || 5000;
         label = `Grow audience by ${target} in ${totalDays} days`;
+        targetUnit = "reach";
         break;
       default:
         target = parseInt(campaign?.targetReach) || 50000;
         label = `Reach ${target.toLocaleString()} people in ${totalDays} days`;
+        targetUnit = "reach";
     }
   }
 
   return {
     goalType,
     target,
+    targetUnit,
     label,
     timeHorizonDays: totalDays,
     successConstraints: [
@@ -107,12 +136,21 @@ export function computeFunnelMath(goal: NormalizedGoal, bizData: any): {
   const conversationToLeadRate = parseFloat(bizData?.conversationToLeadRate) || 0.50;
   const leadToClientRate = closeRate;
 
-  const qualificationRate = 0.2;
+  const qualificationRate = 0.20;
   let requiredLeads: number;
   let requiredQualifiedLeads: number;
   let requiredClosedClients: number;
 
-  if (goal.goalType === "lead_generation") {
+  const isQualifiedLeadTarget = goal.targetUnit === "qualified_leads" ||
+    (goal.goalType === "lead_generation" && (goal.label.toLowerCase().includes("qualified lead") || goal.label.toLowerCase().includes("qualified")));
+
+  if (isQualifiedLeadTarget) {
+    // Reverse calculation: Target IS qualified leads
+    requiredQualifiedLeads = goal.target;
+    requiredLeads = Math.ceil(requiredQualifiedLeads / qualificationRate);
+    requiredClosedClients = Math.ceil(requiredQualifiedLeads * leadToClientRate);
+  } else if (goal.goalType === "lead_generation") {
+    // Forward calculation: Target is raw leads
     requiredLeads = goal.target;
     requiredQualifiedLeads = Math.ceil(requiredLeads * qualificationRate);
     requiredClosedClients = Math.ceil(requiredQualifiedLeads * leadToClientRate);
@@ -121,6 +159,7 @@ export function computeFunnelMath(goal: NormalizedGoal, bizData: any): {
     requiredQualifiedLeads = 0;
     requiredClosedClients = 0;
   } else {
+    // customer_acquisition / sales
     requiredClosedClients = goal.target;
     requiredQualifiedLeads = Math.ceil(requiredClosedClients / leadToClientRate);
     requiredLeads = Math.ceil(requiredQualifiedLeads / qualificationRate);

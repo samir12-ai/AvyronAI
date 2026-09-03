@@ -13,6 +13,7 @@ const CONTENT_TYPE_MAP: Record<string, string[]> = {
 };
 
 function categorizeDecisionType(action: string): string {
+  if (!action || typeof action !== 'string') return "general";
   const lower = action.toLowerCase();
   if (lower.includes("scale") || lower.includes("increase budget") || lower.includes("boost")) return "scaling";
   if (lower.includes("pause") || lower.includes("stop") || lower.includes("kill")) return "pause";

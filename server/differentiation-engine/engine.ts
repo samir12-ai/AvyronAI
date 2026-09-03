@@ -92,7 +92,7 @@ export async function runDifferentiationEngine(
       miAuthorityId: `mi_intent_${cId}`,
       competitorId: cId,
       factType: "COMPETITOR_INTENT",
-      fact: `${cName} operates in ${cIntent} mode without live evidence streaming or automated semantic Judge verification.`,
+      fact: `${cName} operates with an observed ${cIntent} strategic posture in reviewed market evidence.`,
       miSnapshotId: runContext?.miSnapshotId || ""
     });
   });
@@ -120,7 +120,7 @@ export async function runDifferentiationEngine(
 
   const canonicalMi = miFacts;
 
-  // Canonical product truth facts with matching IDs
+  // Canonical product truth facts with matching IDs (FAIL-CLOSED: Must come from Business Understanding)
   const canonicalProductTruth: any[] = [];
   if (Array.isArray(aud.productTruthFacts) && aud.productTruthFacts.length > 0) {
     aud.productTruthFacts.forEach((f: any) => {
@@ -130,29 +130,18 @@ export async function runDifferentiationEngine(
         fact: f.statement || f.fact || f.description || JSON.stringify(f)
       });
     });
-  } else {
-    canonicalProductTruth.push(
-      {
-        productTruthFactId: "8e6acbfc-e6b4-44c3-aa08-3f1f4b0281ae",
-        factType: "CAPABILITY",
-        fact: "Avyron AI continuously analyzes real competitor and audience evidence in real-time via the Live Market Mirror feature."
-      },
-      {
-        productTruthFactId: "b5a677a9-f603-4486-9611-82425d8d79f8",
-        factType: "CAPABILITY",
-        fact: "It converts raw market evidence into structured strategic intelligence to support decision making."
-      },
-      {
-        productTruthFactId: "7c0287a9-89b7-4d36-8415-9552d5c3c8b4",
-        factType: "CAPABILITY",
-        fact: "Avyron AI uses specialized AI engines with semantic Judges to filter out unsupported recommendations before they influence strategy."
-      },
-      {
-        productTruthFactId: "e4b92a98-e277-4de5-80e8-5d571c9b9b85",
-        factType: "CAPABILITY",
-        fact: "The product is designed specifically to inform and optimize competitive and audience strategies based on validated intelligence."
-      }
-    );
+  }
+
+  if (canonicalProductTruth.length === 0) {
+    return {
+      status: "FAILED",
+      statusMessage: "PRODUCT_TRUTH_MISSING: Canonical Product Truth is required for differentiation but was empty or missing.",
+      differentiations: [],
+      painDispositions: [],
+      confidenceScore: 0,
+      executionTimeMs: Date.now() - start,
+      engineVersion: 8
+    };
   }
 
   const canonicalInput: CanonicalDifferentiationInput = {
@@ -171,8 +160,8 @@ export async function runDifferentiationEngine(
       canonicalPain: p.canonical || p.claim || p.normalizedStatement || p.originalStatement || "",
       segmentIds: p.segmentIds || [p.segmentId].filter(Boolean),
       fitType: p.fitType || "DIRECT_FIT",
-      requiredCapability: p.requiredCapability || p.matchedProductCapability || "Data Integration & Signal Analytics",
-      matchedProductCapability: p.matchedProductCapability || p.requiredCapability || "Avyron AI Live Market Mirror",
+      requiredCapability: p.requiredCapability || p.matchedProductCapability || "Product Capability",
+      matchedProductCapability: p.matchedProductCapability || p.requiredCapability || "Product Capability",
       productTruthFactIds: (p.productTruthFactIds && p.productTruthFactIds.length > 0) 
         ? p.productTruthFactIds 
         : canonicalProductTruth.map(f => f.productTruthFactId)

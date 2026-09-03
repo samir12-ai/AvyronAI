@@ -1,19 +1,17 @@
-import "dotenv/config";
-
 async function main() {
   try {
-    const resBackend = await fetch("http://127.0.0.1:5000/api/plans/active/campaign_1786718877499_3jk4zv");
-    console.log("Backend Port 5000 API Status:", resBackend.status);
-  } catch (e: any) {
-    console.log("Backend Port 5000 error:", e.message);
+    const res8808 = await fetch("http://127.0.0.1:8808/");
+    console.log("Port 8808 HTTP status:", res8808.status);
+  } catch (err: any) {
+    console.log("Port 8808 error:", err.message);
   }
 
   try {
-    const resExpo = await fetch("http://localhost:8081");
-    console.log("Expo Port 8081 Status:", resExpo.status);
-  } catch (e: any) {
-    console.log("Expo Port 8081 error:", e.message);
+    const res8081 = await fetch("http://127.0.0.1:8081/");
+    console.log("Port 8081 HTTP status:", res8081.status);
+  } catch (err: any) {
+    console.log("Port 8081 error:", err.message);
   }
 }
 
-main().catch(console.error);
+main();

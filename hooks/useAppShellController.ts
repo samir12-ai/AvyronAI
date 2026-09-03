@@ -35,6 +35,7 @@ export interface AppShellController {
   switchWorkspace: (workspaceId: string) => void;
   monitoring: ShellMonitoringState;
   badges: ShellBadges;
+  isSetupComplete: boolean;
   isLoading: boolean;
   openAccountSwitcher: () => void;
 }
@@ -53,6 +54,7 @@ export function useAppShellController(): AppShellController {
     whatToDoToday: null,
     watchtower: null,
   });
+  const [isSetupComplete, setIsSetupComplete] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState(true);
 
   // 1. Real User Profile Data
@@ -108,6 +110,7 @@ export function useAppShellController(): AppShellController {
         if (isMounted) {
           setMonitoring({ status: 'NO_SOURCES', competitorsCount: null, lastCheckTimestamp: null });
           setBadges({ whatToDoToday: null, watchtower: null });
+          setIsSetupComplete(false);
           setIsLoading(false);
         }
         return;
@@ -118,14 +121,23 @@ export function useAppShellController(): AppShellController {
         const apiUrl = getApiUrl();
         
         // Fetch all dependencies in parallel without blocking main render
-        const [monitoringRes, tasksRes, watchtowerRes] = await Promise.all([
+        const [monitoringRes, tasksRes, watchtowerRes, setupStatusRes] = await Promise.all([
           authFetch(new URL(`/api/perception/monitoring?campaignId=${selectedCampaignId}`, apiUrl).toString()),
           authFetch(new URL(`/api/execution/required-work?campaignId=${selectedCampaignId}`, apiUrl).toString()),
-          authFetch(new URL(`/api/perception/market-signals?campaignId=${selectedCampaignId}`, apiUrl).toString())
+          authFetch(new URL(`/api/perception/market-signals?campaignId=${selectedCampaignId}`, apiUrl).toString()),
+          authFetch(new URL(`/api/setup/status`, apiUrl).toString())
         ]);
 
         let newMonitoring = { ...monitoring };
         let newBadges = { ...badges };
+
+        // Process Setup Completeness
+        if (setupStatusRes.ok) {
+          const sData = await setupStatusRes.json();
+          if (sData.success) {
+            setIsSetupComplete(!!sData.isComplete);
+          }
+        }
 
         // Process Monitoring State
         if (monitoringRes.ok) {
@@ -203,6 +215,7 @@ export function useAppShellController(): AppShellController {
     switchWorkspace,
     monitoring,
     badges,
+    isSetupComplete,
     isLoading,
     openAccountSwitcher
   };

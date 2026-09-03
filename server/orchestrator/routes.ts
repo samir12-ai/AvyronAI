@@ -16,6 +16,7 @@ import {
   executionTasks,
   planAssumptions,
   orchestratorJobs,
+  offerSnapshots,
 } from "@shared/schema";
 import { eq, and, or, desc, sql } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
@@ -285,7 +286,25 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      const planData = plan.planJson ? JSON.parse(plan.planJson) : null;
+      const planData = plan.planJson ? JSON.parse(plan.planJson) : {};
+
+      // Hydrate canonical same-run Offer Snapshot if missing from planJson (Fix 6)
+      if (planData && !planData.offer && (resolved.runId || plan.jobId)) {
+        const targetJobId = resolved.runId || plan.jobId;
+        const [offerSnap] = await db.select().from(offerSnapshots).where(
+          and(
+            eq(offerSnapshots.accountId, accountId),
+            eq(offerSnapshots.campaignId, req.params.campaignId),
+            eq(offerSnapshots.jobId, targetJobId)
+          )
+        ).limit(1);
+
+        if (offerSnap?.primaryOffer) {
+          planData.offer = typeof offerSnap.primaryOffer === "string"
+            ? JSON.parse(offerSnap.primaryOffer)
+            : offerSnap.primaryOffer;
+        }
+      }
 
       const [work] = await db
         .select()

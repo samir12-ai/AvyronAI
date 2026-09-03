@@ -21,7 +21,7 @@ import {
   assessDataReliability,
   normalizeConfidence,
 } from "../engine-hardening";
-import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { formatAELForPrompt, filterAELForStrategicUse } from "../analytical-enrichment-layer/engine";
 import { buildStructuredAELBlock } from "../differentiation-engine/engine";
 import { buildGroundingContract, checkGroundingContract } from "../shared/grounding-contract";
 import {
@@ -124,7 +124,7 @@ export async function runMechanismEngine(
   painRegistry?: any[],
 ): Promise<MechanismEngineResult> {
   const result = await runMechanismEngineInternal(
-    positioning, differentiation, accountId, analyticalEnrichment, strategic, productDna,
+    positioning, differentiation, accountId, analyticalEnrichment, strategic, productDna, painRegistry,
   );
   // Authoritative pain routing (Task 163): mechanism explains the root cause
   // of the CORE purchase pain — never a post-purchase complaint (the
@@ -158,6 +158,7 @@ async function runMechanismEngineInternal(
   analyticalEnrichment?: any,
   strategic?: RunStrategicContext,
   productDna?: ProductDnaLike | null,
+  painRegistry?: any[],
 ): Promise<MechanismEngineResult> {
   const startTime = Date.now();
   const diagnostics: Record<string, any> = {};
@@ -190,9 +191,11 @@ async function runMechanismEngineInternal(
     };
   }
 
-  const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
-  const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
-  const aelStructuredBlock = buildStructuredAELBlock(analyticalEnrichment || null);
+  const filteredAelCtx = filterAELForStrategicUse(analyticalEnrichment || null, painRegistry);
+  const activeAel = filteredAelCtx ? filteredAelCtx.filteredPkg : (analyticalEnrichment || null);
+  const aelBlock = formatAELForPrompt(activeAel, painRegistry);
+  const causalDirective = buildCausalDirectiveForPrompt(activeAel);
+  const aelStructuredBlock = buildStructuredAELBlock(activeAel);
   if (aelBlock.length > 0) {
     console.log(`[MechanismEngine] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | structuredBlock=${aelStructuredBlock.length}chars`);
   }
@@ -482,14 +485,15 @@ Respond with ONLY valid JSON, no markdown:
       if (!nameValidation.valid) {
         console.log(`[MechanismEngine] NAME_INVALID | reason="${nameValidation.reason}" | attempting name repair`);
         try {
+          const domainAnchor = mechAnchor?.name || productDna?.uniqueMechanism || positioning.contrastAxis || primaryAxis;
           const nameRepairResponse = await aiChat({
             model: "gpt-4.1-mini",
             messages: [{ role: "user", content: `The mechanism name "${primaryMech.mechanismName}" is invalid because: ${nameValidation.reason}.
 
 Rename it to satisfy ALL THREE requirements:
-1. DOMAIN OBJECT: A noun specific to this business context: "${positioning.contrastAxis || primaryAxis}" with enemy: "${positioning.enemyDefinition || "unknown"}"
-2. OPERATIONAL ACTION: One of: Diagnostic, Extraction, Audit, Pipeline, Conversion, Qualification, Validation, Assessment, Protocol, Mapping, Tracker
-3. UNIQUE IDENTITY: Must reference the "${primaryAxis}" axis or the specific domain problem
+1. DOMAIN OBJECT: A noun grounded in this product capability / Product Truth: "${domainAnchor}" with enemy: "${positioning.enemyDefinition || "unknown"}"
+2. OPERATIONAL ACTION: One of: Diagnostic, Extraction, Audit, Pipeline, Conversion, Qualification, Validation, Assessment, Protocol, Mapping, Tracker, Mirror, Stream, Loop
+3. UNIQUE IDENTITY: Must reference the "${primaryAxis}" axis or the specific capability
 
 Return ONLY the new mechanism name as a JSON object: {"name": "The [Domain Object] [Action] [Identity]"}` }],
             max_tokens: 100,
@@ -796,9 +800,12 @@ function validateMechanismName(name: string, domainVocab?: string, mechAnchor?: 
   const lower = name.toLowerCase().replace(/^the\s+/, "");
 
   if (mechAnchor) {
-    const anchorName = mechAnchor.name.toLowerCase();
-    const anchorDiff = mechAnchor.differentiatingFeature.toLowerCase();
-    if (anchorName.includes(lower) || lower.includes(anchorName) || lower.includes(anchorDiff) || anchorDiff.includes(lower)) {
+    const anchorName = (mechAnchor.name || "").toLowerCase();
+    const anchorDiff = (mechAnchor.differentiatingFeature || "").toLowerCase();
+    if (anchorName && (anchorName.includes(lower) || lower.includes(anchorName))) {
+      return { valid: true };
+    }
+    if (anchorDiff && (anchorDiff.includes(lower) || lower.includes(anchorDiff))) {
       return { valid: true };
     }
   }

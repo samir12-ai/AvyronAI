@@ -2,7 +2,7 @@ import { deriveValidatedCapabilities } from "../shared/capability-registry";
 import { db } from "../db";
 import { audienceSnapshots, miSnapshots, ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorReviews, growthCampaigns } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt } from "../shared/product-dna";
-import { inArray, eq, and, desc, sql } from "drizzle-orm";
+import { inArray, eq, and, desc, sql, or, isNull } from "drizzle-orm";
 import {
   AUDIENCE_ENGINE_VERSION,
   AUDIENCE_THRESHOLDS,
@@ -48,6 +48,8 @@ import { buildGroundingContract, checkGroundingContract, groundingRefsSchema } f
 import { generateWithRepair, LLMReliabilityError } from "../shared/llm-reliability/reliability-runner";
 import { z } from "zod";
 import { evaluateTargetCoverage, type TargetCoverageResult } from "./target-coverage";
+import { runDynamicCustomerVoiceExtraction, buildCanonicalCompetitorMap } from "./semantic-reasoner";
+import { loadCanonicalCustomerVoice } from "../competitive-intelligence/evidence-routing";
 
 interface EvidenceMeta {
   evidenceCount: number;
@@ -123,6 +125,7 @@ export interface SegmentDefinitionClaim {
 }
 
 interface AudienceSegment extends EvidenceMeta {
+  id: string;
   name: string;
   role: "END_CONSUMER" | "BUYER" | "PRACTITIONER" | "BUSINESS_OWNER" | "PROCUREMENT" | "RESELLER" | "SUPPLIER" | "UNKNOWN";
   roleClaim?: RoleClaim;
@@ -653,29 +656,9 @@ function inferPainsFromObjections(objectionMap: SignalItem[], inputSnapshotId: s
 }
 
 function inferPainsFromEmotionalDrivers(drivers: SignalItem[], inputSnapshotId: string | null): SignalItem[] {
-  const inferred: SignalItem[] = [];
-  for (const driver of drivers) {
-    const painCanonical = `Unresolved need: ${driver.canonical}`;
-    const derivedConfidence = driver.confidenceScore * 0.5;
-    inferred.push({
-      canonical: painCanonical,
-      frequency: Math.max(1, Math.round(driver.frequency * 0.5)),
-      evidence: driver.evidence.slice(0, 2),
-      evidenceCount: Math.max(1, Math.round(driver.evidenceCount * 0.5)),
-      // no 0.1 floor — see inferPainsFromObjections.
-      confidenceScore: derivedConfidence,
-      sourceSignals: [...driver.sourceSignals, "inferred_from_emotional_driver"],
-      inputSnapshotId,
-      // audience-confidence-v2 provenance — inherited from the source driver;
-      // finalConfidence reflects the documented ×0.5 derivation scaling.
-      sourceTypes: driver.sourceTypes,
-      competitorIds: driver.competitorIds,
-      confidenceBreakdown: driver.confidenceBreakdown
-        ? { ...driver.confidenceBreakdown, finalConfidence: Number(derivedConfidence.toFixed(4)) }
-        : undefined,
-    });
-  }
-  return inferred;
+  // Constitutional Invariant: Dynamic semantic reasoner & judge must determine pains from real evidence.
+  // Deterministic fallbacks synthesizing "Unresolved need: ..." are strictly retired.
+  return [];
 }
 
 function mergePainLayers(
@@ -1426,6 +1409,7 @@ const SegmentDefinitionSchema = z.object({
 });
 
 const SegmentCandidateSchema = z.object({
+  id: z.string().optional(),
   name: z.string().min(1),
   segmentDefinition: SegmentDefinitionSchema.optional(),
   role: z.union([
@@ -1447,7 +1431,8 @@ const SegmentCandidateSchema = z.object({
 });
 const SegmentArraySchema = z.array(SegmentCandidateSchema);
 
-function normalizeSegmentCandidate(seg: any, segIndex: number) {
+export function normalizeSegmentCandidate(seg: any, segIndex: number) {
+  const canonicalId = seg.id || `seg_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   const segPrefix = `seg_${segIndex + 1}`;
   
   const segmentDef: SegmentDefinitionClaim = seg.segmentDefinition && typeof seg.segmentDefinition === "object"
@@ -1510,6 +1495,7 @@ function normalizeSegmentCandidate(seg: any, segIndex: number) {
   ])).filter(Boolean);
 
   return {
+    id: canonicalId,
     name: seg.name,
     segmentDefinition: segmentDef,
     role: roleObj.value,
@@ -1623,13 +1609,15 @@ Do NOT weaken evidence standards to fill schema fields.
 - Every claim MUST carry its own stable claimId and specific evidence IDs (e.g. claimId: "seg_1_pain_1", evidenceIds: ["EV-2", "EV-3"]).
 - Do NOT use evidence supporting one claim to justify a different claim (e.g., pain evidence cannot prove a desire or outcome).
 - Fewer fully supported claims are far better than a complete-looking persona containing speculation.
+- PAIN ATOMICITY: Each pain claim MUST represent ONE coherent customer problem or causal issue unit. Do NOT combine multiple distinct, independently actionable issues (e.g. do not conjoin pricing with sizing, or customer service with return delays and defective items). If multiple distinct problems exist in evidence, emit them as separate atomic pain items, each with its own claimId and specific evidenceIds.
 - MARKET_NARRATIVE_CONTEXT may provide market context but must NOT be used as direct buyer pain testimony.
 - Respect the safeUses and prohibitedUses listed on each evidence item.
 
 BUSINESS TARGET CONTEXT (for reference only, NOT evidence):
 Industry: ${businessContext.industry}
+Core Offering: ${businessContext.coreOffer || "N/A"}
 Target Audience: ${businessContext.targetAudience}
-
+${productDnaBlock ? `\nPRODUCT OFFERING CONTEXT:\n${productDnaBlock}\n` : ""}
 MARKET MATURITY: ${maturity.level}
 AWARENESS LEVEL: ${awareness.level}
 ${multiSourceSection}
@@ -1637,38 +1625,42 @@ ${multiSourceSection}
 SAMPLE EVIDENCE (raw market data with source actor attribution, authority class, and safe/prohibited uses):
 ${formatEvidenceUnits(evidenceItems)}
 
-Return a JSON array of 1-3 distinct segments actually supported by the evidence. Each segment format:
+Return a JSON object with a "segments" array containing 1-3 distinct segments actually supported by the evidence. Each segment format:
 {
-  "name": "concise label for this group",
-  "segmentDefinition": {
-    "claimId": "seg_1_def",
-    "claim": "concrete definition of who this audience group is",
-    "evidenceIds": ["EV-1", "EV-2"]
-  },
-  "role": {
-    "claimId": "seg_1_role",
-    "value": "END_CONSUMER" | "BUYER" | "PRACTITIONER" | "BUSINESS_OWNER" | "PROCUREMENT" | "RESELLER" | "SUPPLIER" | "UNKNOWN",
-    "evidenceIds": ["EV-1"]
-  },
-  "description": "concrete description of their operational/usage context",
-  "pains": [
-    { "claimId": "seg_1_pain_1", "claim": "specific problem directly stated in evidence", "evidenceIds": ["EV-2", "EV-3"] }
-  ],
-  "desires": [
-    // Include ONLY if evidence directly expresses a desire/goal. Otherwise OMIT or leave empty [].
-    { "claimId": "seg_1_desire_1", "claim": "specific desire directly stated in evidence", "evidenceIds": ["EV-4"] }
-  ],
-  "objections": [
-    // Include ONLY if evidence directly expresses an objection/skepticism. Otherwise OMIT or leave empty [].
-    { "claimId": "seg_1_objection_1", "claim": "specific objection directly stated in evidence", "evidenceIds": ["EV-5"] }
-  ],
-  "motivations": [], // OMIT if unsupported
-  "outcomes": [], // OMIT if unsupported
-  "estimatedPercentage": number,
-  "groundingRefs": ["EV-1", "EV-2", "EV-3"]
+  "segments": [
+    {
+      "name": "concise label for this group",
+      "segmentDefinition": {
+        "claimId": "seg_1_def",
+        "claim": "concrete definition of who this audience group is",
+        "evidenceIds": ["EV-1", "EV-2"]
+      },
+      "role": {
+        "claimId": "seg_1_role",
+        "value": "END_CONSUMER",
+        "evidenceIds": ["EV-1"]
+      },
+      "description": "concrete description of their operational/usage context",
+      "pains": [
+        { "claimId": "seg_1_pain_1", "claim": "specific problem directly stated in evidence", "evidenceIds": ["EV-2", "EV-3"] }
+      ],
+      "desires": [
+        // Include ONLY if evidence directly expresses a desire/goal. Otherwise OMIT or leave empty [].
+        { "claimId": "seg_1_desire_1", "claim": "specific desire directly stated in evidence", "evidenceIds": ["EV-4"] }
+      ],
+      "objections": [
+        // Include ONLY if evidence directly expresses an objection/skepticism. Otherwise OMIT or leave empty [].
+        { "claimId": "seg_1_objection_1", "claim": "specific objection directly stated in evidence", "evidenceIds": ["EV-5"] }
+      ],
+      "motivations": [], // OMIT if unsupported
+      "outcomes": [], // OMIT if unsupported
+      "estimatedPercentage": 50,
+      "groundingRefs": ["EV-1", "EV-2", "EV-3"]
+    }
+  ]
 }
 
-Return ONLY the JSON array, no markdown.`;
+Return ONLY valid JSON matching this schema.`;
 
   const { result: rawSegments } = await generateWithRepair<string, string>({
     engineName: "AudienceEngine-V3",
@@ -1681,22 +1673,51 @@ Return ONLY the JSON array, no markdown.`;
         messages: [{ role: "user", content: input }],
         temperature: 0.2,
         max_tokens: 4500,
+        response_format: { type: "json_object" },
         endpoint: "audience-engine-v3-segments",
         accountId,
       });
-      return response.choices[0]?.message?.content?.trim() || "[]";
+      return response.choices[0]?.message?.content?.trim() || '{"segments":[]}';
     },
     judge: async (input, candidate) => {
-      const parsed = safeJsonParse<z.infer<typeof SegmentArraySchema>>(candidate, SegmentArraySchema);
-      if (!parsed || parsed.length === 0) {
+      let parsed = safeJsonParse<any>(candidate);
+      if (!parsed) {
+        try {
+          const str = String(candidate).trim();
+          const startBrace = str.indexOf('{');
+          const lastBrace = str.lastIndexOf('}');
+          if (startBrace !== -1 && lastBrace !== -1 && lastBrace > startBrace) {
+            parsed = JSON.parse(str.substring(startBrace, lastBrace + 1));
+          } else {
+            const startBracket = str.indexOf('[');
+            const lastBracket = str.lastIndexOf(']');
+            if (startBracket !== -1 && lastBracket !== -1 && lastBracket > startBracket) {
+              parsed = JSON.parse(str.substring(startBracket, lastBracket + 1));
+            }
+          }
+        } catch {}
+      }
+      if (!parsed) {
         return {
           valid: false,
           failureClass: "GENERATION_QUALITY_FAILURE",
-          rejections: [{ rule: "Structural Integrity", reason: "output was not valid JSON or returned 0 segments" }]
+          rejections: [{ rule: "Structural Integrity", reason: "output was not valid JSON" }]
         };
       }
 
-      const normalizedCandidates = parsed.map((seg, idx) => normalizeSegmentCandidate(seg, idx));
+      if (!Array.isArray(parsed) && Array.isArray((parsed as any).segments)) {
+        parsed = (parsed as any).segments;
+      }
+
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        return {
+          valid: false,
+          failureClass: "GENERATION_QUALITY_FAILURE",
+          rejections: [{ rule: "Structural Integrity", reason: "output did not contain a non-empty array of segments" }]
+        };
+      }
+
+      const normalizedCandidates = parsed.map((seg: any, idx: number) => normalizeSegmentCandidate(seg, idx));
 
       // 1. Build Structural Manifest
       const claimManifest: any[] = [];
@@ -1739,14 +1760,31 @@ ${JSON.stringify(normalizedCandidates, null, 2)}
 CURRENT CLAIM MANIFEST BATCH (Evaluate exactly these IDs):
 ${JSON.stringify(batchManifest, null, 2)}
 
-BUSINESS TARGET CONTEXT (Reference only):
+CANONICAL BUSINESS & TARGET CONTEXT:
 Industry: ${businessContext.industry}
+Core Offering: ${businessContext.coreOffer || "N/A"}
+${productDnaBlock ? `\n${productDnaBlock}\n` : ""}
 
 EVALUATION RULES:
 1. EVIDENCE SUPPORT: Does the cited evidenceIds directly and genuinely support this specific claim?
    - If unsupported: rejectionCode = "UNSUPPORTED_PAIN", "UNSUPPORTED_DESIRE", etc.
 2. SOURCE ROLE PRESERVATION: Does the role match who the cited evidence is actually about? (Code: "ROLE_TRANSFER")
-3. OPTIONAL FIELDS ARE VALID WHEN OMITTED: A segment with only supported role and pains (and empty desires/objections) is 100% VALID. Do NOT reject for omitting optional fields. Do NOT invent claims that are not in the manifest.
+3. BUSINESS & TARGET RELEVANCE:
+   - Does this evidence describe a real buyer problem relevant to purchasing or using the campaign offering and its target roles, OR does it merely describe customer dissatisfaction with a competitor/vendor (e.g. competitor billing disputes, refund delays, poor customer service)?
+   - A competitor complaint must NOT become a canonical audience segment or buyer pain if it is unrelated to the offering's Product Truth and target roles.
+   - If invalid: rejectionCode = "AUDIENCE_RELEVANCE_PROMOTION_FAILED"
+4. OPTIONAL FIELDS ARE VALID WHEN OMITTED: A segment with only supported role and pains (and empty desires/objections) is 100% VALID. Do NOT reject for omitting optional fields. Do NOT invent claims that are not in the manifest.
+5. PAIN ATOMICITY (ONE COHERENT CAUSAL PROBLEM UNIT):
+   - For every pain claim: Does this claim describe ONE coherent customer problem, or has the generator conjoined multiple distinct, independently actionable issues with different capability requirements, lifecycle stages, or strategic treatments?
+   - Examples of compound pains requiring repair:
+     * Conjoining price/value concerns with sizing/fit defects.
+     * Conjoining customer service responsiveness with refund delays, return process friction, and defective item delivery.
+     * Conjoining product aesthetic preferences with sizing chart inaccuracies.
+   - If a pain claim is compound:
+     * status = "INVALID"
+     * rejectionCode = "COMPOUND_PAIN"
+     * critique = "This pain statement conjoins multiple distinct, independently actionable customer problems with different capability requirements or lifecycle stages into a single claim."
+     * repairDirective = "Split this compound claim into separate, evidence-grounded atomic claims under splitClaims, or replace it with a single focused atomic claim under repairedClaim. Provide specific, verified evidenceIds for each child claim. Do not copy evidenceIds blindly."
 
 INSTRUCTIONS:
 Evaluate EVERY claim listed in the CURRENT CLAIM MANIFEST BATCH.
@@ -1854,6 +1892,8 @@ Return a JSON object:
         const rawObj = JSON.parse(failedCandidate);
         if (Array.isArray(rawObj)) {
           candidateSegments = rawObj;
+        } else if (Array.isArray(rawObj.segments)) {
+          candidateSegments = rawObj.segments;
         } else if (rawObj.candidateSegments) {
           candidateSegments = rawObj.candidateSegments;
         }
@@ -1872,7 +1912,16 @@ Return a JSON object:
       }
 
       if (rejectedList.some((r: any) => r.rule === "EMPTY_AUDIENCE" || r.rule === "Structural Integrity" || r.rejectionCode === "CONTRACT_FAILURE")) {
-        throw new Error("Cannot patch structurally invalid audience. Candidate was invalid JSON or 0 segments.");
+        const regenResponse = await aiChat({
+          model: "gpt-4.1-mini",
+          messages: [{ role: "user", content: input + "\n\nCRITICAL: Return ONLY a valid JSON object matching { \"segments\": [ ... ] }." }],
+          temperature: 0.2,
+          max_tokens: 4500,
+          response_format: { type: "json_object" },
+          endpoint: "audience-engine-v3-segments-regen",
+          accountId,
+        });
+        return regenResponse.choices[0]?.message?.content?.trim() || '{"segments":[]}';
       }
 
       const repairDirectives = rejectedList.map((r: any) => {
@@ -1890,14 +1939,18 @@ Return a JSON object:
 The Semantic Judge REJECTED one or more claims in your previous generation.
 You must NOT regenerate the entire Audience. You must return ONLY a structural JSON patch describing how to fix or remove the rejected claims.
 
+RAW EVIDENCE:
+${formatEvidenceUnits(evidenceItems)}
+
 REJECTED CLAIMS TO REPAIR / REMOVE:
 ${repairDirectives}
 
 MANDATORY PATCH RULES:
 1. ONLY rejected claims may be targeted. Accepted claims are LOCKED.
-2. If evidence does not support an optional claim (desires, objections, motivations, outcomes), you MUST return action: "REMOVE".
-3. If an unsupported claim is required (segmentDefinition, role), you MUST return action: "REPLACE" with a repaired claim strictly adhering to evidence.
-4. Do NOT add new claims. Do NOT attempt to modify locked claims.
+2. If evidence does not directly support an optional or non-core claim (desires, objections, motivations, outcomes, or secondary pains), return action: "REMOVE".
+3. If a claim is replaced (action: "REPLACE"), the repaired claim MUST be a single coherent atomic claim directly grounded in the RAW EVIDENCE above, citing valid evidenceIds from RAW EVIDENCE.
+4. If a compound claim is split (action: "SPLIT"), return an array of 2 or more distinct atomic claims under "splitClaims". Each split claim must have its own "claim" text and ONLY the specific "evidenceIds" from RAW EVIDENCE that directly support that individual claim. Do NOT copy evidenceIds blindly. Every split claim MUST cite at least 1 valid evidence unit.
+5. Do NOT add ungrounded claims. Do NOT attempt to modify locked claims.
 
 OUTPUT SCHEMA:
 Return a JSON object with this exact structure:
@@ -1905,8 +1958,12 @@ Return a JSON object with this exact structure:
   "repairs": [
     {
       "claimId": "exact_rejected_claimId",
-      "action": "REMOVE" | "REPLACE",
-      "repairedClaim": { "claim": "reworded text...", "evidenceIds": ["EV-123"] } // ONLY required if action is REPLACE
+      "action": "REMOVE" | "REPLACE" | "SPLIT",
+      "repairedClaim": { "claim": "reworded atomic text grounded in raw evidence...", "evidenceIds": ["EV-1"] },
+      "splitClaims": [
+        { "claim": "first atomic problem grounded in evidence...", "evidenceIds": ["EV-1"] },
+        { "claim": "second atomic problem grounded in evidence...", "evidenceIds": ["EV-2"] }
+      ]
     }
   ]
 }`;
@@ -1915,7 +1972,7 @@ Return a JSON object with this exact structure:
         model: "gpt-4.1-mini",
         messages: [{ role: "user", content: attemptPrompt }],
         temperature: 0.1, // extremely low temperature for patching
-        max_tokens: 2000,
+        max_tokens: 2500,
         response_format: { type: "json_object" },
         endpoint: "audience-engine-v3-segments-repair",
         accountId,
@@ -1931,39 +1988,58 @@ Return a JSON object with this exact structure:
         // Deep clone candidate segments so we don't mutate input
         const mergedSegments = JSON.parse(JSON.stringify(candidateSegments));
 
+        const validPatches = new Map<string, any>();
         for (const patch of repairs) {
-          let matched = false;
-          // Validate patch targets only rejected claims
-          const isRejected = rejectedList.some((r: any) => { 
-            const rid = r.claimId; 
-            return rid === patch.claimId; 
-          });
-          if (!isRejected) {
-             throw new Error(`Unauthorized patch target: ${patch.claimId} was not in rejected claims list.`);
+          if (!patch?.claimId) continue;
+          const isRejected = rejectedList.some((r: any) => r.claimId === patch.claimId);
+          if (isRejected) {
+            validPatches.set(patch.claimId, patch);
           }
+        }
 
-          for (const seg of mergedSegments) {
-            for (const key of ['pains', 'desires', 'objections', 'motivations', 'outcomes']) {
-              if (Array.isArray(seg[key])) {
-                const idx = seg[key].findIndex((c: any) => c.claimId === patch.claimId);
-                if (idx !== -1) {
+        for (const seg of mergedSegments) {
+          for (const key of ['pains', 'desires', 'objections', 'motivations', 'outcomes']) {
+            if (Array.isArray(seg[key])) {
+              const updatedList: any[] = [];
+              for (const c of seg[key]) {
+                const patch = validPatches.get(c.claimId);
+                const isRejected = rejectedList.some((r: any) => r.claimId === c.claimId);
+                if (patch) {
                   if (patch.action === 'REMOVE') {
-                    seg[key].splice(idx, 1);
-                  } else if (patch.action === 'REPLACE' && patch.repairedClaim) {
-                    seg[key][idx] = { ...seg[key][idx], ...patch.repairedClaim, claimId: patch.claimId }; // preserve ID
+                    continue;
                   }
-                  matched = true;
+                  if (patch.action === 'REPLACE' && patch.repairedClaim) {
+                    updatedList.push({
+                      ...patch.repairedClaim,
+                      claimId: c.claimId,
+                    });
+                    continue;
+                  }
+                  if (patch.action === 'SPLIT' && Array.isArray(patch.splitClaims) && patch.splitClaims.length > 0) {
+                    patch.splitClaims.forEach((sc: any, scIdx: number) => {
+                      if (sc?.claim && Array.isArray(sc?.evidenceIds) && sc.evidenceIds.length > 0) {
+                        updatedList.push({
+                          claimId: `${c.claimId}_split_${scIdx + 1}`,
+                          claim: sc.claim,
+                          evidenceIds: sc.evidenceIds,
+                        });
+                      }
+                    });
+                    continue;
+                  }
+                }
+                if (!isRejected) {
+                  updatedList.push(c);
                 }
               }
+              seg[key] = updatedList;
             }
-            for (const key of ['segmentDefinition', 'role', 'roleClaim']) {
-              if (seg[key] && seg[key].claimId === patch.claimId) {
-                if (patch.action === 'REMOVE') {
-                   throw new Error(`Cannot REMOVE required field: ${key} (${patch.claimId})`);
-                } else if (patch.action === 'REPLACE' && patch.repairedClaim) {
-                  seg[key] = { ...seg[key], ...patch.repairedClaim, claimId: patch.claimId };
-                }
-                matched = true;
+          }
+          for (const key of ['segmentDefinition', 'role', 'roleClaim']) {
+            if (seg[key]?.claimId) {
+              const patch = validPatches.get(seg[key].claimId);
+              if (patch && patch.action === 'REPLACE' && patch.repairedClaim) {
+                Object.assign(seg[key], patch.repairedClaim, { claimId: seg[key].claimId });
               }
             }
           }
@@ -1984,7 +2060,7 @@ Return a JSON object with this exact structure:
   });
 
   const rawParsed = safeJsonParse<any>(rawSegments, z.any());
-  const segsList = Array.isArray(rawParsed) ? rawParsed : (rawParsed?.candidateSegments || []);
+  const segsList = Array.isArray(rawParsed) ? rawParsed : (rawParsed?.segments || rawParsed?.candidateSegments || []);
   const acceptedSegments = segsList.map((s: any, idx: number) => normalizeSegmentCandidate(s, idx));
 
   if (!acceptedSegments || acceptedSegments.length === 0) {
@@ -2109,7 +2185,7 @@ CONSOLIDATION RULES:
         const rawRes: any = await aiGemini({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
           config: { responseMimeType: "application/json", maxOutputTokens: 2000 },
-          model: "gemini-3.6-flash",
+          model: "gemini-2.5-flash",
           accountId
         }).catch(() => null);
 
@@ -2180,7 +2256,7 @@ Output JSON only:
             const rawReval: any = await aiGemini({
               contents: [{ role: "user", parts: [{ text: revalPrompt }] }],
               config: { responseMimeType: "application/json", maxOutputTokens: 1000 },
-              model: "gemini-3.6-flash",
+              model: "gemini-2.5-flash",
               accountId
             }).catch(() => null);
 
@@ -2549,6 +2625,7 @@ function buildEmptyResult(
 
 export async function runAudienceEngine(accountId: string, campaignId: string, miSnapshotIdParam?: string, jobId?: string, strategic?: RunStrategicContext): Promise<AudienceEngineV3Result> {
   const startTime = Date.now();
+  const effectiveJobId = jobId || `job_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   console.log(`[AudienceEngine-V3] Starting analysis for account=${accountId} campaign=${campaignId}${miSnapshotIdParam ? ` | run-scoped MI=${miSnapshotIdParam}` : " | unscoped (will resolve latest)"}`);
 
   let latestSnapshot: any = null;
@@ -2616,7 +2693,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   const competitors = await db.select().from(ciCompetitors)
     .where(and(
       eq(ciCompetitors.accountId, accountId),
-      eq(ciCompetitors.campaignId, campaignId),
+      or(eq(ciCompetitors.campaignId, campaignId), isNull(ciCompetitors.campaignId)),
       eq(ciCompetitors.isActive, true),
     ));
 
@@ -2629,72 +2706,63 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   const competitorIds = competitors.map(c => c.id);
   const competitorCount = competitorIds.length;
 
-  let posts: { caption: string | null; platform: string; competitorId: string }[] = [];
-  let rawComments: { commentText: string | null; competitorId: string }[] = [];
-  let rawReviews: { reviewText: string; competitorId: string }[] = [];
+  // 1. Ingest unified Canonical Customer Voice universe (Instagram, TikTok, YouTube comments, Reviews, Market Voice quotes)
+  const canonicalCustomerUnits = await loadCanonicalCustomerVoice(accountId, campaignId);
 
+  // 2. Ingest competitor-authored content (captions, formats, engagement)
+  let posts: { caption: string | null; platform: string; competitorId: string }[] = [];
   if (competitorIds.length > 0) {
     const idList = sql.join(competitorIds.map(id => sql`${id}`), sql`, `);
-
-    [posts, rawComments, rawReviews] = await Promise.all([
-      db.select({ caption: ciCompetitorPosts.caption, platform: ciCompetitorPosts.platform, competitorId: ciCompetitorPosts.competitorId })
-        .from(ciCompetitorPosts)
-        .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
-        .orderBy(desc(ciCompetitorPosts.createdAt))
-        .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE),
-
-      db.select({ commentText: ciCompetitorComments.commentText, competitorId: ciCompetitorComments.competitorId })
-        .from(ciCompetitorComments)
-        .where(sql`${ciCompetitorComments.competitorId} IN (${idList}) AND (${ciCompetitorComments.isSynthetic} = false OR ${ciCompetitorComments.isSynthetic} IS NULL) AND ${ciCompetitorComments.authorType} IS DISTINCT FROM 'owner'`)
-        .orderBy(desc(ciCompetitorComments.createdAt))
-        .limit(AUDIENCE_THRESHOLDS.MAX_COMMENTS_TO_ANALYZE),
-
-      db.select({ reviewText: ciCompetitorReviews.reviewText, competitorId: ciCompetitorReviews.competitorId })
-        .from(ciCompetitorReviews)
-        .where(sql`${ciCompetitorReviews.competitorId} IN (${idList}) AND ${ciCompetitorReviews.isSynthetic} = false`)
-        .orderBy(desc(ciCompetitorReviews.createdAt))
-        .limit(300),
-    ]);
+    posts = await db.select({ 
+      caption: ciCompetitorPosts.caption, 
+      platform: ciCompetitorPosts.platform, 
+      competitorId: ciCompetitorPosts.competitorId 
+    })
+      .from(ciCompetitorPosts)
+      .where(sql`${ciCompetitorPosts.competitorId} IN (${idList})`)
+      .orderBy(desc(ciCompetitorPosts.createdAt))
+      .limit(AUDIENCE_THRESHOLDS.MAX_POSTS_TO_ANALYZE);
   }
 
-  const instagramPosts = posts.filter(p => !p.platform || p.platform === "instagram");
-  const tiktokPosts = posts.filter(p => p.platform === "tiktok");
-
-  const rawCaptionItems = instagramPosts
+  const rawCaptionItems = posts
     .map(p => ({ text: p.caption, competitorId: p.competitorId }))
     .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 5);
-  const rawTiktokItems = tiktokPosts
-    .map(p => ({ text: p.caption, competitorId: p.competitorId }))
-    .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 5);
-  const rawCommentItems = rawComments
-    .map(c => ({ text: c.commentText, competitorId: c.competitorId }))
-    .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 3);
-  const rawReviewItems = rawReviews
-    .map(r => ({ text: r.reviewText, competitorId: r.competitorId }))
-    .filter(i => i.text.length > 5);
-
-  const rawTiktokTexts = rawTiktokItems.map(i => i.text);
-  const rawReviewTexts = rawReviewItems.map(i => i.text);
 
   const captionSanitized = sanitizeTextItems(rawCaptionItems);
-  const commentSanitized = sanitizeTextItems(rawCommentItems);
   const captions = captionSanitized.clean.map(i => i.text);
+
+  // Group Customer Voice items by Origin for downstream linguistic analysis
+  const commentUnits = canonicalCustomerUnits.filter(u => u.origin === "COMPETITOR_COMMENT");
+  const reviewUnits = canonicalCustomerUnits.filter(u => u.origin === "COMPETITOR_REVIEW");
+  const marketVoiceUnits = canonicalCustomerUnits.filter(u => u.origin === "MARKET_VOICE");
+
+  const rawCommentItems = commentUnits
+    .map(c => ({ text: c.text, competitorId: c.competitorId || "unknown" }))
+    .filter((i): i is { text: string; competitorId: string } => !!i.text && i.text.length > 3);
+  const rawReviewItems = reviewUnits
+    .map(r => ({ text: r.text, competitorId: r.competitorId || "unknown" }))
+    .filter(i => i.text.length > 5);
+  const rawMarketVoiceItems = marketVoiceUnits
+    .map(m => ({ text: m.text, competitorId: "market_voice" }))
+    .filter(i => i.text.length > 5);
+
+  const commentSanitized = sanitizeTextItems(rawCommentItems);
   const commentTexts = commentSanitized.clean.map(i => i.text);
+  const rawReviewTexts = rawReviewItems.map(i => i.text);
+  const rawMarketVoiceTexts = rawMarketVoiceItems.map(i => i.text);
   const totalSanitized = captionSanitized.removed + commentSanitized.removed;
 
   const commentClassification = buildLabeledComments(commentSanitized.clean);
   const labeledComments = commentClassification.labeled;
   const labeledCaptions = buildLabeledCaptions(captionSanitized.clean);
   const labeledReviews = buildLabeledReviews(rawReviewItems);
-  const labeledTiktok = buildLabeledTiktok(rawTiktokItems);
-  const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions, ...labeledReviews, ...labeledTiktok];
+  const labeledAllTexts: LabeledText[] = [...labeledComments, ...labeledCaptions, ...labeledReviews];
   const primaryDataStrength = computePrimaryDataStrength(labeledComments, labeledCaptions);
 
   console.log(
-    `[AudienceEngine-V3] Data: ${competitorCount} competitors, ${captions.length} captions, ${commentTexts.length} comments` +
-    ` | reviews=${labeledReviews.length} tiktok=${labeledTiktok.length}` +
-    ` (sanitized ${totalSanitized} synthetic | noise-filtered ${commentClassification.noiseCount}` +
-    ` | HIGH=${commentClassification.highCount} MED=${commentClassification.mediumCount} LOW=${commentClassification.lowCount})` +
+    `[AudienceEngine-V3] Canonical Customer Voice: ${canonicalCustomerUnits.length} total units` +
+    ` (comments=${commentUnits.length}, reviews=${reviewUnits.length}, marketVoice=${marketVoiceUnits.length})` +
+    ` | Competitor posts=${posts.length} captions=${captions.length}` +
     ` | primaryStrength=${primaryDataStrength.toFixed(3)}`
   );
 
@@ -2704,7 +2772,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     competitorsAnalyzed: competitorCount,
     sanitizedCount: totalSanitized,
     reviewsAnalyzed: labeledReviews.length,
-    tiktokAnalyzed: labeledTiktok.length,
+    tiktokAnalyzed: canonicalCustomerUnits.filter(u => u.platform === "tiktok").length,
+    marketVoiceAnalyzed: marketVoiceUnits.length,
     commentQuality: {
       noise: commentClassification.noiseCount,
       low: commentClassification.lowCount,
@@ -2718,9 +2787,10 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     detectedMarkets: [] as string[],
   };
 
+  const totalCustomerEvidence = canonicalCustomerUnits.length;
   const datasetTooSmall =
-    competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS ||
-    captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS;
+    (competitorCount < AUDIENCE_THRESHOLDS.MIN_COMPETITORS_FOR_ANALYSIS && totalCustomerEvidence < 5) ||
+    (captions.length < AUDIENCE_THRESHOLDS.MIN_POSTS_FOR_ANALYSIS && totalCustomerEvidence < 5);
 
   let bridgeResult: SemanticBridgeResult | null = null;
   if (latestSnapshot) {
@@ -2751,7 +2821,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
 
       const executionTimeMs = Date.now() - startTime;
       const [inserted] = await db.insert(audienceSnapshots).values({
-        accountId, campaignId, jobId, miSnapshotId,
+        accountId, campaignId, jobId: effectiveJobId, miSnapshotId,
         engineVersion: AUDIENCE_ENGINE_VERSION,
         inputSummary: JSON.stringify({ ...baseInputSummary, status: "DATASET_TOO_SMALL", statusMessage: msg }),
         executionTimeMs,
@@ -2773,15 +2843,41 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     .limit(1);
 
   const productDna = await loadProductDNA(campaignId, accountId);
+
+  // ── AUTHORITY VACUUM GUARD (Rule 11) ──
+  // Canonical business authority (campaignOfferingId, targetRoles / target definition) must be available.
+  // Audience generation MUST NOT proceed with competitor evidence alone if canonical authority is missing.
+  if (!productDna || !productDna.campaignOfferingId || (!productDna.targetRoles?.length && !productDna.targetDecisionMaker && !productDna.targetAudienceSegment)) {
+    console.error(`[AudienceEngine-V3] AUTHORITY_VACUUM | Canonical Business / Target Understanding is missing or incomplete for campaign=${campaignId}`);
+    const executionTimeMs = Date.now() - startTime;
+    return buildEmptyResult(
+      "INCOMPLETE",
+      "AUTHORITY_VACUUM: Canonical Business Understanding or Target Understanding is missing. Cannot proceed with competitor evidence alone.",
+      baseInputSummary,
+      executionTimeMs,
+      "",
+    );
+  }
+
+  const primaryTarget = productDna.targetRoles?.map(r => `${r.roleTitle} (${r.roleType})`).join("; ")
+    || productDna.targetDecisionMaker
+    || productDna.targetAudienceSegment
+    || "Target Market";
+
   const businessContext = {
-    industry: productDna?.businessType || productDna?.productCategory || campaign?.name || "General",
-    coreOffer: productDna?.coreOffer || campaign?.name || "Products/Services",
-    targetAudience: productDna?.targetDecisionMaker || productDna?.targetAudienceSegment || "Market audience",
+    industry: productDna.productCategory || productDna.businessType || campaign?.name || "General",
+    coreOffer: productDna.coreOffer || campaign?.name || "Products/Services",
+    targetAudience: primaryTarget,
     location: "",
-    productDna: productDna || undefined,
+    productDna: productDna,
+    campaignOfferingId: productDna.campaignOfferingId,
+    businessUnderstandingId: productDna.businessUnderstandingAuthorityId,
+    targetUnderstandingId: productDna.targetUnderstandingAuthorityId,
+    productTruthFacts: productDna.productTruthFacts || [],
+    targetRoles: productDna.targetRoles || [],
   };
   if (productDna) {
-    console.log(`[AudienceEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"} | advantage=${productDna.strategicAdvantage || "n/a"}`);
+    console.log(`[AudienceEngine-V3] PRODUCT_DNA_LOADED | offering=${productDna.coreOffer} | category=${productDna.productCategory || "n/a"} | targetRoles=${(productDna.targetRoles || []).length} | truthFacts=${(productDna.productTruthFacts || []).length}`);
   }
 
   const allText = [...commentTexts, ...captions];
@@ -2790,24 +2886,94 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
   baseInputSummary.detectedMarkets = detectedMarkets;
   console.log(`[AudienceEngine-V3] Market scope detected: ${detectedMarkets.join(", ")} | scopeConfidence=${scopeMetadata.scopeConfidence} | ambiguity=${scopeMetadata.scopeAmbiguityFlag}`);
 
-  const scopedPainClusters = filterClustersByMarket(PAIN_CLUSTERS, detectedMarkets);
-  const scopedDesireClusters = filterClustersByMarket(DESIRE_CLUSTERS, detectedMarkets);
-  const scopedObjectionClusters = filterClustersByMarket(OBJECTION_CLUSTERS, detectedMarkets);
+  // ── DYNAMIC CUSTOMER VOICE SEMANTIC REASONING ──
+  // Replaces domain-specific static dictionaries with dynamic LLM Reasoner + Hostile Semantic Judge
+  const dynamicSemanticResult = await runDynamicCustomerVoiceExtraction({
+    accountId,
+    campaignId,
+    competitors: competitors.map(c => ({
+      id: c.id,
+      name: c.name,
+      websiteUrl: c.websiteUrl,
+      profileLink: c.profileLink,
+      platform: c.platform,
+    })),
+    customerEvidenceUnits: canonicalCustomerUnits,
+    businessContext: {
+      heroProduct: productDna?.coreOffer || campaign?.name || "Products/Services",
+      businessName: campaign?.name || "Business",
+      market: campaign?.targetMarket || "Target Market",
+      category: productDna?.productCategory || "Apparel & Retail",
+    },
+  });
 
-  const languageSignals = analyzeLanguage(commentTexts, captions, miSnapshotId, competitorCount, rawReviewTexts, rawTiktokTexts);
-  const rawPainMap = matchPatternClusters(labeledAllTexts, scopedPainClusters, miSnapshotId, competitorCount);
-  const rawDesireMap = matchPatternClusters(labeledAllTexts, scopedDesireClusters, miSnapshotId, competitorCount);
-  let rawObjectionMap = matchPatternClusters(labeledAllTexts, scopedObjectionClusters, miSnapshotId, competitorCount);
-  const rawTransformationMap = matchPatternClusters(labeledAllTexts, TRANSFORMATION_PATTERNS, miSnapshotId, competitorCount);
-  const rawEmotionalDrivers = matchPatternClusters(labeledAllTexts, EMOTIONAL_DRIVER_PATTERNS, miSnapshotId, competitorCount);
+  const allCustomerVoiceTexts = canonicalCustomerUnits.map(u => u.text).filter(Boolean);
+  const languageSignals = analyzeLanguage(allCustomerVoiceTexts, captions, miSnapshotId, competitorCount, rawReviewTexts, rawMarketVoiceTexts);
 
-  rawObjectionMap = applyObjectionContextRules(rawObjectionMap, allText);
+  let directPainMap: SignalItem[] = dynamicSemanticResult.pains.map(p => ({
+    canonical: p.canonical,
+    frequency: p.frequency,
+    evidence: p.evidence,
+    evidenceCount: p.evidenceCount,
+    confidenceScore: p.confidenceScore,
+    sourceSignals: p.sourceSignals,
+    inputSnapshotId: miSnapshotId,
+    sourceTypes: p.sourceTypes,
+    competitorIds: p.competitorIds,
+    confidenceBreakdown: p.confidenceBreakdown,
+  }));
 
-  let directPainMap = applyEvidenceIntegrityFilter(rawPainMap);
-  let desireMap = applyEvidenceIntegrityFilter(rawDesireMap);
-  let objectionMap = applyEvidenceIntegrityFilter(rawObjectionMap);
-  const transformationMap = applyEvidenceIntegrityFilter(rawTransformationMap);
-  const emotionalDrivers = applyEvidenceIntegrityFilter(rawEmotionalDrivers);
+  let desireMap: SignalItem[] = dynamicSemanticResult.desires.map(d => ({
+    canonical: d.canonical,
+    frequency: d.frequency,
+    evidence: d.evidence,
+    evidenceCount: d.evidenceCount,
+    confidenceScore: d.confidenceScore,
+    sourceSignals: d.sourceSignals,
+    inputSnapshotId: miSnapshotId,
+    sourceTypes: d.sourceTypes,
+    competitorIds: d.competitorIds,
+    confidenceBreakdown: d.confidenceBreakdown,
+  }));
+
+  let objectionMap: SignalItem[] = dynamicSemanticResult.objections.map(o => ({
+    canonical: o.canonical,
+    frequency: o.frequency,
+    evidence: o.evidence,
+    evidenceCount: o.evidenceCount,
+    confidenceScore: o.confidenceScore,
+    sourceSignals: o.sourceSignals,
+    inputSnapshotId: miSnapshotId,
+    sourceTypes: o.sourceTypes,
+    competitorIds: o.competitorIds,
+    confidenceBreakdown: o.confidenceBreakdown,
+  }));
+
+  const transformationMap: SignalItem[] = dynamicSemanticResult.patterns.map(t => ({
+    canonical: t.canonical,
+    frequency: t.frequency,
+    evidence: t.evidence,
+    evidenceCount: t.evidenceCount,
+    confidenceScore: t.confidenceScore,
+    sourceSignals: t.sourceSignals,
+    inputSnapshotId: miSnapshotId,
+    sourceTypes: t.sourceTypes,
+    competitorIds: t.competitorIds,
+    confidenceBreakdown: t.confidenceBreakdown,
+  }));
+
+  const emotionalDrivers: SignalItem[] = dynamicSemanticResult.psychologicalDrivers.map(ed => ({
+    canonical: ed.canonical,
+    frequency: ed.frequency,
+    evidence: ed.evidence,
+    evidenceCount: ed.evidenceCount,
+    confidenceScore: ed.confidenceScore,
+    sourceSignals: ed.sourceSignals,
+    inputSnapshotId: miSnapshotId,
+    sourceTypes: ed.sourceTypes,
+    competitorIds: ed.competitorIds,
+    confidenceBreakdown: ed.confidenceBreakdown,
+  }));
 
   const narrativeObjectionSignals = buildNarrativeObjectionSignals(latestSnapshot, miSnapshotId);
   if (narrativeObjectionSignals.length > 0) {
@@ -2826,9 +2992,6 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
       frequency: bs.frequency || 1,
       evidence: bs.evidence || [],
       evidenceCount: bs.evidenceCount || 1,
-      // no 0.1 floor and no 0.3 phantom-default. A bridge signal that
-      // carries no confidence emits zero; downstream gates decide whether to
-      // surface it or drop it.
       confidenceScore: (typeof bs.confidenceScore === "number" ? bs.confidenceScore : 0) * 0.7,
       sourceSignals: [...(bs.sourceSignals || []), "bridge_signal"],
       inputSnapshotId: miSnapshotId,
@@ -2899,7 +3062,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     console.log(`[AudienceEngine-V3] GENERIC_OUTPUT_DETECTED | penalty=${genericCheck.penalty.toFixed(3)} | matches=${genericCheck.genericPhrases.join(", ")}`);
   }
 
-  const isDefensiveMode = totalSignalFrequency < AUDIENCE_THRESHOLDS.DEFENSIVE_MODE_SIGNAL_THRESHOLD;
+  const isDefensiveMode = totalSignalFrequency < AUDIENCE_THRESHOLDS.DEFENSIVE_MODE_SIGNAL_THRESHOLD && totalCustomerEvidence < AUDIENCE_THRESHOLDS.DEFENSIVE_MODE_SIGNAL_THRESHOLD;
 
   let audienceSegments: AudienceSegment[] = [];
   let adsTargetingHints: AdsTargetingHint[] = [];
@@ -2917,7 +3080,8 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
       const allRawEvidence = [
         ...captionSanitized.clean.map(i => ({ text: i.text, sourceActor: "COMPETITOR_BRAND" })),
         ...commentSanitized.clean.map(i => ({ text: i.text, sourceActor: "CUSTOMER_COMMENTER" })),
-        ...rawReviewItems.map(i => ({ text: i.text, sourceActor: "REVIEWER" }))
+        ...rawReviewItems.map(i => ({ text: i.text, sourceActor: "REVIEWER" })),
+        ...rawMarketVoiceItems.map(i => ({ text: i.text, sourceActor: "CUSTOMER_DISCUSSANT" })),
       ];
 
       const selectionResult = await selectEvidence(
@@ -2936,7 +3100,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
           defensiveMode: isDefensiveMode,
           languageSignals, painMap, desireMap, objectionMap, transformationMap, emotionalDrivers,
           audienceSegments: [], segmentDensity: [], awarenessLevel, maturityIndex, intentDistribution,
-          adsTargetingHints: [], structuredSignals: EMPTY_STRUCTURED_SIGNALS,
+          adsTargetingHints: [], structuredSignals: buildStructuredSignals(painMap, desireMap, objectionMap, emotionalDrivers, transformationMap, awarenessLevel, intentDistribution),
           targetCoverage: {
             status: "NOT_EVALUATED",
             supportedTargetRoles: [],
@@ -2975,7 +3139,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
           defensiveMode: isDefensiveMode,
           languageSignals, painMap, desireMap, objectionMap, transformationMap, emotionalDrivers,
           audienceSegments: [], segmentDensity: [], awarenessLevel, maturityIndex, intentDistribution,
-          adsTargetingHints: [], structuredSignals: EMPTY_STRUCTURED_SIGNALS,
+          adsTargetingHints: [], structuredSignals: buildStructuredSignals(painMap, desireMap, objectionMap, emotionalDrivers, transformationMap, awarenessLevel, intentDistribution),
           targetCoverage: {
             status: "NOT_EVALUATED",
             supportedTargetRoles: [],
@@ -3190,7 +3354,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
 
   executionTimeMs = Date.now() - startTime;
   const [inserted] = await db.insert(audienceSnapshots).values({
-    accountId, campaignId, jobId, miSnapshotId,
+    accountId, campaignId, jobId: effectiveJobId, miSnapshotId,
     engineVersion: AUDIENCE_ENGINE_VERSION,
     languageSignals: JSON.stringify(languageSignals),
     audiencePains: JSON.stringify(painMap),
@@ -3246,6 +3410,7 @@ export async function runAudienceEngine(accountId: string, campaignId: string, m
     adsTargetingHints,
     structuredSignals,
     targetCoverage,
+    productTruthFacts: productDna?.productTruthFacts || [],
     inputSummary,
     confidenceScore: 0.85,
     dataReliability,
@@ -3296,6 +3461,7 @@ export async function getLatestAudienceSnapshot(accountId: string, campaignId: s
     adsTargetingHints: JSON.parse(snapshot.adsTargetingHints || "[]"),
     structuredSignals: JSON.parse(snapshot.structuredSignals || '{"pain_clusters":[],"desire_clusters":[],"pattern_clusters":[],"root_causes":[],"psychological_drivers":[]}'),
     inputSummary: JSON.parse(snapshot.inputSummary || "{}"),
+    productTruthFacts: JSON.parse(snapshot.inputSummary || "{}")?.productTruthFacts || [],
     freshnessMetadata,
   };
 }

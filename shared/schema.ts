@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint, foreignKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -2442,6 +2442,7 @@ export const funnelSnapshots = pgTable("funnel_snapshots", {
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
   jobId: varchar("job_id").notNull(),
+  laneId: varchar("lane_id"),
   offerSnapshotId: varchar("offer_snapshot_id").notNull(),
   awarenessSnapshotId: varchar("awareness_snapshot_id"),
   miSnapshotId: varchar("mi_snapshot_id").notNull(),
@@ -2507,6 +2508,7 @@ export const awarenessSnapshots = pgTable("awareness_snapshots", {
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
   jobId: varchar("job_id").notNull(),
+  laneId: varchar("lane_id"),
   integritySnapshotId: varchar("integrity_snapshot_id"),
   funnelSnapshotId: varchar("funnel_snapshot_id"),
   offerSnapshotId: varchar("offer_snapshot_id").notNull(),
@@ -2543,6 +2545,7 @@ export const persuasionSnapshots = pgTable("persuasion_snapshots", {
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
   jobId: varchar("job_id").notNull(),
+  laneId: varchar("lane_id"),
   awarenessSnapshotId: varchar("awareness_snapshot_id").notNull(),
   integritySnapshotId: varchar("integrity_snapshot_id").notNull(),
   funnelSnapshotId: varchar("funnel_snapshot_id").notNull(),
@@ -2726,13 +2729,24 @@ export const dataSourceTransitions = pgTable("data_source_transitions", {
 
 export type DataSourceTransition = typeof dataSourceTransitions.$inferSelect;
 
-export const conversations = pgTable("conversations", {
-  id: serial("id").primaryKey(),
-  accountId: varchar("account_id").notNull().default("default"),
-  title: text("title").notNull().default("New Chat"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
-});
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: serial("id").primaryKey(),
+    accountId: varchar("account_id").notNull().default("default"),
+    campaignId: text("campaign_id"),
+    title: text("title").notNull().default("New Chat"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => ({
+    tenantCampaignIdx: index("conversations_tenant_campaign_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.updatedAt
+    ),
+  })
+);
 
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
@@ -4294,6 +4308,9 @@ export const offeringInputEvidence = pgTable(
     rawOfferingName: text("raw_offering_name").notNull(),
     rawFeaturesAndNotes: text("raw_features_and_notes").notNull(),
     contentHash: text("content_hash").notNull(),
+    authorityType: text("authority_type").default("UNKNOWN"),
+    sourceSuggestionEvidenceId: varchar("source_suggestion_evidence_id"),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -4392,4 +4409,1053 @@ export const strategicPainDecisions = pgTable(
 );
 
 export type StrategicPainDecisionRow = typeof strategicPainDecisions.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Performance Loop Business Execution Intelligence Tables
+// ---------------------------------------------------------------------------
+
+export const ownedSourceSnapshots = pgTable(
+  "owned_source_snapshots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id"),
+    sourceType: varchar("source_type").notNull(), // WEBSITE | INSTAGRAM | TIKTOK | YOUTUBE | MANUAL_BUSINESS_TRUTH | OTHER
+    sourceIdentityId: varchar("source_identity_id"),
+    providerSnapshotId: varchar("provider_snapshot_id"),
+    historyAvailability: varchar("history_availability").notNull().default("UNKNOWN"), // CONFIRMED_HISTORY | PARTIAL_HISTORY | NO_HISTORY_CONFIRMED | UNKNOWN
+    providerStatus: varchar("provider_status").notNull().default("NOT_CONNECTED"), // COMPLETE | PARTIAL | FAILED | NOT_CONNECTED | STALE | COMING_SOON
+    factualMetrics: jsonb("factual_metrics"),
+    evidenceRefIds: jsonb("evidence_ref_ids").default(sql`'[]'::jsonb`),
+    freshness: varchar("freshness").default("FRESH"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).defaultNow(),
+    observedPeriodStart: timestamp("observed_period_start", { withTimezone: true }),
+    observedPeriodEnd: timestamp("observed_period_end", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("owned_source_snapshots_tenant_idx").on(table.accountId, table.campaignId),
+    sourceTypeIdx: index("owned_source_snapshots_type_idx").on(table.sourceType),
+  }),
+);
+
+export type OwnedSourceSnapshotRow = typeof ownedSourceSnapshots.$inferSelect;
+
+export const businessExecutionStates = pgTable(
+  "business_execution_states",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    sourcePerformanceCycleId: varchar("source_performance_cycle_id"),
+    sourceWebsiteSnapshotId: varchar("source_website_snapshot_id"),
+    sourceOwnedSourceSnapshotIds: jsonb("source_owned_source_snapshot_ids").default(sql`'[]'::jsonb`),
+    mode: varchar("mode").notNull().default("UNKNOWN"), // BUILD | OPTIMIZE | UNKNOWN
+    primaryBottleneck: varchar("primary_bottleneck").default("UNKNOWN"), // REACH | ENGAGEMENT | INTENT | CONVERSATION | CONVERSION | RETENTION | NONE | UNKNOWN
+    observedBusinessHistory: jsonb("observed_business_history"),
+    observedAudienceTraction: jsonb("observed_audience_traction"),
+    observedDemandState: jsonb("observed_demand_state"),
+    observedLeadState: jsonb("observed_lead_state"),
+    observedCustomerState: jsonb("observed_customer_state"),
+    observedConversionState: jsonb("observed_conversion_state"),
+    observedProofState: jsonb("observed_proof_state"),
+    observedChannelState: jsonb("observed_channel_state"),
+    evidenceSummary: text("evidence_summary"),
+    evidenceRefIds: jsonb("evidence_ref_ids").default(sql`'[]'::jsonb`),
+    confidence: varchar("confidence").notNull().default("LOW"), // HIGH | MEDIUM | LOW
+    freshness: varchar("freshness").notNull().default("FRESH"),
+    status: varchar("status").notNull().default("ACTIVE"), // ACTIVE | STALE
+    reason: text("reason"),
+    reasoningAuthorityId: varchar("reasoning_authority_id"),
+    judgeAuthorityId: varchar("judge_authority_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("business_execution_states_tenant_idx").on(table.accountId, table.campaignId),
+  }),
+);
+
+export type BusinessExecutionStateRow = typeof businessExecutionStates.$inferSelect;
+
+export const clarificationRequests = pgTable(
+  "clarification_requests",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    executionStateDraftId: varchar("execution_state_draft_id"),
+    missingFactType: varchar("missing_fact_type").notNull(),
+    question: text("question").notNull(),
+    answerType: varchar("answer_type").notNull().default("TEXT"), // TEXT | NUMBER | BOOLEAN | CHOICE
+    reason: text("reason"),
+    evidenceRefIds: jsonb("evidence_ref_ids").default(sql`'[]'::jsonb`),
+    status: varchar("status").notNull().default("PENDING"), // PENDING | ANSWERED | EXPIRED
+    userAnswer: text("user_answer"),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("clarification_requests_tenant_idx").on(table.accountId, table.campaignId),
+    statusIdx: index("clarification_requests_status_idx").on(table.status),
+  }),
+);
+
+export type ClarificationRequestRow = typeof clarificationRequests.$inferSelect;
+
+export const performanceContexts = pgTable(
+  "performance_contexts",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    businessExecutionStateId: varchar("business_execution_state_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    mode: varchar("mode").notNull().default("UNKNOWN"), // BUILD | OPTIMIZE | UNKNOWN
+    primaryBottleneck: varchar("primary_bottleneck").default("UNKNOWN"),
+    currentReality: text("current_reality"),
+    strongestSignals: jsonb("strongest_signals").default(sql`'[]'::jsonb`),
+    weakestSignals: jsonb("weakest_signals").default(sql`'[]'::jsonb`),
+    recentTrend: varchar("recent_trend").default("INSUFFICIENT_DATA"),
+    activeChannels: jsonb("active_channels").default(sql`'[]'::jsonb`),
+    provenAssets: jsonb("proven_assets").default(sql`'[]'::jsonb`),
+    proofGaps: jsonb("proof_gaps").default(sql`'[]'::jsonb`),
+    relevantBuyerResponses: jsonb("relevant_buyer_responses").default(sql`'[]'::jsonb`),
+    relevantObjections: jsonb("relevant_objections").default(sql`'[]'::jsonb`),
+    confidence: varchar("confidence").notNull().default("LOW"),
+    freshness: varchar("freshness").notNull().default("FRESH"),
+    evidenceRefIds: jsonb("evidence_ref_ids").default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("performance_contexts_tenant_idx").on(table.accountId, table.campaignId),
+    stateIdx: index("performance_contexts_state_idx").on(table.businessExecutionStateId),
+  }),
+);
+
+export type PerformanceContextRow = typeof performanceContexts.$inferSelect;
+
+export const enginePerformanceConsumptions = pgTable(
+  "engine_performance_consumptions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    engineName: varchar("engine_name").notNull(),
+    engineRunId: varchar("engine_run_id").notNull(),
+    performanceContextId: varchar("performance_context_id").notNull(),
+    businessExecutionStateId: varchar("business_execution_state_id").notNull(),
+    mode: varchar("mode").notNull(),
+    primaryBottleneck: varchar("primary_bottleneck"),
+    outputSnapshotId: varchar("output_snapshot_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("engine_performance_consumptions_tenant_idx").on(table.accountId, table.campaignId),
+    runIdx: index("engine_performance_consumptions_run_idx").on(table.engineRunId),
+  }),
+);
+
+export type EnginePerformanceConsumptionRow = typeof enginePerformanceConsumptions.$inferSelect;
+
+// ============================================================================
+// PHASE 0: ADAPTIVE INTELLIGENCE FOUNDATION TABLES
+// ============================================================================
+
+export const adaptiveSignals = pgTable(
+  "adaptive_signals",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    sourceDomain: varchar("source_domain", { length: 32 }).notNull(), // MARKET | PERFORMANCE
+    sourceArtifactId: varchar("source_artifact_id").notNull(),
+    entityIds: jsonb("entity_ids").default(sql`'[]'::jsonb`),
+    evidenceIds: jsonb("evidence_ids").default(sql`'[]'::jsonb`),
+    signalType: varchar("signal_type", { length: 64 }).notNull(),
+    summary: text("summary").notNull(),
+    severity: varchar("severity", { length: 16 }).notNull().default("MEDIUM"), // LOW | MEDIUM | HIGH | CRITICAL
+    confidence: doublePrecision("confidence").notNull().default(0.8),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  },
+  (table) => ({
+    tenantIdx: index("adaptive_signals_tenant_idx").on(table.accountId, table.campaignId),
+    sourceArtifactIdx: index("adaptive_signals_source_artifact_idx").on(table.sourceArtifactId),
+    domainIdx: index("adaptive_signals_domain_idx").on(table.sourceDomain),
+    signalTypeIdx: index("adaptive_signals_type_idx").on(table.signalType),
+  }),
+);
+
+export type AdaptiveSignalRow = typeof adaptiveSignals.$inferSelect;
+export type InsertAdaptiveSignal = typeof adaptiveSignals.$inferInsert;
+
+export const reasoningCases = pgTable(
+  "reasoning_cases",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    strategyRootId: varchar("strategy_root_id").notNull(),
+    strategyRootVersion: integer("strategy_root_version").notNull(),
+    marketEventIds: jsonb("market_event_ids").default(sql`'[]'::jsonb`),
+    performanceWarningIds: jsonb("performance_warning_ids").default(sql`'[]'::jsonb`),
+    evidenceIds: jsonb("evidence_ids").default(sql`'[]'::jsonb`),
+    status: varchar("status", { length: 32 }).notNull().default("OPEN"), // OPEN | ANALYZING | EVALUATED | RESOLVED | CLOSED | INSUFFICIENT_EVIDENCE
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    reasoningVersion: varchar("reasoning_version", { length: 32 }).notNull().default("1.0.0"),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("reasoning_cases_tenant_idx").on(table.accountId, table.campaignId),
+    rootIdx: index("reasoning_cases_root_idx").on(table.strategyRootId, table.strategyRootVersion),
+    statusIdx: index("reasoning_cases_status_idx").on(table.status),
+  }),
+);
+
+export type ReasoningCaseRow = typeof reasoningCases.$inferSelect;
+export type InsertReasoningCase = typeof reasoningCases.$inferInsert;
+
+export const reasoningHypotheses = pgTable(
+  "reasoning_hypotheses",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    reasoningCaseId: varchar("reasoning_case_id").notNull(),
+    hypothesisType: varchar("hypothesis_type", { length: 64 }).notNull(),
+    explanation: text("explanation").notNull(),
+    supportingEvidenceIds: jsonb("supporting_evidence_ids").default(sql`'[]'::jsonb`),
+    contradictingEvidenceIds: jsonb("contradicting_evidence_ids").default(sql`'[]'::jsonb`),
+    alternativeCauseIds: jsonb("alternative_cause_ids").default(sql`'[]'::jsonb`),
+    confidence: doublePrecision("confidence").notNull().default(0.5),
+    status: varchar("status", { length: 32 }).notNull().default("PROPOSED"), // PROPOSED | VALIDATED | REJECTED | INCONCLUSIVE
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    caseIdx: index("reasoning_hypotheses_case_idx").on(table.reasoningCaseId),
+    statusIdx: index("reasoning_hypotheses_status_idx").on(table.status),
+  }),
+);
+
+export type ReasoningHypothesisRow = typeof reasoningHypotheses.$inferSelect;
+export type InsertReasoningHypothesis = typeof reasoningHypotheses.$inferInsert;
+
+export const adaptiveDecisions = pgTable(
+  "adaptive_decisions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    reasoningCaseId: varchar("reasoning_case_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    strategyRootId: varchar("strategy_root_id").notNull(),
+    strategyRootVersion: integer("strategy_root_version").notNull(),
+    decisionType: varchar("decision_type", { length: 64 }).notNull(), // OBSERVE | EXECUTION_RESPONSE | REEVALUATE_AUTHORITY | STRATEGY_CHANGE_REQUIRED | STRATEGIC_REBUILD_REQUIRED | INSUFFICIENT_EVIDENCE
+    affectedAuthority: varchar("affected_authority", { length: 64 }), // e.g. DIFFERENTIATION, POSITIONING, OFFER
+    affectedEntityIds: jsonb("affected_entity_ids").default(sql`'[]'::jsonb`),
+    evidenceIds: jsonb("evidence_ids").default(sql`'[]'::jsonb`),
+    confidence: doublePrecision("confidence").notNull().default(0.8),
+    rationale: text("rationale").notNull(),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("adaptive_decisions_tenant_idx").on(table.accountId, table.campaignId),
+    caseIdx: index("adaptive_decisions_case_idx").on(table.reasoningCaseId),
+    rootIdx: index("adaptive_decisions_root_idx").on(table.strategyRootId, table.strategyRootVersion),
+    typeIdx: index("adaptive_decisions_type_idx").on(table.decisionType),
+  }),
+);
+
+export type AdaptiveDecisionRow = typeof adaptiveDecisions.$inferSelect;
+export type InsertAdaptiveDecision = typeof adaptiveDecisions.$inferInsert;
+
+export const strategyAdaptationLineages = pgTable(
+  "strategy_adaptation_lineages",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    previousRootId: varchar("previous_root_id").notNull(),
+    previousRootVersion: integer("previous_root_version").notNull(),
+    newRootId: varchar("new_root_id").notNull(),
+    newRootVersion: integer("new_root_version").notNull(),
+    triggerReasoningCaseId: varchar("trigger_reasoning_case_id"),
+    triggerAdaptiveDecisionId: varchar("trigger_adaptive_decision_id"),
+    changedAuthorities: jsonb("changed_authorities").default(sql`'[]'::jsonb`),
+    preservedAuthorities: jsonb("preserved_authorities").default(sql`'[]'::jsonb`),
+    sourceEventIds: jsonb("source_event_ids").default(sql`'[]'::jsonb`),
+    sourcePerformanceWarningIds: jsonb("source_performance_warning_ids").default(sql`'[]'::jsonb`),
+    evidenceIds: jsonb("evidence_ids").default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("strategy_adaptation_lineages_tenant_idx").on(table.accountId, table.campaignId),
+    prevRootIdx: index("strategy_adaptation_lineages_prev_root_idx").on(table.previousRootId, table.previousRootVersion),
+    newRootIdx: index("strategy_adaptation_lineages_new_root_idx").on(table.newRootId, table.newRootVersion),
+    decisionIdx: index("strategy_adaptation_lineages_decision_idx").on(table.triggerAdaptiveDecisionId),
+  }),
+);
+
+export type StrategyAdaptationLineageRow = typeof strategyAdaptationLineages.$inferSelect;
+export type InsertStrategyAdaptationLineage = typeof strategyAdaptationLineages.$inferInsert;
+
+export const executionSignals = pgTable(
+  "execution_signals",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    strategyRootId: varchar("strategy_root_id").notNull(),
+    strategyRootVersion: integer("strategy_root_version").notNull(),
+    sourceDecisionId: varchar("source_decision_id"),
+    sourceReasoningCaseId: varchar("source_reasoning_case_id"),
+    sourceEventIds: jsonb("source_event_ids").default(sql`'[]'::jsonb`),
+    sourcePerformanceWarningIds: jsonb("source_performance_warning_ids").default(sql`'[]'::jsonb`),
+    affectedLaneIds: jsonb("affected_lane_ids").default(sql`'[]'::jsonb`),
+    affectedStrategyAuthorities: jsonb("affected_strategy_authorities").default(sql`'[]'::jsonb`),
+    actionType: varchar("action_type", { length: 32 }).notNull(), // KEEP_TASK | REFRESH_TASK | CANCEL_TASK | CREATE_TASK | PAUSE_TASK
+    priority: varchar("priority", { length: 16 }).notNull().default("MEDIUM"), // LOW | MEDIUM | HIGH | CRITICAL
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("execution_signals_tenant_idx").on(table.accountId, table.campaignId),
+    rootIdx: index("execution_signals_root_idx").on(table.strategyRootId, table.strategyRootVersion),
+    decisionIdx: index("execution_signals_decision_idx").on(table.sourceDecisionId),
+  }),
+);
+
+export type ExecutionSignalRow = typeof executionSignals.$inferSelect;
+export type InsertExecutionSignal = typeof executionSignals.$inferInsert;
+
+export const competitorSources = pgTable(
+  "competitor_sources",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    competitorId: varchar("competitor_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    platform: varchar("platform", { length: 32 }).notNull(), // WEBSITE | LINKEDIN | X | INSTAGRAM | TIKTOK | YOUTUBE | GOOGLE | TRUSTPILOT | OTHER
+    canonicalUrl: text("canonical_url").notNull(),
+    externalAccountId: varchar("external_account_id", { length: 128 }),
+    status: varchar("status", { length: 32 }).notNull().default("ACTIVE"), // ACTIVE | INACTIVE | PENDING_VERIFICATION | BLOCKED | DEAD
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    lastFetchedAt: timestamp("last_fetched_at", { withTimezone: true }),
+    activityState: varchar("activity_state", { length: 32 }).default("UNKNOWN"), // ACTIVE | DORMANT | UNKNOWN
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("competitor_sources_tenant_idx").on(table.accountId, table.campaignId),
+    competitorIdx: index("competitor_sources_competitor_idx").on(table.competitorId),
+    platformIdx: index("competitor_sources_platform_idx").on(table.platform),
+  }),
+);
+
+export type CompetitorSourceRow = typeof competitorSources.$inferSelect;
+export type InsertCompetitorSource = typeof competitorSources.$inferInsert;
+
+export const strategyAdaptationOutcomes = pgTable(
+  "strategy_adaptation_outcomes",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    adaptiveDecisionId: varchar("adaptive_decision_id").notNull(),
+    reasoningCaseId: varchar("reasoning_case_id").notNull(),
+    previousRootId: varchar("previous_root_id").notNull(),
+    previousRootVersion: integer("previous_root_version").notNull(),
+    newRootId: varchar("new_root_id").notNull(),
+    newRootVersion: integer("new_root_version").notNull(),
+    changedAuthorities: jsonb("changed_authorities").default(sql`'[]'::jsonb`),
+    baselinePerformanceContextIds: jsonb("baseline_performance_context_ids").default(sql`'[]'::jsonb`),
+    postChangePerformanceContextIds: jsonb("post_change_performance_context_ids").default(sql`'[]'::jsonb`),
+    evaluationWindow: jsonb("evaluation_window").default(sql`'{}'::jsonb`),
+    status: varchar("status", { length: 32 }).notNull().default("PENDING_BASELINE"), // PENDING_BASELINE | MONITORING | EVALUATED | CLOSED
+    outcomeClassification: varchar("outcome_classification", { length: 32 }).notNull().default("PENDING"), // PENDING | IMPROVED | NO_MATERIAL_CHANGE | DEGRADED | INCONCLUSIVE | INSUFFICIENT_DATA
+    confidence: doublePrecision("confidence").notNull().default(0.0),
+    evidenceIds: jsonb("evidence_ids").default(sql`'[]'::jsonb`),
+    summary: text("summary"),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    evaluatedAt: timestamp("evaluated_at", { withTimezone: true }),
+  },
+  (table) => ({
+    tenantIdx: index("strategy_adaptation_outcomes_tenant_idx").on(table.accountId, table.campaignId),
+    decisionIdx: index("strategy_adaptation_outcomes_decision_idx").on(table.adaptiveDecisionId),
+    prevRootIdx: index("strategy_adaptation_outcomes_prev_root_idx").on(table.previousRootId, table.previousRootVersion),
+    newRootIdx: index("strategy_adaptation_outcomes_new_root_idx").on(table.newRootId, table.newRootVersion),
+    statusIdx: index("strategy_adaptation_outcomes_status_idx").on(table.status),
+  }),
+);
+
+export type StrategyAdaptationOutcomeRow = typeof strategyAdaptationOutcomes.$inferSelect;
+export type InsertStrategyAdaptationOutcome = typeof strategyAdaptationOutcomes.$inferInsert;
+
+export const strategyRecomputeJobs = pgTable(
+  "strategy_recompute_jobs",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    sourceRootId: varchar("source_root_id").notNull(),
+    sourceRootVersion: integer("source_root_version").notNull(),
+    adaptiveDecisionId: varchar("adaptive_decision_id").notNull(),
+    reasoningCaseId: varchar("reasoning_case_id"),
+    authority: varchar("authority", { length: 64 }).notNull(),
+    sourceArtifactId: varchar("source_artifact_id").notNull(),
+    outputArtifactId: varchar("output_artifact_id"),
+    status: varchar("status", { length: 32 }).notNull().default("PENDING"), // PENDING | RUNNING | COMPLETED | FAILED
+    result: varchar("result", { length: 32 }).notNull().default("PENDING"), // PENDING | NO_CHANGE_REQUIRED | CHANGED | INCOMPLETE | FAILED
+    evidenceIds: jsonb("evidence_ids").default(sql`'[]'::jsonb`),
+    summary: text("summary"),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    tenantIdx: index("strategy_recompute_jobs_tenant_idx").on(table.accountId, table.campaignId),
+    decisionIdx: index("strategy_recompute_jobs_decision_idx").on(table.adaptiveDecisionId),
+    rootIdx: index("strategy_recompute_jobs_root_idx").on(table.sourceRootId, table.sourceRootVersion),
+    authorityIdx: index("strategy_recompute_jobs_authority_idx").on(table.authority),
+  }),
+);
+
+export type StrategyRecomputeJobRow = typeof strategyRecomputeJobs.$inferSelect;
+export type InsertStrategyRecomputeJob = typeof strategyRecomputeJobs.$inferInsert;
+
+// ============================================================================
+// WHAT TO DO TODAY — DAILY EXECUTION ENGINE PERSISTENCE
+// ============================================================================
+
+export const executionDays = pgTable(
+  "execution_days",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull().default("default"),
+    campaignId: varchar("campaign_id").notNull(),
+    businessDate: varchar("business_date", { length: 32 }).notNull(), // YYYY-MM-DD
+    strategyRootId: varchar("strategy_root_id").notNull(),
+    rootBundleId: varchar("root_bundle_id").notNull(),
+    strategicPlanId: varchar("strategic_plan_id").notNull(),
+    planningContextId: varchar("planning_context_id"),
+    dailyMission: text("daily_mission").notNull(),
+    executionRationale: text("execution_rationale"),
+    status: varchar("status", { length: 32 }).notNull().default("ACTIVE"), // PLANNED | ACTIVE | CLOSED | ARCHIVED
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    generationVersion: integer("generation_version").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("execution_days_tenant_idx").on(table.accountId, table.campaignId),
+    campaignDateIdx: index("execution_days_campaign_date_idx").on(table.campaignId, table.businessDate),
+    rootIdx: index("execution_days_root_idx").on(table.strategyRootId),
+  }),
+);
+
+export type ExecutionDayRow = typeof executionDays.$inferSelect;
+export type InsertExecutionDay = typeof executionDays.$inferInsert;
+
+export const dailyExecutionTasks = pgTable(
+  "daily_execution_tasks",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    executionDayId: varchar("execution_day_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    strategyRootId: varchar("strategy_root_id").notNull(),
+    laneId: varchar("lane_id"),
+    title: text("title").notNull(),
+    description: text("description").notNull(),
+    taskType: varchar("task_type", { length: 64 }).notNull().default("CONTENT"), // CONTENT | PROOF_ASSET | DISTRIBUTION | MARKET_LEARNING | SALES_OUTREACH | CONVERSION | FOLLOW_UP | MEASUREMENT | OPTIMIZATION
+    priority: varchar("priority", { length: 32 }).notNull().default("MUST_DO"), // MUST_DO | SHOULD_DO | OPTIONAL | WAITING_BLOCKED
+    status: varchar("status", { length: 32 }).notNull().default("PLANNED"), // PLANNED | ACTIVE | DONE | MISSED | BLOCKED | DEFERRED | STALE | CANCELLED | REPLACED
+    channel: varchar("channel", { length: 64 }).notNull().default("WEBSITE"), // YOUTUBE | INSTAGRAM | TIKTOK | FACEBOOK | X | WEBSITE | EMAIL | OTHER
+    channelRole: varchar("channel_role", { length: 32 }).notNull().default("PRIMARY"), // PRIMARY | SUPPORTING | TESTING
+    objective: text("objective"),
+    reason: text("reason"),
+    expectedOutcome: text("expected_outcome"),
+    sourceAuthority: varchar("source_authority", { length: 64 }), // POSITIONING | DIFFERENTIATION | MECHANISM | OFFER | AWARENESS | FUNNEL | PERSUASION | CHANNEL_SELECTION | PLAN_SYNTHESIS
+    sourceDecisionIds: jsonb("source_decision_ids").default(sql`'[]'::jsonb`),
+    sourceReasoningCaseId: varchar("source_reasoning_case_id"),
+    sourceAdaptiveDecisionId: varchar("source_adaptive_decision_id"),
+    sourceExecutionSignalIds: jsonb("source_execution_signal_ids").default(sql`'[]'::jsonb`),
+    parentTaskId: varchar("parent_task_id"),
+    replacementTaskId: varchar("replacement_task_id"),
+    estimatedEffort: varchar("estimated_effort", { length: 64 }),
+    sequenceOrder: integer("sequence_order").notNull().default(0),
+    dependencies: jsonb("dependencies").default(sql`'[]'::jsonb`),
+    executionApproach: text("execution_approach"),
+    proofRequired: text("proof_required"),
+    ctaDestination: text("cta_destination"),
+    productionBlueprint: jsonb("production_blueprint"),
+    requiredQuantity: integer("required_quantity").notNull().default(1),
+    matchedQuantity: integer("matched_quantity").notNull().default(0),
+    remainingQuantity: integer("remaining_quantity").notNull().default(1),
+    dueDate: timestamp("due_date", { withTimezone: true }),
+    executionLifecycleState: varchar("execution_lifecycle_state", { length: 64 }).notNull().default("NOT_YET_DUE"), // NOT_YET_DUE | PARTIALLY_EXECUTED | EXECUTED | UNVERIFIED | NOT_EXECUTED | BLOCKED
+    matchedPostIds: jsonb("matched_post_ids").default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    dayIdx: index("daily_execution_tasks_day_idx").on(table.executionDayId),
+    campaignIdx: index("daily_execution_tasks_campaign_idx").on(table.campaignId),
+    statusIdx: index("daily_execution_tasks_status_idx").on(table.status),
+    priorityIdx: index("daily_execution_tasks_priority_idx").on(table.priority),
+  }),
+);
+
+export type DailyExecutionTaskRow = typeof dailyExecutionTasks.$inferSelect;
+export type InsertDailyExecutionTask = typeof dailyExecutionTasks.$inferInsert;
+
+export const executionChannelCoverage = pgTable(
+  "execution_channel_coverage",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    campaignId: varchar("campaign_id").notNull(),
+    channel: varchar("channel", { length: 64 }).notNull(),
+    strategicRole: varchar("strategic_role", { length: 32 }).notNull().default("SUPPORTING"), // PRIMARY | SUPPORTING | TESTING
+    lastExecutionDate: varchar("last_execution_date", { length: 32 }),
+    recentTaskCount: integer("recent_task_count").notNull().default(0),
+    recentCompletedTaskCount: integer("recent_completed_task_count").notNull().default(0),
+    currentCoverageState: varchar("current_coverage_state", { length: 64 }).notNull().default("ACTIVE"), // ACTIVE | PENDING_PREREQUISITE | UNTESTED | ROTATION_DUE
+    executionDayId: varchar("execution_day_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    campaignChannelIdx: index("execution_channel_coverage_idx").on(table.campaignId, table.channel),
+  }),
+);
+
+export const strategyChangeProposals = pgTable(
+  "strategy_change_proposals",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    campaignId: varchar("campaign_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    reasoningCaseId: varchar("reasoning_case_id").notNull(),
+    adaptiveDecisionId: varchar("adaptive_decision_id").notNull(),
+    currentStrategyRootId: varchar("current_strategy_root_id").notNull(),
+    currentRootBundleId: varchar("current_root_bundle_id"),
+    currentRootBundleVersion: integer("current_root_bundle_version"),
+    currentStrategicPlanId: varchar("current_strategic_plan_id"),
+    decisionType: varchar("decision_type", { length: 64 }).notNull(),
+    affectedAuthorities: jsonb("affected_authorities").default(sql`'[]'::jsonb`),
+    affectedLaneIds: jsonb("affected_lane_ids").default(sql`'[]'::jsonb`),
+    summary: text("summary").notNull(),
+    whyNow: text("why_now").notNull(),
+    evidenceSummary: text("evidence_summary").notNull(),
+    expectedImpact: text("expected_impact").notNull(),
+    potentialDependentAuthorities: jsonb("potential_dependent_authorities").default(sql`'[]'::jsonb`),
+    preservedAuthorities: jsonb("preserved_authorities").default(sql`'[]'::jsonb`),
+    status: varchar("status", { length: 32 }).notNull().default("PENDING_USER_APPROVAL"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    appliedNewRootId: varchar("applied_new_root_id"),
+    appliedNewBundleId: varchar("applied_new_bundle_id"),
+    appliedNewBundleVersion: integer("applied_new_bundle_version"),
+    rejectionReason: text("rejection_reason"),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("strategy_change_proposals_tenant_idx").on(table.accountId, table.campaignId),
+    statusIdx: index("strategy_change_proposals_status_idx").on(table.status),
+    decisionIdx: index("strategy_change_proposals_decision_idx").on(table.adaptiveDecisionId),
+    rootIdx: index("strategy_change_proposals_root_idx").on(table.currentStrategyRootId),
+  }),
+);
+
+export const strategyChangeAcknowledgements = pgTable(
+  "strategy_change_acknowledgements",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    userId: varchar("user_id").notNull(),
+    strategyRootId: varchar("strategy_root_id").notNull(),
+    rootBundleVersion: integer("root_bundle_version").notNull(),
+    authority: varchar("authority", { length: 64 }).notNull(),
+    laneId: varchar("lane_id"),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("strategy_change_ack_tenant_idx").on(table.accountId, table.campaignId),
+    userAckIdx: index("strategy_change_ack_user_idx").on(table.userId, table.campaignId, table.rootBundleVersion),
+    uniqueAckIdx: uniqueIndex("strategy_change_ack_unique_idx").on(
+      table.campaignId,
+      table.userId,
+      table.rootBundleVersion,
+      table.authority,
+      sql`COALESCE(${table.laneId}, '__GLOBAL__')`
+    ),
+  }),
+);
+
+export type StrategyChangeAcknowledgementRow = typeof strategyChangeAcknowledgements.$inferSelect;
+export type InsertStrategyChangeAcknowledgement = typeof strategyChangeAcknowledgements.$inferInsert;
+
+export const monthlyReports = pgTable(
+  "monthly_reports",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    reportPeriodYear: integer("report_period_year").notNull(),
+    reportPeriodMonth: integer("report_period_month").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull().default("UTC"),
+    status: varchar("status", { length: 32 }).notNull().default("IN_PROGRESS"),
+    generatedAt: timestamp("generated_at", { withTimezone: true }),
+    finalizedAt: timestamp("finalized_at", { withTimezone: true }),
+    strategyRootIds: jsonb("strategy_root_ids").default(sql`'[]'::jsonb`),
+    rootBundleVersions: jsonb("root_bundle_versions").default(sql`'[]'::jsonb`),
+    strategicPlanIds: jsonb("strategic_plan_ids").default(sql`'[]'::jsonb`),
+    watchtowerEventIds: jsonb("watchtower_event_ids").default(sql`'[]'::jsonb`),
+    reasoningCaseIds: jsonb("reasoning_case_ids").default(sql`'[]'::jsonb`),
+    adaptiveDecisionIds: jsonb("adaptive_decision_ids").default(sql`'[]'::jsonb`),
+    strategyChangeProposalIds: jsonb("strategy_change_proposal_ids").default(sql`'[]'::jsonb`),
+    strategyAdaptationLineageIds: jsonb("strategy_adaptation_lineage_ids").default(sql`'[]'::jsonb`),
+    executionDayIds: jsonb("execution_day_ids").default(sql`'[]'::jsonb`),
+    executionTaskIds: jsonb("execution_task_ids").default(sql`'[]'::jsonb`),
+    sourceMetricIds: jsonb("source_metric_ids").default(sql`'[]'::jsonb`),
+    reportPayload: jsonb("report_payload").default(sql`'{}'::jsonb`),
+    generationVersion: integer("generation_version").notNull().default(1),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index("monthly_reports_tenant_idx").on(table.accountId, table.campaignId),
+    periodUniqueIdx: uniqueIndex("monthly_reports_period_unique_idx").on(
+      table.campaignId,
+      table.reportPeriodYear,
+      table.reportPeriodMonth
+    ),
+    statusIdx: index("monthly_reports_status_idx").on(table.status),
+  })
+);
+
+export type MonthlyReportRow = typeof monthlyReports.$inferSelect;
+export type InsertMonthlyReport = typeof monthlyReports.$inferInsert;
+
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    accountId: text("account_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    userId: text("user_id"),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    severity: text("severity").notNull().default("INFO"),
+    sourceEntityType: text("source_entity_type"),
+    sourceEntityId: text("source_entity_id"),
+    targetRoute: text("target_route").notNull(),
+    isRead: boolean("is_read").notNull().default(false),
+    readAt: timestamp("read_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    unreadIdx: index("notifications_account_campaign_unread_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.isRead
+    ),
+    campaignCreatedIdx: index("notifications_campaign_created_idx").on(
+      table.campaignId,
+      table.createdAt
+    ),
+    dedupIdx: uniqueIndex("notifications_dedup_idx").on(
+      table.campaignId,
+      table.type,
+      table.sourceEntityType,
+      table.sourceEntityId
+    ),
+  })
+);
+
+export type NotificationRow = typeof notifications.$inferSelect;
+export type InsertNotification = typeof notifications.$inferInsert;
+
+export const brandAssets = pgTable(
+  "brand_assets",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    accountId: text("account_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    assetType: text("asset_type").notNull(), // 'LOGO' | 'BRAND_IMAGE' | 'PRODUCT_IMAGE' | 'REFERENCE_IMAGE' | 'COLOR_PALETTE'
+    assetUrl: text("asset_url").notNull(),
+    assetName: text("asset_name").notNull(),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantTypeIdx: index("brand_assets_tenant_type_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.assetType
+    ),
+    campaignCreatedIdx: index("brand_assets_campaign_created_idx").on(
+      table.campaignId,
+      table.createdAt
+    ),
+  })
+);
+
+export type BrandAssetRow = typeof brandAssets.$inferSelect;
+export type InsertBrandAsset = typeof brandAssets.$inferInsert;
+
+export const generatedCreatives = pgTable(
+  "generated_creatives",
+  {
+    id: text("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()::text`),
+    accountId: text("account_id").notNull(),
+    campaignId: text("campaign_id").notNull(),
+    generationType: text("generation_type").notNull(), // 'IMAGE' | 'COPY' | 'VIDEO'
+    sourceTaskId: text("source_task_id"),
+    sourceLaneId: text("source_lane_id"),
+    sourceStrategyRootId: text("source_strategy_root_id"),
+    platform: text("platform").notNull().default("Instagram"),
+    format: text("format").notNull().default("Post"),
+    prompt: text("prompt").notNull(),
+    content: text("content"),
+    mediaUrl: text("media_url"),
+    brandAssetIds: jsonb("brand_asset_ids").default(sql`'[]'::jsonb`),
+    referenceAssetIds: jsonb("reference_asset_ids").default(sql`'[]'::jsonb`),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantTypeIdx: index("generated_creatives_tenant_type_idx").on(
+      table.accountId,
+      table.campaignId,
+      table.generationType
+    ),
+    campaignCreatedIdx: index("generated_creatives_campaign_created_idx").on(
+      table.campaignId,
+      table.createdAt
+    ),
+  })
+);
+
+export type GeneratedCreativeRow = typeof generatedCreatives.$inferSelect;
+export type InsertGeneratedCreative = typeof generatedCreatives.$inferInsert;
+
+export const dailyOwnedFetchRecords = pgTable(
+  "daily_owned_fetch_records",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    ownedSourceId: varchar("owned_source_id").notNull(),
+    platform: text("platform").notNull(),
+    measurementDate: text("measurement_date").notNull(), // YYYY-MM-DD in campaign timezone
+    status: text("status").notNull().default("SUCCESS"), // SUCCESS | FAILED | PARTIAL
+    fetchedPostCount: integer("fetched_post_count").notNull().default(0),
+    evidenceRefId: text("evidence_ref_id"),
+    details: jsonb("details").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    dedupIdx: uniqueIndex("daily_owned_fetch_dedup_uidx").on(
+      table.accountId,
+      table.campaignId,
+      table.ownedSourceId,
+      table.platform,
+      table.measurementDate
+    ),
+    campaignDateIdx: index("daily_owned_fetch_campaign_date_idx").on(
+      table.campaignId,
+      table.measurementDate
+    ),
+  })
+);
+
+export type DailyOwnedFetchRecord = typeof dailyOwnedFetchRecords.$inferSelect;
+export type InsertDailyOwnedFetchRecord = typeof dailyOwnedFetchRecords.$inferInsert;
+
+export const weeklyBusinessInventories = pgTable(
+  "weekly_business_inventories",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    periodLabel: text("period_label").notNull(),
+    status: text("status").notNull().default("WAITING_FOR_USER"), // WAITING_FOR_USER | COMPLETED | PARTIAL | EXPIRED
+    applicableMetricsSchema: jsonb("applicable_metrics_schema").default(sql`'[]'::jsonb`),
+    automaticMetrics: jsonb("automatic_metrics").default(sql`'{}'::jsonb`),
+    submittedMetrics: jsonb("submitted_metrics").default(sql`'{}'::jsonb`),
+    coverageStatus: text("coverage_status").default("NONE"), // COMPLETE | PARTIAL | NONE
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    periodDedupIdx: uniqueIndex("weekly_business_inventories_period_uidx").on(
+      table.accountId,
+      table.campaignId,
+      table.periodStart,
+      table.periodEnd
+    ),
+    campaignStatusIdx: index("weekly_business_inventories_status_idx").on(
+      table.campaignId,
+      table.status
+    ),
+  })
+);
+
+export type WeeklyBusinessInventory = typeof weeklyBusinessInventories.$inferSelect;
+export type InsertWeeklyBusinessInventory = typeof weeklyBusinessInventories.$inferInsert;
+
+export const taskContentMatchLineage = pgTable(
+  "task_content_match_lineage",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    taskId: varchar("task_id").notNull(),
+    ownedPostId: varchar("owned_post_id").notNull(),
+    matchScore: doublePrecision("match_score").notNull(),
+    matchedDimensions: jsonb("matched_dimensions").notNull().default(sql`'[]'::jsonb`),
+    missingDimensions: jsonb("missing_dimensions").notNull().default(sql`'[]'::jsonb`),
+    conflicts: jsonb("conflicts").notNull().default(sql`'[]'::jsonb`),
+    matchReason: text("match_reason").notNull(),
+    countedAt: timestamp("counted_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    taskPostDedupIdx: uniqueIndex("task_content_match_lineage_task_post_uidx").on(
+      table.taskId,
+      table.ownedPostId
+    ),
+    taskIdx: index("task_content_match_lineage_task_idx").on(table.taskId),
+    postIdx: index("task_content_match_lineage_post_idx").on(table.ownedPostId),
+    campaignIdx: index("task_content_match_lineage_campaign_idx").on(table.campaignId),
+  })
+);
+
+export type TaskContentMatchLineage = typeof taskContentMatchLineage.$inferSelect;
+export type InsertTaskContentMatchLineage = typeof taskContentMatchLineage.$inferInsert;
+
+// =============================================
+// MARKET VOICE DISCOVERY MODULE (PHASE 1)
+// =============================================
+
+export const marketVoiceDiscoveryJobs = pgTable(
+  "market_voice_discovery_jobs",
+  {
+    id: varchar("id").primaryKey(),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    status: varchar("status", { length: 36 }).notNull().default("PENDING"), // PENDING | RUNNING | COMPLETED | COMPLETED_WITH_BUDGET_LIMIT | FAILED
+    searchPlannerPrompt: text("search_planner_prompt"),
+    budgetLimits: jsonb("budget_limits").default(sql`'{}'::jsonb`),
+    discoveredCompetitorCount: integer("discovered_competitor_count").default(0),
+    extractedEvidenceCount: integer("extracted_evidence_count").default(0),
+    errorMessage: text("error_message"),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    lineageUidx: uniqueIndex("market_voice_discovery_jobs_lineage_uidx").on(
+      table.id,
+      table.accountId,
+      table.campaignId,
+      table.campaignOfferingId
+    ),
+    tenantIdx: index("market_voice_discovery_jobs_tenant_idx").on(table.accountId, table.campaignId),
+    offeringIdx: index("market_voice_discovery_jobs_offering_idx").on(table.campaignOfferingId),
+    statusIdx: index("market_voice_discovery_jobs_status_idx").on(table.status),
+  })
+);
+
+export type MarketVoiceDiscoveryJob = typeof marketVoiceDiscoveryJobs.$inferSelect;
+export type InsertMarketVoiceDiscoveryJob = typeof marketVoiceDiscoveryJobs.$inferInsert;
+
+export const marketVoiceSearchIntents = pgTable(
+  "market_voice_search_intents",
+  {
+    id: varchar("id").primaryKey(),
+    discoveryJobId: varchar("discovery_job_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    query: text("query").notNull(),
+    intentCategory: varchar("intent_category", { length: 36 }).notNull(), // CUSTOMER_DISCUSSION | CUSTOMER_EXPERIENCE | CUSTOMER_QUESTION | PRODUCT_REVIEW | COMPARISON | RECOMMENDATION | CATEGORY_DISCUSSION | COMPETITOR_DISCOVERY
+    marketScope: varchar("market_scope", { length: 24 }).notNull(), // TARGET_MARKET | GLOBAL_CATEGORY
+    targetPlatform: varchar("target_platform", { length: 32 }).notNull(), // GOOGLE_SEARCH | REDDIT | YOUTUBE_SEARCH | WEB_FORUMS
+    targetGeography: varchar("target_geography", { length: 16 }),
+    languageHint: varchar("language_hint", { length: 16 }),
+    reasonForSearch: text("reason_for_search"),
+    discoveryGoal: text("discovery_goal"),
+    status: varchar("status", { length: 24 }).notNull().default("PENDING"), // PENDING | DISPATCHED | COMPLETED | FAILED
+    resultsCount: integer("results_count").default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    lineageFk: foreignKey({
+      columns: [table.discoveryJobId, table.accountId, table.campaignId, table.campaignOfferingId],
+      foreignColumns: [
+        marketVoiceDiscoveryJobs.id,
+        marketVoiceDiscoveryJobs.accountId,
+        marketVoiceDiscoveryJobs.campaignId,
+        marketVoiceDiscoveryJobs.campaignOfferingId,
+      ],
+      name: "fk_mv_search_intents_job_lineage",
+    }).onDelete("cascade"),
+    lineageUidx: uniqueIndex("market_voice_search_intents_lineage_uidx").on(
+      table.id,
+      table.discoveryJobId,
+      table.accountId,
+      table.campaignId,
+      table.campaignOfferingId
+    ),
+    jobIdx: index("market_voice_search_intents_job_idx").on(table.discoveryJobId),
+    tenantIdx: index("market_voice_search_intents_tenant_idx").on(table.accountId, table.campaignId),
+    offeringIdx: index("market_voice_search_intents_offering_idx").on(table.campaignOfferingId),
+    categoryIdx: index("market_voice_search_intents_category_idx").on(table.intentCategory),
+  })
+);
+
+export type MarketVoiceSearchIntent = typeof marketVoiceSearchIntents.$inferSelect;
+export type InsertMarketVoiceSearchIntent = typeof marketVoiceSearchIntents.$inferInsert;
+
+export const marketVoiceDiscoveryResults = pgTable(
+  "market_voice_discovery_results",
+  {
+    id: varchar("id").primaryKey(),
+    searchIntentId: varchar("search_intent_id").notNull(),
+    discoveryJobId: varchar("discovery_job_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    url: text("url").notNull(),
+    canonicalUrl: text("canonical_url").notNull(),
+    title: text("title"),
+    snippet: text("snippet"),
+    sourcePlatform: varchar("source_platform", { length: 32 }).notNull(), // reddit | youtube | google_serp_forum | web_community | reviews
+    discoveredType: varchar("discovered_type", { length: 32 }).notNull().default("COMMUNITY_POST"), // FORUM_THREAD | COMMUNITY_POST | COMPETITOR_CANDIDATE | REVIEW_PAGE | OTHER
+    verificationStatus: varchar("verification_status", { length: 36 }).notNull().default("DISCOVERED"), // DISCOVERED | VERIFIED_CUSTOMER_SOURCE | VERIFIED_COMPETITOR | REJECTED_IRRELEVANT | REJECTED_MARKETING_COPY | NO_CUSTOMER_VOICE
+    verifiedCompetitorId: varchar("verified_competitor_id"),
+    extractedCount: integer("extracted_count").default(0),
+    fetchJobId: varchar("fetch_job_id", { length: 80 }),
+    providerRunId: varchar("provider_run_id", { length: 80 }),
+    metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    lineageFk: foreignKey({
+      columns: [table.searchIntentId, table.discoveryJobId, table.accountId, table.campaignId, table.campaignOfferingId],
+      foreignColumns: [
+        marketVoiceSearchIntents.id,
+        marketVoiceSearchIntents.discoveryJobId,
+        marketVoiceSearchIntents.accountId,
+        marketVoiceSearchIntents.campaignId,
+        marketVoiceSearchIntents.campaignOfferingId,
+      ],
+      name: "fk_mv_discovery_results_intent_lineage",
+    }).onDelete("cascade"),
+    lineageUidx: uniqueIndex("market_voice_discovery_results_lineage_uidx").on(
+      table.id,
+      table.searchIntentId,
+      table.discoveryJobId,
+      table.accountId,
+      table.campaignId,
+      table.campaignOfferingId
+    ),
+    intentIdx: index("market_voice_discovery_results_intent_idx").on(table.searchIntentId),
+    jobIdx: index("market_voice_discovery_results_job_idx").on(table.discoveryJobId),
+    tenantIdx: index("market_voice_discovery_results_tenant_idx").on(table.accountId, table.campaignId),
+    offeringIdx: index("market_voice_discovery_results_offering_idx").on(table.campaignOfferingId),
+    statusIdx: index("market_voice_discovery_results_status_idx").on(table.verificationStatus),
+    canonicalUrlIdx: index("market_voice_discovery_results_url_idx").on(table.canonicalUrl),
+  })
+);
+
+export type MarketVoiceDiscoveryResult = typeof marketVoiceDiscoveryResults.$inferSelect;
+export type InsertMarketVoiceDiscoveryResult = typeof marketVoiceDiscoveryResults.$inferInsert;
+
+export const marketVoiceEvidence = pgTable(
+  "market_voice_evidence",
+  {
+    id: varchar("id").primaryKey(),
+    discoveryResultId: varchar("discovery_result_id").notNull(),
+    searchIntentId: varchar("search_intent_id").notNull(),
+    discoveryJobId: varchar("discovery_job_id").notNull(),
+    accountId: varchar("account_id").notNull(),
+    campaignId: varchar("campaign_id").notNull(),
+    campaignOfferingId: varchar("campaign_offering_id").notNull(),
+    verbatimText: text("verbatim_text").notNull(),
+    sourceScope: varchar("source_scope", { length: 32 }).notNull().default("MARKET_CUSTOMER_VOICE"),
+    marketScope: varchar("market_scope", { length: 24 }).notNull().default("UNKNOWN"), // TARGET_MARKET | GLOBAL_CATEGORY | UNKNOWN
+    platform: varchar("platform", { length: 32 }).notNull(),
+    externalUrl: text("external_url"),
+    externalId: varchar("external_id", { length: 128 }),
+    authorHash: varchar("author_hash", { length: 16 }),
+    likesCount: integer("likes_count").default(0),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    geography: varchar("geography", { length: 16 }), // Nullable: "LB", "US", or null if unknown. MUST NOT default to target market.
+    language: varchar("language", { length: 16 }),
+    fetchJobId: varchar("fetch_job_id", { length: 80 }),
+    providerRunId: varchar("provider_run_id", { length: 80 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    lineageFk: foreignKey({
+      columns: [table.discoveryResultId, table.searchIntentId, table.discoveryJobId, table.accountId, table.campaignId, table.campaignOfferingId],
+      foreignColumns: [
+        marketVoiceDiscoveryResults.id,
+        marketVoiceDiscoveryResults.searchIntentId,
+        marketVoiceDiscoveryResults.discoveryJobId,
+        marketVoiceDiscoveryResults.accountId,
+        marketVoiceDiscoveryResults.campaignId,
+        marketVoiceDiscoveryResults.campaignOfferingId,
+      ],
+      name: "fk_mv_evidence_result_lineage",
+    }).onDelete("cascade"),
+    resultIdx: index("market_voice_evidence_result_idx").on(table.discoveryResultId),
+    tenantIdx: index("market_voice_evidence_tenant_idx").on(table.accountId, table.campaignId),
+    jobIdx: index("market_voice_evidence_job_idx").on(table.discoveryJobId),
+    offeringIdx: index("market_voice_evidence_offering_idx").on(table.campaignOfferingId),
+    scopeIdx: index("market_voice_evidence_scope_idx").on(table.marketScope),
+    platformIdx: index("market_voice_evidence_platform_idx").on(table.platform),
+  })
+);
+
+export type MarketVoiceEvidence = typeof marketVoiceEvidence.$inferSelect;
+export type InsertMarketVoiceEvidence = typeof marketVoiceEvidence.$inferInsert;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

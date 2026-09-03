@@ -262,7 +262,11 @@ function buildAudienceAlignmentContext(audience: OfferAudienceInput): {
   primaryPain: string;
   painWords: string[];
 } {
-  const selected = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const selected = audience.painRegistry?.length
+    ? (() => {
+        try { return selectPainForUse(audience.painRegistry, "offer_core"); } catch { return null; }
+      })()
+    : null;
   const primaryPain = audiencePainText(selected || (audience.audiencePains || [])[0]).trim();
   const painWords = primaryPain
     .toLowerCase()
@@ -1359,7 +1363,11 @@ export function validateOfferAlignment(
   }
 
   const pains = audience.audiencePains || [];
-  const selectedCorePain = selectPainForUse(audience.painRegistry || [], "offer_core");
+  const selectedCorePain = audience.painRegistry?.length
+    ? (() => {
+        try { return selectPainForUse(audience.painRegistry, "offer_core"); } catch { return null; }
+      })()
+    : null;
   if (audience.painRegistry?.length && !selectedCorePain) {
     failures.push("No eligible authoritative core purchase pain is available for Offer");
   }
@@ -1678,7 +1686,7 @@ interface OfferIntegrityChecks {
   integrityPassed: boolean;
 }
 
-function buildDeterministicOfferSkeletons(
+export function buildDeterministicOfferSkeletons(
   strategyRoot: any,
   audience: OfferAudienceInput,
   positioning: OfferPositioningInput,
@@ -1723,8 +1731,11 @@ function buildDeterministicOfferSkeletons(
 
   const coreRegistryPain = (primaryLane && primaryLane.painIds?.length > 0)
     ? registryPains.find((p: any) => p.painId === primaryLane.painIds[0])
-    : selectPainForUse(registryPains, "offer_core");
-  const objectionRegistryPains = registryPains.filter((pain: any) => pain?.classification === "OBJECTION" && Array.isArray(pain?.allowedUses) && pain?.allowedUses?.includes("offer_objection"));
+    : (registryPains.length > 0
+        ? (() => {
+            try { return selectPainForUse(registryPains, "offer_core"); } catch { return null; }
+          })()
+        : null);
   const painsList: string[] = (() => {
     if (coreRegistryPain) return [cleanPainScaffolding(coreRegistryPain.canonical)];
     if (rootPains && Array.isArray(rootPains)) {
@@ -1753,23 +1764,25 @@ function buildDeterministicOfferSkeletons(
   })();
 
   const objectionsList: string[] = (() => {
-    if (objectionRegistryPains.length > 0) {
-      return safeLabelArray(objectionRegistryPains.slice(0, 5), "skeleton.objectionsList.registry");
-    }
+    // Canonical StrategyRoot.approvedObjections is the single authoritative source of objections
     if (rootObjections) {
       if (Array.isArray(rootObjections)) {
-        const arr = safeLabelArray(rootObjections.slice(0, 5), "skeleton.objectionsList.root");
+        const arr = safeLabelArray(rootObjections.slice(0, 8), "skeleton.objectionsList.root");
         if (arr.length > 0) return arr;
-      } else if (typeof rootObjections === "object") {
-        const arr = safeLabelArray(Object.values(rootObjections).slice(0, 5), "skeleton.objectionsList.rootMap");
+      } else if (typeof rootObjections === "object" && rootObjections !== null) {
+        const arr = safeLabelArray(Object.values(rootObjections).slice(0, 8), "skeleton.objectionsList.rootMap");
         if (arr.length > 0) return arr;
       }
     }
     const om = audience.objectionMap || {};
     if (Array.isArray(om)) {
-      return safeLabelArray(om.slice(0, 5), "skeleton.objectionsList.audience");
+      const arr = safeLabelArray(om.slice(0, 8), "skeleton.objectionsList.audience");
+      if (arr.length > 0) return arr;
+    } else if (typeof om === "object" && om !== null) {
+      const arr = safeLabelArray(Object.values(om).slice(0, 8), "skeleton.objectionsList.audienceMap");
+      if (arr.length > 0) return arr;
     }
-    return safeLabelArray(Object.values(om).slice(0, 5), "skeleton.objectionsList.audienceMap");
+    return [];
   })();
 
   const proofTypesList: string[] = (() => {
@@ -1986,16 +1999,13 @@ function buildDeterministicOfferSkeletons(
         laneAltDesire,
       ) || altOutcomeText;
 
-      const laneObjections = registryPains.filter((pain: any) => pain?.eligible && pain?.classification === "OBJECTION" && (lane.painIds || []).includes(pain.painId));
-      const laneObjectionsList = laneObjections.map((p: any) => `Addresses: ${p.canonical}`);
-
       primaryLaneFraming[lane.laneId] = {
         title: lane.title,
         hook: lanePrimaryHook,
         problemStatement: lanePrimaryProblem || PRIMARY_PROBLEM_DEGRADED,
         outcome: lanePrimaryOutcome,
         proofPath,
-        objectionHandling: laneObjectionsList.length > 0 ? laneObjectionsList : objectionHandling,
+        objectionHandling,
         buyerJob: lane.valueContext || "Target audience seeking a tailored solution",
       };
 
@@ -2005,7 +2015,7 @@ function buildDeterministicOfferSkeletons(
         problemStatement: laneAltProblem || ALT_PROBLEM_DEGRADED,
         outcome: laneAltOutcome,
         proofPath,
-        objectionHandling: laneObjectionsList.length > 0 ? laneObjectionsList : objectionHandling,
+        objectionHandling,
         buyerJob: lane.valueContext || "Target audience seeking a tailored solution",
       };
     });
@@ -2085,7 +2095,7 @@ export async function aiOfferGeneration(
   }
 
   if (strategyRoot) {
-    const mechanismStatus = mechanismContext?.status;
+    const mechanismStatus = (positioningLock as any)?.mechanismStatus || (strategyRoot as any)?.mechanismStatus || null;
     const skeletonResult = buildDeterministicOfferSkeletons(strategyRoot, audience, positioning, differentiation, mechanismStatus);
     const skeletons = skeletonResult;
     console.log(`[OfferEngine-V4] DETERMINISTIC_SKELETON_BUILT | primaryHook="${skeletons.primary.name.substring(0, 60)}" | mechName="${(safeJsonParse(typeof strategyRoot.approvedMechanism === 'string' ? strategyRoot.approvedMechanism : JSON.stringify(strategyRoot.approvedMechanism))?.mechanismName || 'n/a')}" | proofTypes=${skeletons.primary.proofPath.length} | objections=${skeletons.primary.objectionHandling.length}`);

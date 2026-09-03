@@ -12,9 +12,10 @@
  *
  * Pending surfaces:
  *   GOOGLE_BUSINESS_ACTOR_ID — Google Business profile data
- *   GOOGLE_REVIEWS_ACTOR_ID  — Google reviews (review text needs a SERP-class
- *                              source; Bright Data raw HTML was permanently off)
- *   GOOGLE_SEARCH_ACTOR_ID   — Google search/SERP results
+ *   GOOGLE_REVIEWS_ACTOR_ID  — Google reviews
+ *   GOOGLE_SEARCH_ACTOR_ID   — Google search/SERP results (ACTIVE: apify~google-search-scraper)
+ *   LINKEDIN_ACTOR_ID        — LinkedIn posts (ACTIVE: apimaestro~linkedin-profile-posts)
+ *   X_SCRAPER_ACTOR_ID       — X / Twitter tweets (ACTIVE: apidojo~tweet-scraper)
  *   WEBSITE_SCRAPER_ACTOR_ID — competitor/user website + blog page fetch
  */
 
@@ -32,11 +33,22 @@ const SLOTS = {
   googleBusiness: "GOOGLE_BUSINESS_ACTOR_ID",
   googleReviews: "GOOGLE_REVIEWS_ACTOR_ID",
   googleSearch: "GOOGLE_SEARCH_ACTOR_ID",
+  linkedinPosts: "LINKEDIN_ACTOR_ID",
+  xTweets: "X_SCRAPER_ACTOR_ID",
   website: "WEBSITE_SCRAPER_ACTOR_ID",
 } as const;
 
-function slotStatus(surface: string, envSlot: string): PendingProviderStatus {
-  const actorId = process.env[envSlot]?.trim() || null;
+function slotStatus(surface: string, envSlot: string, defaultActiveActor?: string): PendingProviderStatus {
+  const actorId = process.env[envSlot]?.trim() || defaultActiveActor || null;
+  if (defaultActiveActor) {
+    return {
+      surface,
+      state: "ACTIVE",
+      envSlot,
+      actorId,
+      detail: `Active verified provider (${actorId}) integrated via Apify client.`,
+    };
+  }
   return {
     surface,
     state: actorId ? "NOT_CONFIGURED" : "PROVIDER_PENDING",
@@ -55,7 +67,13 @@ export function getGoogleReviewsProviderStatus(): PendingProviderStatus {
   return slotStatus("google_reviews", SLOTS.googleReviews);
 }
 export function getGoogleSearchProviderStatus(): PendingProviderStatus {
-  return slotStatus("google_search", SLOTS.googleSearch);
+  return slotStatus("google_search", SLOTS.googleSearch, "apify~google-search-scraper");
+}
+export function getLinkedInPostsProviderStatus(): PendingProviderStatus {
+  return slotStatus("linkedin_posts", SLOTS.linkedinPosts, "apimaestro~linkedin-profile-posts");
+}
+export function getXTweetsProviderStatus(): PendingProviderStatus {
+  return slotStatus("x_tweets", SLOTS.xTweets, "apidojo~tweet-scraper");
 }
 export function getWebsiteProviderStatus(): PendingProviderStatus {
   return slotStatus("website", SLOTS.website);
@@ -66,6 +84,9 @@ export function getAllPendingProviderStatuses(): PendingProviderStatus[] {
     getGoogleBusinessProviderStatus(),
     getGoogleReviewsProviderStatus(),
     getGoogleSearchProviderStatus(),
+    getLinkedInPostsProviderStatus(),
+    getXTweetsProviderStatus(),
     getWebsiteProviderStatus(),
   ];
 }
+

@@ -235,33 +235,7 @@ export async function scrapeInstagramViaApify(handle: string, maxPosts: number):
 
     return { posts, followers, profileName };
   } catch (err: any) {
-    console.warn(`[InstagramApify] Scraping error for @${handle}: ${err.message}. Using synthetic fallback data.`);
-    return generateSyntheticIgData(handle, maxPosts);
+    console.warn(`[InstagramApify] Scraping error for @${handle}: ${err.message}. Returning empty result (fail-closed, no synthetic data).`);
+    return { posts: [], followers: null, profileName: null };
   }
-}
-
-function generateSyntheticIgData(handle: string, maxPosts: number): InstagramApifyResult {
-  const posts: ScrapedPost[] = [];
-  const now = Date.now();
-  for (let i = 0; i < maxPosts; i++) {
-    const isVideo = i % 3 === 0;
-    posts.push({
-      postId: `synth_${handle}_${i}`,
-      permalink: `https://www.instagram.com/p/synth_${handle}_${i}/`,
-      mediaType: isVideo ? "REEL" : "IMAGE",
-      timestamp: new Date(now - i * 86400000).toISOString(),
-      caption: `Synthetic post ${i} for @${handle} #demo`,
-      likes: Math.floor(Math.random() * 500) + 50,
-      comments: Math.floor(Math.random() * 50) + 5,
-      views: isVideo ? Math.floor(Math.random() * 5000) + 500 : null,
-      videoUrl: null,
-      displayUrl: `https://picsum.photos/seed/${handle}${i}/400/400`,
-      shortcode: `synth_${handle}_${i}`,
-    });
-  }
-  return {
-    posts,
-    followers: Math.floor(Math.random() * 50000) + 1000,
-    profileName: `${handle} (Synthetic)`,
-  };
 }

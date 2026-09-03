@@ -123,8 +123,9 @@ AUDIENCE PAIN CLAIM:
 "${canonicalPain}"
 
 EVALUATION CRITERIA:
-- DIRECT_FIT: A verified capability directly performs OR directly enables the function required to solve/address this pain without unproven assumptions.
-- STRATEGIC_FIT: The capability partially, indirectly, or conditionally supports strategic reasoning/decisions related to the pain, but does not directly perform or directly enable the required operational function.
+- DIRECT_FIT: Verified capabilities directly perform OR directly enable the function required to solve/address this pain without unproven assumptions.
+  * MULTI-REQUIREMENT / COMPOUND PAIN RULE: DIRECT_FIT requires verified capabilities to directly address ALL material requirements or clauses of the pain claim. If verified capabilities directly address only a subset or fragment of the pain's requirements, you must NOT return DIRECT_FIT.
+- STRATEGIC_FIT: The capability partially, indirectly, or conditionally supports strategic reasoning/decisions related to the pain, or directly addresses only a subset of a multi-clause pain, but does not directly perform or directly enable the full required operational function.
 - NOT_FIT: The offering does not legitimately address the pain, or the pain is explicitly out of scope / contradicts capability boundaries.
 - UNKNOWN: Insufficient verified Product Truth authority to determine fit.
 
@@ -139,39 +140,31 @@ Output JSON format:
   let reason = "Evaluation failed";
 
   try {
-    const rawRes: any = await aiGemini({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json", maxOutputTokens: 1024 },
-      model: "gemini-3.6-flash",
+    const chatRes = await aiChat({
+      messages: [{ role: "user", content: prompt }],
+      model: "gpt-4.1-mini",
+      max_tokens: 1024,
+      response_format: { type: "json_object" },
       accountId: "system",
+      endpoint: "product-assessment-engine",
     });
-    let text = typeof rawRes === "string" ? rawRes : rawRes?.candidates?.[0]?.content?.parts?.[0]?.text || rawRes?.text || "";
-    text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(text || "{}");
+    const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
     if (["DIRECT_FIT", "STRATEGIC_FIT", "NOT_FIT", "UNKNOWN"].includes(parsed.fitType)) {
       fitType = parsed.fitType;
       reason = parsed.reason || "Evaluated by Product Assessment Engine";
     }
-  } catch (e: any) {
-    console.warn(`[ProductAssessment] aiGemini error for pain ${painId}, falling back to aiChat: ${e.message}`);
-    try {
-      const chatRes = await aiChat({
-        messages: [{ role: "user", content: prompt }],
-        model: "gpt-4.1-mini",
-        max_tokens: 1024,
-        response_format: { type: "json_object" },
-        accountId: "system",
-        endpoint: "product-assessment-engine",
-      });
-      const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
-      if (["DIRECT_FIT", "STRATEGIC_FIT", "NOT_FIT", "UNKNOWN"].includes(parsed.fitType)) {
-        fitType = parsed.fitType;
-        reason = parsed.reason || "Evaluated by Product Assessment Engine";
-      }
-    } catch (chatErr: any) {
-      reason = `Product Assessment evaluation failed: ${chatErr.message}`;
-      fitType = "UNKNOWN";
-    }
+  } catch (chatErr: any) {
+    console.error(`[ProductAssessment] Evaluation failed: ${chatErr.message}`);
+    return {
+      productAssessmentAuthorityId,
+      painId,
+      campaignOfferingId,
+      fitType: "UNKNOWN",
+      status: "INCOMPLETE",
+      parentAuthorityIds: [businessUnderstandingAuthorityId, painId],
+      reason: `Product Assessment evaluation error: ${chatErr.message}`,
+      jobId,
+    };
   }
 
   const parentAuthorityIds = [businessUnderstandingAuthorityId, ...factIds, painId];

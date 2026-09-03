@@ -550,6 +550,20 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     }
   }
 
+  // Canonical semantic separation: Strategy Invalidity vs Spend Invalidity
+  const SPEND_ONLY_BLOCK_CODES = new Set<string>([
+    "BUDGET_KILL",
+    "BUDGET_HALT",
+    "BUDGET_OVERRIDE_ZERO_CONFIDENCE",
+    "COMPLIANCE_FAILURE",
+  ]);
+
+  const strategyBlocks = blockReasons.filter(b => !SPEND_ONLY_BLOCK_CODES.has(b.code));
+  const spendBlocks = blockReasons.filter(b => SPEND_ONLY_BLOCK_CODES.has(b.code));
+
+  const strategyBlocked = strategyBlocks.length > 0;
+  const spendBlocked = spendBlocks.length > 0 || strategyBlocked;
+
   const result: SystemControlVerdict = {
     verdict,
     executionMode,
@@ -559,6 +573,8 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
     contradictions,
     repairActions,
     repairAttempted,
+    strategyBlocked,
+    spendBlocked,
     timestamp: new Date(),
     durationMs,
     controlVersion: CONTROL_VERSION,

@@ -714,6 +714,101 @@ export function layer8_systemCoherence(
   return { layerName: "system_coherence", passed: failedLayers.length <= 2 && score >= 0.4, score, findings, warnings, evaluationState: "EVALUATED" };
 }
 
+export function layer9_strategicLaneAuthority(
+  audience: IntegrityAudienceInput & { strategicLanes?: any[]; painRegistry?: any[] },
+): LayerResult {
+  const lanes = audience?.strategicLanes;
+  const painRegistry = audience?.painRegistry;
+
+  if (!Array.isArray(lanes) || lanes.length === 0) {
+    return {
+      layerName: "strategic_lane_authority",
+      passed: true,
+      score: 1.0,
+      findings: ["No strategic lanes supplied for lane authority check."],
+      warnings: [],
+      evaluationState: "EVALUATED",
+    };
+  }
+
+  const findings: string[] = [];
+  const warnings: string[] = [];
+  let violations = 0;
+
+  const registryPains = Array.isArray(painRegistry) ? painRegistry : [];
+  const corePainIds = new Set(
+    registryPains
+      .filter((p: any) => p.classification === "CORE_PURCHASE" || p.classification === "CORE")
+      .map((p: any) => p.painId)
+  );
+  const supportingPainIds = new Set(
+    registryPains
+      .filter((p: any) => p.classification === "SUPPORTING")
+      .map((p: any) => p.painId)
+  );
+  const excludedPainIds = new Set(
+    registryPains
+      .filter((p: any) => 
+        p.classification === "STRATEGIC_EXCLUDED" || 
+        p.classification === "EXCLUDED" || 
+        p.classification === "INCOMPLETE" ||
+        p.classification === "UNKNOWN"
+      )
+      .map((p: any) => p.painId)
+  );
+
+  lanes.forEach((lane: any, idx: number) => {
+    const laneTitle = lane.title || `Lane ${idx + 1}`;
+    const coreIds = Array.isArray(lane.corePainIds) ? lane.corePainIds : [];
+    const suppIds = Array.isArray(lane.supportingPainIds) ? lane.supportingPainIds : [];
+    const allPainIds = Array.isArray(lane.painIds) ? lane.painIds : [...coreIds, ...suppIds];
+    const primaryId = lane.primaryPainId || coreIds[0];
+
+    // A. Must contain >= 1 CORE_PURCHASE pain
+    if (coreIds.length === 0 && !corePainIds.has(primaryId)) {
+      warnings.push(`NO_CORE_PAIN_IN_STRATEGIC_LANE: Lane "${laneTitle}" has no CORE_PURCHASE pain`);
+      violations++;
+    }
+
+    // B. primaryPainId MUST resolve to CORE_PURCHASE (cannot be SUPPORTING)
+    if (primaryId && (supportingPainIds.has(primaryId) || (!corePainIds.has(primaryId) && corePainIds.size > 0))) {
+      warnings.push(`SUPPORTING_AS_PRIMARY_PAIN: Lane "${laneTitle}" has non-CORE primary pain "${primaryId}"`);
+      violations++;
+    }
+
+    // C. ANY lane contains STRATEGIC_EXCLUDED, EXCLUDED, or INCOMPLETE
+    allPainIds.forEach((pid: string) => {
+      if (excludedPainIds.has(pid)) {
+        warnings.push(`EXCLUDED_PAIN_IN_STRATEGIC_LANE: Excluded pain "${pid}" detected in lane "${laneTitle}"`);
+        violations++;
+      }
+    });
+
+    // D. Pain ID must resolve to a valid canonical Strategic Pain Decision in registry if registry is provided
+    if (registryPains.length > 0) {
+      const knownIds = new Set(registryPains.map((p: any) => p.painId));
+      allPainIds.forEach((pid: string) => {
+        if (!knownIds.has(pid)) {
+          warnings.push(`UNRESOLVED_PAIN_AUTHORITY: Pain "${pid}" in lane "${laneTitle}" does not exist in pain registry`);
+          violations++;
+        }
+      });
+    }
+  });
+
+  const passed = violations === 0;
+  const score = passed ? 1.0 : Math.max(0, 1 - violations * 0.5);
+
+  return {
+    layerName: "strategic_lane_authority",
+    passed,
+    score,
+    findings,
+    warnings,
+    evaluationState: "EVALUATED",
+  };
+}
+
 export function runIntegrityEngine(
   mi: IntegrityMIInput,
   audience: IntegrityAudienceInput,
@@ -767,7 +862,10 @@ export function runIntegrityEngine(
   const l8 = layer8_systemCoherence(firstSevenLayers, mi, positioning, differentiation, offer, funnel, audience);
   diagnostics.layer8 = { passed: l8.passed, score: l8.score, warnings: l8.warnings.length };
 
-  const allLayers = [...firstSevenLayers, l8];
+  const l9 = layer9_strategicLaneAuthority(audience as any);
+  diagnostics.layer9 = { passed: l9.passed, score: l9.score, warnings: l9.warnings.length };
+
+  const allLayers = [...firstSevenLayers, l8, l9];
 
   // CLP-15: score numerator AND denominator exclude INSUFFICIENT_EVIDENCE
   // layers. If every layer is INSUFFICIENT, score is 0 and the aggregator
@@ -839,29 +937,32 @@ export function runIntegrityEngine(
 
   const audienceOfferLayer = l2;
   const painAlignmentFailed = audienceOfferLayer.evaluationState === "EVALUATED" && (
-    (audienceOfferLayer.score ?? 0) < 0.3 ||
-    audienceOfferLayer.passed === false ||
-    audienceOfferLayer.warnings.some(w => {
-      const wl = w.toLowerCase();
-      return wl.includes("audience pain") || wl.includes("readiness gap") || wl.includes("pain signal") || wl.includes("pain alignment");
-    })
+    (audienceOfferLayer.score ?? 0) < 0.4 ||
+    audienceOfferLayer.passed === false
   );
 
   const objectionCoverageZero = l6.evaluationState === "EVALUATED" && (
-    (l6.score ?? 0) < 0.3 ||
-    l6.passed === false ||
-    l6.warnings.some(w => {
-      const wl = w.toLowerCase();
-      return wl.includes("no proof") || wl.includes("proof missing") || wl.includes("zero proof") || wl.includes("proof gap");
-    })
+    (l6.score ?? 0) < 0.4 ||
+    l6.passed === false
   );
 
-  const hasEnforcementFailure = painAlignmentFailed || objectionCoverageZero;
+  const laneAuthorityFailed = l9.evaluationState === "EVALUATED" && (
+    l9.passed === false ||
+    (l9.score ?? 0) < 0.5 ||
+    l9.warnings.some(w => 
+      w.includes("EXCLUDED_PAIN_IN_STRATEGIC_LANE") || 
+      w.includes("NO_CORE_PAIN_IN_STRATEGIC_LANE") || 
+      w.includes("SUPPORTING_AS_PRIMARY_PAIN")
+    )
+  );
+
+  const hasEnforcementFailure = painAlignmentFailed || objectionCoverageZero || laneAuthorityFailed;
 
   if (hasEnforcementFailure) {
     const reasons: string[] = [];
     if (painAlignmentFailed) reasons.push("offer↔audience pain alignment failed");
     if (objectionCoverageZero) reasons.push("objection/proof coverage is critically low");
+    if (laneAuthorityFailed) reasons.push("strategic lane pain authority violated (excluded pain in lane or missing core pain)");
     structuralWarnings.push(`ENFORCEMENT_BLOCK: safeToExecute overridden — ${reasons.join(", ")}`);
     console.log(`[IntegrityEngine-V3] ENFORCEMENT_OVERRIDE | safeToExecute=false | reasons=${reasons.join(", ")}`);
   }

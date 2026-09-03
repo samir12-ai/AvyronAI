@@ -444,8 +444,31 @@ export async function runPerformanceCycle(params: RunPerformanceCycleParams): Pr
   if (!prevTruth && window.windowIndex > 0) reasons.push("previous_window_truth_missing");
   if (window.windowIndex === 0) reasons.push("first_window_of_plan_no_baseline");
 
-  const salesAfter = truth.payingCustomers ?? null;
-  const salesBefore = prevTruth?.payingCustomers ?? null;
+  // Resolve primary success metric dynamically from campaign goal math (not globally hardcoded)
+  const [campSelection] = await db
+    .select()
+    .from(campaignSelections)
+    .where(and(
+      eq(campaignSelections.accountId, accountId),
+      eq(campaignSelections.selectedCampaignId, campaignId)
+    ))
+    .limit(1);
+
+  const goalType = (campSelection?.campaignGoalType || "conversions").toLowerCase();
+  
+  let salesAfter: number | null = null;
+  let salesBefore: number | null = null;
+  
+  if (goalType.includes("lead")) {
+    salesAfter = truth.qualifiedLeads ?? truth.totalLeads ?? null;
+    salesBefore = prevTruth ? (prevTruth.qualifiedLeads ?? prevTruth.totalLeads ?? null) : null;
+  } else if (goalType.includes("revenue") || goalType.includes("sales")) {
+    salesAfter = truth.payingCustomers ?? (truth.grossRevenueCents ? Math.round(truth.grossRevenueCents / 100) : null);
+    salesBefore = prevTruth ? (prevTruth.payingCustomers ?? (prevTruth.grossRevenueCents ? Math.round(prevTruth.grossRevenueCents / 100) : null)) : null;
+  } else {
+    salesAfter = truth.payingCustomers ?? null;
+    salesBefore = prevTruth?.payingCustomers ?? null;
+  }
 
   // 4) Executed posts in the window (scorable lineage only).
   const windowPosts = await db

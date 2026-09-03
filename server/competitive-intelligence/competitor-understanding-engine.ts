@@ -153,19 +153,9 @@ export async function runCompetitorUnderstandingEngine(
     competitorWebsiteSnapshotId = existingSnap.id;
     pages = existingSnap.pagesCrawled as CompetitorPageEvidence[];
   } else {
-    competitorWebsiteSnapshotId = uuidv4();
-    await db.insert(competitorWebsiteSnapshots).values({
-      id: competitorWebsiteSnapshotId,
-      accountId,
-      campaignId,
-      competitorId,
-      websiteUrl,
-      status: "IN_PROGRESS",
-      pagesCrawled: [] as any,
-      contentHash: ""
-    });
-
-    pages = await runCompetitorWebsiteCrawler(competitorWebsiteSnapshotId, competitorId, websiteUrl, 6);
+    const crawlRes = await runCompetitorWebsiteCrawler(accountId, campaignId, competitorId, websiteUrl, 6);
+    competitorWebsiteSnapshotId = crawlRes.snapshotId;
+    pages = crawlRes.pagesCrawled;
   }
 
   const evidenceIds = pages.map(p => p.competitorBusinessEvidenceId);
@@ -234,7 +224,7 @@ Return JSON matching this exact structure:
         max_tokens: 4096,
         response_format: { type: "json_object" },
         accountId,
-        endpoint: "competitor-understanding"
+        endpoint: "competitor-understanding",
       });
       let rawText = chatRes.choices?.[0]?.message?.content || "{}";
       rawText = rawText.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();

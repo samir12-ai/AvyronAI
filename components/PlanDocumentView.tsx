@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Colors from '@/constants/colors';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
+import BuyerConversionJourneyView from '@/components/strategy-plan/BuyerConversionJourneyView';
 
 const C = {
   mint: '#8B5CF6',
@@ -50,6 +51,7 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
   const [pipelineState, setPipelineState] = useState<any>(null);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [expandedRiskIdx, setExpandedRiskIdx] = useState<number | null>(null);
+  const [selectedJourneyIdx, setSelectedJourneyIdx] = useState<number>(0);
 
   const cardBg = isDark ? '#0F1419' : '#FFFFFF';
   const cardBorder = isDark ? '#1F2937' : '#E2E8F0';
@@ -997,6 +999,19 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
     );
   };
 
+  const renderBuyerConversionJourney = () => {
+    const sections = (plan as any)?.sections || {};
+    return (
+      <BuyerConversionJourneyView
+        journeys={sections.buyerConversionJourneys || sections.businessRepresentation?.buyerConversionJourneys}
+        legacyJourney={sections.buyerConversionJourney || sections.businessRepresentation?.buyerConversionJourney}
+        legacyPersuasion={sections.persuasionStrategy || sections.businessRepresentation?.persuasionStrategy}
+        approvedLanes={sections.approvedLanes}
+        pains={sections.pains || sections.canonicalPains}
+      />
+    );
+  };
+
   return (
     <View>
       {onClose && (
@@ -1169,6 +1184,7 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
       {renderGoalBlock()}
       {renderWhyThisPlan()}
       {renderStrategyPlan()}
+      {renderBuyerConversionJourney()}
       {renderNumbersThatMatter()}
       {renderGrowthSimulation()}
       {renderContentDistribution()}

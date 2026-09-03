@@ -25,9 +25,9 @@ const differentiation = {
 describe("authoritative Audience pain registry", () => {
   it("creates stable, ranked roles and prevents post-purchase friction becoming the offer core", () => {
     const raw = [
-      { canonical: "Refund and account access friction after purchase", evidence: ["ev-refund"] },
-      { canonical: "Teams struggle to produce reliable reports before the sales call", evidence: ["ev-report"] },
-      { canonical: "Price and proof concerns delay purchase approval", evidence: ["ev-price"] },
+      { canonical: "Refund and account access friction after purchase", evidence: ["ev-refund"], classification: "POST_PURCHASE_FRICTION", productFit: "ELIGIBLE", eligible: true, allowedUses: ["retention"] },
+      { canonical: "Teams struggle to produce reliable reports before the sales call", evidence: ["ev-report"], classification: "CORE_PURCHASE", productFit: "ELIGIBLE", eligible: true, allowedUses: ["positioning", "differentiation", "mechanism", "offer_core", "awareness", "funnel", "persuasion", "channel"] },
+      { canonical: "Price and proof concerns delay purchase approval", evidence: ["ev-price"], classification: "OBJECTION", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_objection", "awareness", "funnel", "persuasion"] },
     ];
     const first = buildAudiencePainRegistry(raw, lineage);
     const second = buildAudiencePainRegistry(raw, lineage);
@@ -50,16 +50,21 @@ describe("authoritative Audience pain registry", () => {
     expect(result.issues.join(" ")).toContain("PAIN_LINEAGE_MISMATCH");
   });
 
-  it("uses deterministic evidence-only classifications", () => {
-    expect(classifyAudiencePain("Refund friction after delivery")).toBe("POST_PURCHASE_FRICTION");
-    expect(classifyAudiencePain("Pricing proof concerns delay approval")).toBe("OBJECTION");
-    expect(classifyAudiencePain("Teams struggle to prepare reports")).toBe("CORE_PURCHASE");
+  it("initial registry creates neutral unassessed records by default", () => {
+    const neutral = buildAudiencePainRegistry([
+      { canonical: "Refund friction after delivery" },
+      { canonical: "Pricing proof concerns delay approval" },
+      { canonical: "Teams struggle to prepare reports" },
+    ], lineage);
+    expect(neutral.every((p) => p.classification === "NOT_EVALUATED")).toBe(true);
+    expect(neutral.every((p) => p.eligible === false)).toBe(true);
+    expect(neutral.every((p) => p.allowedUses.length === 0)).toBe(true);
   });
 
   it("rejects Offer core-pain merging and lower-ranked selections", () => {
     const painRegistry = buildAudiencePainRegistry([
-      { canonical: "Teams struggle to prepare reliable reports before sales calls" },
-      { canonical: "Price and proof concerns delay purchase approval" },
+      { canonical: "Teams struggle to prepare reliable reports before sales calls", classification: "CORE_PURCHASE", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_core"] },
+      { canonical: "Price and proof concerns delay purchase approval", classification: "OBJECTION", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_objection"] },
     ], lineage);
     const audience = {
       audiencePains: painRegistry,
@@ -92,7 +97,7 @@ describe("authoritative Audience pain registry", () => {
 
   it("rejects a final strategy that drops the selected core pain role", () => {
     const pains = buildAudiencePainRegistry([
-      { canonical: "Teams struggle to prepare reliable reports before sales calls" },
+      { canonical: "Teams struggle to prepare reliable reports before sales calls", classification: "CORE_PURCHASE", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_core"] },
     ], lineage);
     const result = validatePostGeneration({
       accountId: lineage.accountId,
@@ -111,8 +116,8 @@ describe("authoritative Audience pain registry", () => {
 
   it("attaches authoritative pain roles on the Offer signal-insufficient early return", async () => {
     const registry = buildAudiencePainRegistry([
-      { canonical: "Teams struggle to produce reliable reports before the sales call" },
-      { canonical: "Price and proof concerns delay purchase approval" },
+      { canonical: "Teams struggle to produce reliable reports before the sales call", classification: "CORE_PURCHASE", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_core"] },
+      { canonical: "Price and proof concerns delay purchase approval", classification: "OBJECTION", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_objection"] },
     ], lineage);
     const corePainId = selectPainForUse(registry, "offer_core")!.painId;
     const strategyRoot = {
@@ -147,7 +152,7 @@ describe("authoritative Audience pain registry", () => {
 
   it("attaches authoritative pain roles on the Offer differentiation-insufficient early return", async () => {
     const registry = buildAudiencePainRegistry([
-      { canonical: "Teams struggle to produce reliable reports before the sales call" },
+      { canonical: "Teams struggle to produce reliable reports before the sales call", classification: "CORE_PURCHASE", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_core"] },
     ], lineage);
     const corePainId = selectPainForUse(registry, "offer_core")!.painId;
     const strategyRoot = {
@@ -188,8 +193,8 @@ describe("authoritative Audience pain registry", () => {
 
   it("routes post-purchase friction to Retention and preserves the selected role on fallback paths", async () => {
     const registry = buildAudiencePainRegistry([
-      { canonical: "Teams struggle to produce reliable reports before the sales call" },
-      { canonical: "Refund and cancellation friction after purchase" },
+      { canonical: "Teams struggle to produce reliable reports before the sales call", classification: "CORE_PURCHASE", productFit: "ELIGIBLE", eligible: true, allowedUses: ["offer_core"] },
+      { canonical: "Refund and cancellation friction after purchase", classification: "POST_PURCHASE_FRICTION", productFit: "ELIGIBLE", eligible: true, allowedUses: ["retention"] },
     ], lineage);
     const retentionPain = selectPainForUse(registry, "retention");
     expect(retentionPain?.classification).toBe("POST_PURCHASE_FRICTION");

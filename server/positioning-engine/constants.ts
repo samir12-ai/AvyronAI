@@ -98,6 +98,7 @@ export interface Territory {
   evidenceSignals: string[];
   confidenceScore: number;
   mappedSignalIds?: string[];
+  signalSource?: string;
   /** Canonical AEL evidence IDs this territory's claims cite (grounding contract). */
   groundingRefs?: string[];
   domainFailure?: string;

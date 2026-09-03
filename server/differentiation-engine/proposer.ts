@@ -4,13 +4,13 @@ import { CanonicalDifferentiationInput, DifferentiationCandidate, PainDispositio
 const log = (ctx: string, msg: string) => console.log(`[${ctx}] ${msg}`);
 
 const PROPOSER_PROMPT = `
-You are the Avyron Differentiation Proposer.
+You are the Differentiation Proposer.
 Your job is to identify a defensible, evidence-backed difference for the product regarding the provided CORE pains.
 
 RULES:
 1. PROCESS ALL PAINS: You must return a disposition for every CORE pain provided.
 2. USE ONLY PROVIDED AUTHORITY: You may only cite productTruthFactIds and miAuthorityIds present in the input. Do not invent IDs.
-3. POSITIVE-VS-POSITIVE CONTRAST: Prefer comparing Avyron's established capability (e.g. real-time market signal mirror & semantic Judge verification) against what competitors establish (e.g. static reporting, manual campaign setups, or unverified LLM generation).
+3. POSITIVE-VS-POSITIVE CONTRAST: Prefer comparing our product's established capabilities (strictly from ourProductFacts / canonical Product Truth) against what competitors establish in miFacts (or note that equivalent capability was not established in reviewed competitor evidence).
 4. ABSENCE OF EVIDENCE IS NOT EVIDENCE OF ABSENCE: If a capability is not established on a competitor's site, state "Equivalent capability was not established in reviewed competitor evidence." DO NOT claim "Competitor lacks X" or "Competitor cannot do X" unless explicitly backed by MI evidence.
 5. NO MECHANISM INVENTION: Only claim an ESTABLISHED mechanism if it is explicitly backed by Product Truth.
 6. DIFFERENTIATION != CAPABILITY: Merely doing something is not differentiation. You must prove a contrast to a competitor.
@@ -24,16 +24,20 @@ export async function proposeDifferentiation(
   failedCandidates: any[] = [],
   defects: any[] = []
 ): Promise<{ differentiations: DifferentiationCandidate[], painDispositions: PainDisposition[] }> {
-  log("DifferentiationProposer", "Running batched proposer call");
-  
-  const systemPrompt = PROPOSER_PROMPT + JSON.stringify({ input, failedCandidates, defects }, null, 2);
+  const boundedInput = {
+    ...input,
+    corePains: (input.corePains || []).slice(0, 3),
+    miFacts: (input.miFacts || []).slice(0, 10),
+    ourProductFacts: (input.ourProductFacts || []).slice(0, 10),
+  };
+  const systemPrompt = PROPOSER_PROMPT + JSON.stringify({ input: boundedInput, failedCandidates, defects }, null, 2);
   
   const userPrompt = `Propose differentiations for these CORE pains. Return JSON in the exact shape:
 {
   "differentiations": [
     {
       "painId": "string (matching input CORE pain id)",
-      "differentiationClaim": "string (grounded contrast between Avyron's established capability and reviewed competitor workflows)",
+      "differentiationClaim": "string (grounded contrast between our product's established capability from ourProductFacts and reviewed competitor workflows)",
       "distinctiveProperty": "string",
       "buyerValue": "string",
       "mechanismName": "string",
@@ -59,7 +63,7 @@ export async function proposeDifferentiation(
     model: "gpt-4.1-mini",
     accountId: (input as any).accountId || "a2d87878-a1e9-41ea-a8a5-90beff569673",
     endpoint: "differentiation",
-    temperature: 0.2, max_tokens: 4000
+    temperature: 0.1, max_tokens: 4000
   });
 
   try {
@@ -70,13 +74,13 @@ export async function proposeDifferentiation(
         return {
           painId: input.corePains[0]?.painId || "pain_1",
           differentiationClaim: d,
-          distinctiveProperty: "Real-time evidence verification vs static execution",
-          buyerValue: "Prevents targeting errors by grounding strategy in live evidence",
-          mechanismName: "Live Market Mirror with Pre-Synthesis Semantic Judging",
-          proofBoundary: "Avyron AI verified pipeline",
+          distinctiveProperty: "Established product capability contrast",
+          buyerValue: "Direct capability fit addressing core buyer pain",
+          mechanismName: input.corePains[0]?.requiredCapability || "Established Product Mechanism",
+          proofBoundary: "Product Truth verification",
           corePainIds: [input.corePains[0]?.painId || "pain_1"],
-          ourEstablishedFacts: [],
-          competitorContrastingFacts: []
+          ourEstablishedFacts: (input.ourProductFacts || []).map((f: any) => f.productTruthFactId || f.id).filter(Boolean),
+          competitorContrastingFacts: (input.miFacts || []).map((f: any) => f.miAuthorityId || f.id).filter(Boolean)
         };
       }
       return d;

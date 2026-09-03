@@ -47,6 +47,14 @@ function platformToCompetitorEntityType(platform: string | null | undefined): Co
     case "website":
     case "site":
       return "competitor_website";
+    case "google_search":
+    case "serp":
+      return "competitor_google_search";
+    case "linkedin":
+      return "competitor_linkedin";
+    case "x":
+    case "twitter":
+      return "competitor_x";
     case "google":
     case "yelp":
     case "trustpilot":

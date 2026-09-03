@@ -257,10 +257,26 @@ function toNum(v: any): number | undefined {
   return isNaN(n) ? undefined : n;
 }
 
-export async function scrapeTiktokViaApify(handle: string): Promise<TiktokPost[]> {
+export function extractTiktokHandle(urlOrHandle: string): string | null {
+  if (!urlOrHandle) return null;
+  const clean = urlOrHandle.trim();
+  const urlMatch = clean.match(/tiktok\.com\/@?([a-zA-Z0-9_.-]+)/i);
+  if (urlMatch) return urlMatch[1].replace(/^@/, "").trim();
+  const handleMatch = clean.match(/^@?([a-zA-Z0-9_.-]+)$/i);
+  if (handleMatch) return handleMatch[1].replace(/^@/, "").trim();
+  return null;
+}
+
+export async function scrapeTiktokViaApify(handleOrUrl: string): Promise<TiktokPost[]> {
   const apiKey = getApifyApiKey();
   if (!apiKey) {
     console.warn("[TiktokApify] APIFY_API_KEY not set — cannot scrape TikTok via Apify");
+    return [];
+  }
+
+  const handle = extractTiktokHandle(handleOrUrl);
+  if (!handle) {
+    console.warn(`[TiktokApify] Invalid TikTok handle/URL: ${handleOrUrl}`);
     return [];
   }
 

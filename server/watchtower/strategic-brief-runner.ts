@@ -217,9 +217,14 @@ export async function executeBriefJob(briefId: string): Promise<void> {
 
     // Self-correction Retry Loop (once)
     if (violations.length > 0) {
-      console.log(`${LOG} Validation failed: ${violations.join(", ")}. Retrying self-correction...`);
+      console.log(`${LOG} Validation failed: ${violations.join(", ")}. Retrying self-correction with feedback...`);
       try {
-        const retryBriefResponse = await runStrategicInterpreter(briefRow.eventId, context.evidenceRegistry, briefRow.accountId);
+        const retryBriefResponse = await runStrategicInterpreter(
+          briefRow.eventId,
+          context.evidenceRegistry,
+          briefRow.accountId,
+          violations
+        );
         const retryViolations = validateBriefDeterministic(retryBriefResponse, context.evidenceRegistry);
         
         let retryJudgeResult: JudgeResult | null = null;
@@ -236,7 +241,10 @@ export async function executeBriefJob(briefId: string): Promise<void> {
             violations = [];
             judgeResult = retryJudgeResult;
           } else {
-            violations.push("Judge retry validation rejected");
+            violations = [
+              "Judge retry validation rejected: " + 
+              retryJudgeResult.claims.map(c => `${c.claimId}: ${c.verdict} (${c.violations.join(", ")})`).join("; ")
+            ];
           }
         } else {
           violations = retryViolations;

@@ -17,7 +17,7 @@ import {
   validateClaimGrounding,
   MIN_QUALIFYING_SIGNALS,
 } from "../shared/signal-lineage";
-import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
+import { formatAELForPrompt, filterAELForStrategicUse } from "../analytical-enrichment-layer/engine";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import {
   buildDoctrineBlock,
@@ -523,14 +523,15 @@ export function layer5_awarenessFunnelFit(
     findings.push("Low-commitment funnel with most-aware audience — efficient conversion path");
   }
 
-  if (funnel.trustPath.length > 0) {
-    findings.push(`Funnel has ${funnel.trustPath.length} trust-building stage(s) — awareness can leverage`);
+  const trustPath = Array.isArray(funnel?.trustPath) ? funnel.trustPath : [];
+  if (trustPath.length > 0) {
+    findings.push(`Funnel has ${trustPath.length} trust-building stage(s) — awareness can leverage`);
   } else {
     warnings.push("Funnel has no trust path — awareness entry must compensate");
     score -= 0.1;
   }
 
-  const stages = funnel.stageMap || [];
+  const stages = Array.isArray(funnel?.stageMap) ? funnel.stageMap : [];
   if (stages.length > 0) {
     findings.push(`Funnel has ${stages.length} stage(s) for awareness-to-conversion flow`);
   }
@@ -818,10 +819,15 @@ export async function runAwarenessEngine(
   // contract gap instead of a phantom default.
   const inputCheck = validateAwarenessInputs(audience, mi);
 
-  const aelAck = acknowledgeAelInput("AwarenessEngine-V3", analyticalEnrichment ?? null, accountId);
-  if (analyticalEnrichment) {
-    const aelBlock = formatAELForPrompt(analyticalEnrichment);
-    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(analyticalEnrichment).filter(k => analyticalEnrichment[k] && (Array.isArray(analyticalEnrichment[k]) ? analyticalEnrichment[k].length > 0 : true)).length} | partial=${aelAck.partial}`);
+  const painRegistry = (audience.painRegistry || []) as any[];
+  const approvedLanes = (audience.approvedLanes || []) as any[];
+  const filteredAelCtx = filterAELForStrategicUse(analyticalEnrichment ?? null, painRegistry, approvedLanes);
+  const activeAel = filteredAelCtx ? filteredAelCtx.filteredPkg : (analyticalEnrichment ?? null);
+
+  const aelAck = acknowledgeAelInput("AwarenessEngine-V3", activeAel, accountId);
+  if (activeAel) {
+    const aelBlock = formatAELForPrompt(activeAel, painRegistry, approvedLanes);
+    console.log(`[AwarenessEngine-V3] AEL_RECEIVED | enrichmentSize=${aelBlock.length}chars | dimensions=${Object.keys(activeAel).filter(k => (activeAel as any)[k] && (Array.isArray((activeAel as any)[k]) ? (activeAel as any)[k].length > 0 : true)).length} | partial=${aelAck.partial}`);
   }
 
   if (!inputCheck.ok) {
@@ -961,19 +967,26 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
   // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
   try {
     const { generateMythBreaker } = await import("./myth-breaker-llm");
-    const segments0 = (audience.audienceSegments || [])[0] as any;
-    const sophisticationTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const { resolveTargetLaneAndSegment } = await import("../persuasion-engine/engine");
+    const allSegments = (audience.audienceSegments || []) as any[];
+    const { targetSegment } = resolveTargetLaneAndSegment(audience, {
+      laneId: (audience as any)?.laneId || (audience as any)?.currentLaneId,
+      positioning,
+      funnel: (upstreamSignals as any)?.funnel,
+    });
+
+    const sophisticationTier = targetSegment?.sophisticationProfile?.sophisticationTier ?? null;
     const rejectedClaimPatterns: string[] = [];
-    for (const seg of (audience.audienceSegments || []) as any[]) {
+    for (const seg of allSegments) {
       const profile = seg?.sophisticationProfile;
       if (profile?.rejectedClaimPatterns) {
         for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
       }
     }
-    const audienceBeliefs = (audience.audienceSegments || []).flatMap((s: any) => s.beliefProfile || []);
+    const audienceBeliefs = (targetSegment ? [targetSegment] : allSegments).flatMap((s: any) => s.beliefProfile || []);
     const objectionStatements = Object.keys(audience.objectionMap || {}).slice(0, 8);
     const mythBreaker = await generateMythBreaker({
-      analyticalEnrichment: analyticalEnrichment ?? null,
+      analyticalEnrichment: activeAel,
       audienceObjections: objectionStatements,
       audienceBeliefs,
       audiencePains: (audience.audiencePains || []).slice(0, 8),
@@ -1004,11 +1017,16 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
   // route + myth-breaker.
   try {
     const { engineerNarrativeReframe } = await import("./narrative-reframe");
+    const { resolveTargetLaneAndSegment } = await import("../persuasion-engine/engine");
     const bp = upstreamSignals?.buyerPsychology;
     const trust = upstreamSignals?.trustMechanism;
     const game = upstreamSignals?.gameDimension;
-    const segments0 = (audience.audienceSegments || [])[0] as any;
-    const fallbackTier = segments0?.sophisticationProfile?.sophisticationTier ?? null;
+    const { targetSegment } = resolveTargetLaneAndSegment(audience, {
+      laneId: (audience as any)?.laneId || (audience as any)?.currentLaneId,
+      positioning,
+      funnel: (upstreamSignals as any)?.funnel,
+    });
+    const fallbackTier = targetSegment?.sophisticationProfile?.sophisticationTier ?? null;
     const reframe = await engineerNarrativeReframe({
       awarenessStage: readinessStage,
       primaryEntryRoute: primaryEntry,
@@ -1155,7 +1173,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
     accountId,
     campaignId: commercialReasoningCtx?.campaignId ?? `awareness-standalone:${accountId}`,
     runId: commercialReasoningCtx?.runId ?? `awareness-standalone:${Date.now()}`,
-    ael: analyticalEnrichment ?? null,
+    ael: activeAel ?? null,
     awarenessRouteSourceTexts: celSourceTexts,
     industry: commercialReasoningCtx?.industry ?? null,
     businessProfile: commercialReasoningCtx?.businessProfile ?? null,
@@ -1177,7 +1195,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
   let depthGateResult: DepthGateResult | null = null;
 
   if (
-    analyticalEnrichment &&
+    activeAel &&
     isDepthBlocking(celDepth, celSourceTexts) &&
     !reasonerLifted
   ) {

@@ -19,7 +19,7 @@ import { useAppShellController } from '@/hooks/useAppShellController';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
 import { GlobalHeader } from '@/components/GlobalHeader';
 
-const TABS = ['All Changes', 'High Impact', 'Confirmed', 'First Observation', 'Archived'] as const;
+const TABS = ['All Changes', 'High Impact', 'Confirmed', 'Under Review', 'Archived'] as const;
 
 export default function WatchtowerPage() {
   const { user } = useAuth();
@@ -215,6 +215,16 @@ export default function WatchtowerPage() {
               title="Could not load signals"
               body={state.error || 'An error occurred fetching intelligence.'}
               tint="#EF4444"
+            />
+          ) : (activeTab === 'Confirmed' && state.events.length === 0) ? (
+            <EmptyPane
+              icon="check-circle"
+              title="No confirmed changes yet"
+              body={`${state.tabCounts?.['Under Review'] ?? state.tabCounts?.['First Observation'] ?? 0} strategic changes are currently under review awaiting scheduled second confirmation fetch.`}
+              action={{
+                label: 'View Under Review',
+                onPress: () => setActiveTab('Under Review'),
+              }}
             />
           ) : state.events.length === 0 ? (
             <EmptyPane

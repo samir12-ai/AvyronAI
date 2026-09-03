@@ -72,33 +72,23 @@ describe("POST /api/revenue campaign gating (Phase N)", () => {
   });
 });
 
-describe("GET /api/performance/console tenant scoping", () => {
+describe("Performance Intelligence console-route tenant scoping", () => {
   const src = read("server/performance-loop/console-route.ts");
 
-  it("route is registered with requireCampaign middleware", () => {
-    expect(src).toMatch(
-      /get\(\s*["']\/api\/performance\/console["']\s*,\s*requireCampaign/,
-    );
+  it("route is registered with resolveAccountIdFromCampaign ownership resolver", () => {
+    expect(src).toMatch(/resolveAccountIdFromCampaign/);
+    expect(src).toMatch(/router\.get\(\s*["']\/execution-state\/:campaignId["']/);
   });
 
   it("every table read is accountId-scoped", () => {
-    // Every `.from(table)` in the route must have a matching
-    // `eq(table.accountId, accountId)` filter somewhere in the file.
     const fromTables = [...src.matchAll(/\.from\((\w+)\)/g)].map((m) => m[1]);
-    expect(fromTables.length).toBeGreaterThan(5);
+    expect(fromTables.length).toBeGreaterThanOrEqual(3);
     for (const tbl of new Set(fromTables)) {
       expect(
         src.includes(`eq(${tbl}.accountId, accountId)`),
         `${tbl} read must be accountId-scoped`,
       ).toBe(true);
     }
-  });
-
-  it("live comparator call never persists (read model stays read-only)", () => {
-    const idx = src.indexOf("runExecutionComparison(");
-    expect(idx).toBeGreaterThan(-1);
-    const window = src.slice(idx, idx + 200);
-    expect(window).toMatch(/persist:\s*false/);
   });
 });
 

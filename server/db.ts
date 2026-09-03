@@ -17,8 +17,9 @@ const STATEMENT_TIMEOUT_MS = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || "30
 export const pool = new pg.Pool({
   connectionString: process.env.DATABASE_URL,
   max: Number.isFinite(POOL_MAX) && POOL_MAX > 0 ? POOL_MAX : 20,
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
+  idleTimeoutMillis: 120_000,
+  connectionTimeoutMillis: 30_000,
+  keepAlive: true,
 });
 
 pool.on("connect", (client) => {

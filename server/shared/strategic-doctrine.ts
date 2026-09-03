@@ -162,6 +162,20 @@ export interface StrategicDoctrine {
 export interface RunStrategicContext {
   doctrine: StrategicDoctrine;
   priorDecisions: EngineDecisionSummary[];
+  performanceContext?: any | null;
+  rawPerformanceContext?: any | null;
+}
+
+export function buildPerformanceBlock(perfCtx?: any | null): string {
+  if (!perfCtx) return "";
+  return `
+═══ BUSINESS EXECUTION PERFORMANCE CONTEXT ═══
+BUSINESS MODE: ${perfCtx.mode || "UNKNOWN"} (Confidence: ${perfCtx.confidence || "LOW"})
+PRIMARY BOTTLENECK: ${perfCtx.primaryBottleneck || "NONE"}
+FRESHNESS: ${perfCtx.freshness || "FRESH"}${perfCtx.isStale ? " [STALE CONTEXT]" : ""}
+PERMISSIONS & DIRECTIVES: ${perfCtx.permissionDirective || "Use performance context as bounded execution feedback."}
+ALLOWED SIGNALS: ${JSON.stringify(perfCtx.allowedSignals || {})}
+═══`;
 }
 
 // ---------------------------------------------------------------------------
@@ -444,7 +458,7 @@ export function buildDoctrineBlock(ctx: RunStrategicContext): string {
     if (a.uniqueMechanism) lines.push(`Delivery mechanism: ${a.uniqueMechanism}`);
     if (a.strategicAdvantage) lines.push(`Strategic advantage: ${a.strategicAdvantage}`);
     if (a.alternativeReplaced) lines.push(`Alternatives replaced: ${a.alternativeReplaced}`);
-    if (a.keyAttributes.length > 0) {
+    if (a.keyAttributes && a.keyAttributes.length > 0) {
       lines.push(`Key attributes: ${a.keyAttributes.join("; ")}`);
     }
     lines.push(`Core problem solved: ${a.coreProblemSolved}`);
@@ -467,12 +481,17 @@ export function buildDoctrineBlock(ctx: RunStrategicContext): string {
     }
   }
 
-  if (priorDecisions.length > 0) {
+  if (Array.isArray(priorDecisions) && priorDecisions.length > 0) {
     lines.push("");
     lines.push("=== PRIOR VALIDATED DECISIONS (do not contradict these) ===");
     for (const d of priorDecisions) {
       lines.push(`- [${d.engineId}] ${d.summary}`);
     }
+  }
+
+  if (ctx.performanceContext) {
+    lines.push("");
+    lines.push(buildPerformanceBlock(ctx.performanceContext));
   }
 
   return lines.join("\n");

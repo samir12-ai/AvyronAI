@@ -32,6 +32,8 @@ export function translateSignalKind(kind: string | null | undefined): string | n
     case "posting_frequency_shift":  return "Posting cadence shift";
     case "competitor_profile_change": return "Competitor profile change";
     case "offer_language_change":     return "Offer language change";
+    case "pricing_change":
+    case "pricing_page_change":       return "Pricing strategy shift";
     default: return null;
   }
 }

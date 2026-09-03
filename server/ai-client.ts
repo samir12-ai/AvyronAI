@@ -99,6 +99,30 @@ const HARD_TIMEOUT_MS = 45000;
 
 export const PRIMARY_CHAT_MODEL = "gpt-4.1";
 
+export type ModelCapabilityTier =
+  | "STRATEGIC_REASONING"
+  | "HIGH_CAPABILITY"
+  | "HIGH_REASONING"
+  | "STANDARD_CLASSIFICATION"
+  | "FAST_EXTRACTION";
+
+export function resolveModelForTier(tier: ModelCapabilityTier): string {
+  switch (tier) {
+    case "STRATEGIC_REASONING":
+      return process.env.MODEL_TIER_STRATEGIC || process.env.AI_PRIMARY_MODEL || "gpt-5";
+    case "HIGH_CAPABILITY":
+      return process.env.MODEL_TIER_HIGH_CAPABILITY || process.env.AI_PRIMARY_MODEL || PRIMARY_CHAT_MODEL;
+    case "HIGH_REASONING":
+      return process.env.MODEL_TIER_HIGH_REASONING || process.env.AI_PRIMARY_MODEL || PRIMARY_CHAT_MODEL;
+    case "STANDARD_CLASSIFICATION":
+      return process.env.MODEL_TIER_STANDARD || "gpt-4o-mini";
+    case "FAST_EXTRACTION":
+      return process.env.MODEL_TIER_FAST || "gpt-4o-mini";
+    default:
+      return PRIMARY_CHAT_MODEL;
+  }
+}
+
 let openaiInstance: OpenAI | null = null;
 let openaiApiKey: string | undefined;
 let geminiInstance: GoogleGenAI | null = null;
@@ -193,19 +217,27 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
   let success = false;
   let actualTokens = 0;
   let outcomeKind: "success" | "timeout" | "failed" | null = null;
+  const payload = buildOpenAIPayload(rest);
+
+  const effectiveTimeoutMs = options.timeoutMs ?? HARD_TIMEOUT_MS;
+  let timeoutHandle: NodeJS.Timeout | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new AICallError(`OpenAI call timed out after ${effectiveTimeoutMs}ms`, "AI_TIMEOUT"));
+    }, effectiveTimeoutMs);
+  });
 
   try {
     const openai = getOpenAI();
-    // Task #89 / P4-A — payload built via shared helper so the recorder
-    // promptHash and the strict-mock lookup key are computed over the
-    // exact same canonical object.
-    const payload = buildOpenAIPayload(rest);
-    const callOptions = options.timeoutMs && options.timeoutMs > HARD_TIMEOUT_MS
-      ? { timeout: options.timeoutMs }
-      : undefined;
-    const result = callOptions
-      ? await openai.chat.completions.create(payload as any, callOptions)
-      : await openai.chat.completions.create(payload as any);
+    let result: OpenAI.Chat.Completions.ChatCompletion;
+    try {
+      result = await Promise.race([
+        openai.chat.completions.create(payload as any, { timeout: effectiveTimeoutMs }),
+        timeoutPromise
+      ]);
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
 
     success = true;
     actualTokens = result.usage?.total_tokens || rest.max_tokens;
@@ -226,6 +258,9 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
     });
     return result;
   } catch (err: any) {
+    const isTimeout =
+      (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
+      (err && (err.name === "APITimeoutError" || /timeout/i.test(String(err.message ?? ""))));
     const isQuotaOrRateLimit =
       err &&
       (/429/i.test(String(err.message)) ||
@@ -234,9 +269,9 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
         /insufficient_quota/i.test(String(err.message)));
 
     const geminiKey = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-    if (isQuotaOrRateLimit && geminiKey) {
+    if ((isQuotaOrRateLimit || isTimeout) && geminiKey) {
       console.warn(
-        `[aiChat] OpenAI quota/rate-limit hit ("${err.message}"). Attempting seamless Gemini fallback...`
+        `[aiChat] OpenAI ${isTimeout ? "timeout" : "quota/rate-limit"} hit ("${err.message}"). Attempting seamless Gemini fallback...`
       );
       try {
         const gemini = getGemini();
@@ -258,17 +293,39 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
           : promptText;
 
         const isJson = rest.response_format?.type === "json_object";
-        const geminiModel = "gemini-3.6-flash";
+        const geminiModel = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
-        const geminiRes = await gemini.models.generateContent({
-          model: geminiModel,
-          contents: fullContent,
-          config: {
-            maxOutputTokens: rest.max_tokens,
-            temperature: rest.temperature,
-            ...(isJson ? { responseMimeType: "application/json" } : {}),
-          },
-        });
+        let geminiRes: any = null;
+        let lastGeminiErr: any = null;
+
+        for (let attempt = 1; attempt <= 5; attempt++) {
+          try {
+            geminiRes = await gemini.models.generateContent({
+              model: geminiModel,
+              contents: fullContent,
+              config: {
+                maxOutputTokens: rest.max_tokens,
+                temperature: rest.temperature,
+                ...(isJson ? { responseMimeType: "application/json" } : {}),
+              },
+            });
+            if (geminiRes?.text) break;
+          } catch (mErr: any) {
+            lastGeminiErr = mErr;
+            if (/429|RESOURCE_EXHAUSTED|rate-limit/i.test(mErr.message || "") && attempt < 5) {
+              const waitMatch = String(mErr.message).match(/retry in ([\d\.]+)s/i);
+              const rawWait = waitMatch ? Math.ceil(parseFloat(waitMatch[1])) : 5;
+              const waitSec = Math.min(Math.max(rawWait, 2), 15);
+              console.log(`[aiChat] Gemini 429 rate limit hit. Waiting ${waitSec}s before attempt ${attempt + 1}...`);
+              await new Promise((r) => setTimeout(r, waitSec * 1000));
+              continue;
+            }
+          }
+        }
+
+        if (!geminiRes) {
+          throw (lastGeminiErr || new Error("Gemini fallback returned empty response"));
+        }
 
         const text = geminiRes.text || "";
         success = true;
@@ -311,9 +368,6 @@ export async function aiChat(options: AIChatOptions): Promise<OpenAI.Chat.Comple
       }
     }
 
-    const isTimeout =
-      (err instanceof AICallError && err.code === "AI_TIMEOUT") ||
-      (err && (err.name === "APITimeoutError" || /timeout/i.test(String(err.message ?? ""))));
     outcomeKind = isTimeout ? "timeout" : "failed";
     if (err instanceof AICallError) throw err;
     throw new AICallError(err.message || "AI call failed", "AI_CALL_FAILED");
@@ -477,19 +531,33 @@ const ACCOUNT_BUDGET_OVERRIDES: Record<string, number> = {
   "system": Infinity,
 };
 
-function getAccountBudget(accountId: string): number {
+export function getAccountBudget(accountId: string): number {
+  if (
+    process.env.NODE_ENV !== "production" &&
+    (accountId.startsWith("acc_buffer") ||
+     accountId.startsWith("test_") ||
+     accountId.startsWith("dev_") ||
+     accountId.includes("_e2e_") ||
+     process.env.NODE_ENV === "test" ||
+     process.env.NODE_ENV === "development")
+  ) {
+    return Infinity;
+  }
   return ACCOUNT_BUDGET_OVERRIDES[accountId] ?? WEEKLY_TOKEN_BUDGET;
 }
 
-async function checkAndReserveBudget(accountId: string, maxTokens: number): Promise<{ allowed: boolean; reason?: string }> {
+export async function checkAndReserveBudget(accountId: string, maxTokens: number): Promise<{ allowed: boolean; reason?: string }> {
   try {
+    const budget = getAccountBudget(accountId);
+    if (!Number.isFinite(budget)) {
+      return { allowed: true };
+    }
     const { db } = await import("./db");
     const { sql } = await import("drizzle-orm");
     const lockKey = hashAccountId(accountId);
-    const budget = getAccountBudget(accountId);
-    await db.execute(sql`SELECT pg_advisory_lock(${lockKey})`);
-    try {
-      const result = await db.execute(sql`
+    return await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(${lockKey})`);
+      const result = await tx.execute(sql`
         SELECT COALESCE(SUM(estimated_tokens), 0) as total_tokens
         FROM ai_usage_log
         WHERE account_id = ${accountId} AND created_at > NOW() - INTERVAL '7 days'
@@ -498,14 +566,12 @@ async function checkAndReserveBudget(accountId: string, maxTokens: number): Prom
       if (totalTokens + maxTokens > budget) {
         return { allowed: false, reason: `Weekly quota ${budget} tokens exceeded (used: ${totalTokens}, requested: ${maxTokens})` };
       }
-      await db.execute(sql`
+      await tx.execute(sql`
         INSERT INTO ai_usage_log (account_id, endpoint, model, max_tokens, estimated_tokens, success, duration_ms, created_at)
         VALUES (${accountId}, 'budget_reservation', 'reservation', ${maxTokens}, ${maxTokens}, false, 0, NOW())
       `);
       return { allowed: true };
-    } finally {
-      await db.execute(sql`SELECT pg_advisory_unlock(${lockKey})`);
-    }
+    });
   } catch {
     return { allowed: true };
   }
@@ -531,18 +597,21 @@ interface ReconcileEntry {
 
 async function reconcileBudgetReservation(entry: ReconcileEntry): Promise<void> {
   try {
+    const budget = getAccountBudget(entry.accountId);
     const { db } = await import("./db");
     const { sql } = await import("drizzle-orm");
-    await db.execute(sql`
-      DELETE FROM ai_usage_log 
-      WHERE id = (
-        SELECT id FROM ai_usage_log 
-        WHERE account_id = ${entry.accountId} 
-          AND endpoint = 'budget_reservation' 
-          AND model = 'reservation'
-        ORDER BY created_at DESC LIMIT 1
-      )
-    `);
+    if (Number.isFinite(budget)) {
+      await db.execute(sql`
+        DELETE FROM ai_usage_log 
+        WHERE id = (
+          SELECT id FROM ai_usage_log 
+          WHERE account_id = ${entry.accountId} 
+            AND endpoint = 'budget_reservation' 
+            AND model = 'reservation'
+          ORDER BY created_at DESC LIMIT 1
+        )
+      `);
+    }
     await db.execute(sql`
       INSERT INTO ai_usage_log (account_id, endpoint, model, max_tokens, estimated_tokens, success, duration_ms, created_at)
       VALUES (${entry.accountId}, ${entry.endpoint}, ${entry.model}, ${entry.maxTokens}, ${entry.actualTokens}, ${entry.success}, ${entry.durationMs}, NOW())

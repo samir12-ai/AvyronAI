@@ -77,15 +77,16 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
 
-    const inAuthGroup = segments[0] === 'login';
+    const inAuthGroup = segments[0] === 'login' || segments[0] === 'signup';
     const inIntro = segments[0] === 'intro';
     const inUpgrade = segments[0] === 'upgrade';
+    const inSetup = segments[0] === 'setup';
 
     if (!isAuthenticated) {
       if (!inAuthGroup) {
         router.replace('/login');
       }
-    } else if (!user?.hasSeenIntro) {
+    } else if (!user?.hasSeenIntro && !inSetup) {
       if (!inIntro) {
         router.replace('/intro');
       }
@@ -97,7 +98,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       if (inAuthGroup && isAddingAccount) {
         return;
       }
-      if (inAuthGroup || inIntro || inUpgrade) {
+      if (inAuthGroup || inUpgrade) {
         router.replace('/(tabs)');
       }
     }
@@ -116,6 +117,8 @@ function RootLayoutNav() {
       <OnboardingProvider>
         <Stack screenOptions={{ headerBackTitle: "Back" }}>
           <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen name="signup" options={{ headerShown: false }} />
+          <Stack.Screen name="setup" options={{ headerShown: false }} />
           <Stack.Screen name="intro" options={{ headerShown: false }} />
           <Stack.Screen name="upgrade" options={{ headerShown: false }} />
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

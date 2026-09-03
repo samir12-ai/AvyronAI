@@ -1765,4 +1765,38 @@ export function buildMarketSummary(
   return parts.join(" ");
 }
 
+export function computeDataFreshnessDays(competitors: CompetitorInput[]): number {
+  if (!Array.isArray(competitors) || competitors.length === 0) return 999;
+  let newestTimestamp: number | null = null;
+
+  for (const comp of competitors) {
+    const posts = comp.posts || [];
+    const comments = comp.comments || [];
+    for (const p of posts) {
+      if (p.timestamp) {
+        const ts = new Date(p.timestamp).getTime();
+        if (!isNaN(ts)) {
+          if (newestTimestamp === null || ts > newestTimestamp) {
+            newestTimestamp = ts;
+          }
+        }
+      }
+    }
+    for (const c of comments) {
+      if (c.timestamp) {
+        const ts = new Date(c.timestamp).getTime();
+        if (!isNaN(ts)) {
+          if (newestTimestamp === null || ts > newestTimestamp) {
+            newestTimestamp = ts;
+          }
+        }
+      }
+    }
+  }
+
+  if (newestTimestamp === null) return 999;
+  const now = Date.now();
+  return Math.max(0, Math.floor((now - newestTimestamp) / (24 * 60 * 60 * 1000)));
+}
+
 export { validateEngineIsolation, validateDomainOwnership, rejectBlockedEngine, assertSnapshotReadOnly, assertNoPlanWrites, assertNoOrchestrator, assertNoAutopilot, assertNoComputeFromExternal, getProtectedDomains, getBlockedEngines } from "./isolation-guard";

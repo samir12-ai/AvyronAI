@@ -546,21 +546,47 @@ export function validateTerritorySpecificity(territories: Territory[]): { passed
   let systemCount = 0;
   let audienceCount = 0;
 
-  for (const t of territories) {
+  for (let idx = 0; idx < territories.length; idx++) {
+    const t = territories[idx];
     const classification = classifyTerritoryLevel(t);
+    const reasons: string[] = [];
+
+    // Guard 1: Psychology Promoted to Primary Territory without Core Pain Linkage (Fix 4)
+    if (idx === 0) {
+      const hasCorePainAlignment = Array.isArray(t.painAlignment) && t.painAlignment.length > 0;
+      const isPurePsychological = !hasCorePainAlignment && Array.isArray(t.desireAlignment) && t.desireAlignment.length > 0;
+      if (isPurePsychological && classification.level !== "system") {
+        reasons.push("PSYCHOLOGY_PROMOTED_TO_CORE: primary territory is derived from supporting psychological drivers without core purchase pain grounding");
+      }
+    }
+
+    // Guard 2: Composite Axis Overload Guard (Fix 4, 13)
+    if (t.contrastAxis && typeof t.contrastAxis === "string") {
+      const contrastLower = t.contrastAxis.toLowerCase();
+      const clauseConnectors = (contrastLower.match(/\b(and foster|instead of remaining|due to|while also|in order to also)\b/g) || []).length;
+      if (clauseConnectors >= 3) {
+        reasons.push("COMPOSITE_AXIS_OVERLOAD: contrast axis concatenates multiple independent themes into a compound narrative rather than expressing one coherent commercial contrast");
+      }
+    }
+
     if (classification.level === "system") {
-      systemCount++;
+      if (reasons.length > 0) {
+        audienceCount++;
+        rejections.push({ name: t.name, reasons });
+      } else {
+        systemCount++;
+      }
     } else if (classification.level === "audience") {
       audienceCount++;
-      rejections.push({ name: t.name, reasons: classification.reasons });
+      rejections.push({ name: t.name, reasons: [...classification.reasons, ...reasons] });
     } else {
       const hasMinimalStructure = (t.domainFailure && t.domainFailure.trim().length > 15) ||
         (t.operationalProblem && t.operationalProblem.trim().length > 15);
-      if (hasMinimalStructure) {
+      if (hasMinimalStructure && reasons.length === 0) {
         systemCount++;
       } else {
         audienceCount++;
-        rejections.push({ name: t.name, reasons: [...classification.reasons, "mixed but lacks domain failure or operational problem detail"] });
+        rejections.push({ name: t.name, reasons: [...classification.reasons, ...reasons, ...(hasMinimalStructure ? [] : ["mixed but lacks domain failure or operational problem detail"])] });
       }
     }
   }
@@ -1164,14 +1190,17 @@ function layer7_opportunityGapDetection(
   contentDna: any[] = [],
   competitionIntensityScore: number = 0,
   productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null } | null,
+  authoritativePains?: any[],
 ): OpportunityGap[] {
-  const pains = safeJsonParse(audienceData.audiencePains, []);
+  const pains = Array.isArray(authoritativePains) && authoritativePains.length > 0
+    ? authoritativePains
+    : safeJsonParse(audienceData.audiencePains, []);
   const desires = safeJsonParse(audienceData.desireMap, []);
   const competitorCount = Object.keys(narrativeMap).length || marketPower.length;
 
   const painTerritories = pains.slice(0, 8).map((p: any) => ({
     name: translateToSystemTerritory(p.canonical, "pain", productDna),
-    demand: Math.min(1.0, p.frequency / 20),
+    demand: Math.min(1.0, (p.frequency || 10) / 20),
     signals: purifyEvidence(p.evidence || []),
     type: "pain" as const,
   }));
@@ -1347,10 +1376,22 @@ function layer10_strategicTerritorySelection(
   segmentPriority: { segment: string; priority: number; painAlignment: number }[],
   trustGaps: string[],
   flankingMode: boolean,
+  positioningPains?: any[],
 ): Territory[] {
-  const topSegments = segmentPriority.slice(0, 2);
+  const corePainIds = new Set((positioningPains || []).map((p: any) => (p.painId || p.id || "").toLowerCase()).filter(Boolean));
 
-  const rawTerritories: Territory[] = opportunities.slice(0, 8).map(opp => {
+  const getOppPrecedence = (o: OpportunityGap) => {
+    let score = o.opportunityScore;
+    if (o.signalSource && corePainIds.has(o.signalSource.toLowerCase())) {
+      score += 0.60; // Direct grounded core purchase pain
+    } else if (o.painSignals && o.painSignals.length > 0) {
+      score += 0.25;
+    }
+    return score;
+  };
+  const sortedOpportunities = [...opportunities].sort((a, b) => getOppPrecedence(b) - getOppPrecedence(a) || b.opportunityScore - a.opportunityScore);
+
+  const rawTerritories: Territory[] = sortedOpportunities.slice(0, 8).map(opp => {
     const narrativeDistance = layer9_narrativeDistanceScoring(opp.territory, narrativeMap);
 
     const painAlignment = opp.painSignals.length > 0 ? opp.painSignals : [];
@@ -1379,6 +1420,7 @@ function layer10_strategicTerritorySelection(
       stabilityNotes: [],
       evidenceSignals: [...opp.painSignals, ...opp.desireSignals].slice(0, 5),
       confidenceScore: Math.round(opp.opportunityScore * narrativeDistance * 100) / 100,
+      signalSource: opp.signalSource,
     };
   });
 
@@ -1401,9 +1443,19 @@ function layer10_strategicTerritorySelection(
     console.log(`[PositioningEngine] TERRITORY_FILTER: FALLBACK — all ${filtered.length} territories were audience-level, using best available candidates`);
   }
 
-  // Stable tiebreaker on territory name guarantees identical ordering when
-  // two territories share the same opportunityScore across runs.
-  const sorted = territoriesToSort.sort((a, b) => b.opportunityScore - a.opportunityScore || a.name.localeCompare(b.name));
+  // Strategic Precedence (Fix 11): Primary territory must prioritize direct operational pain grounding
+  // over pure ungrounded emotional drivers, while keeping ties stable.
+  const getStrategicPrecedence = (t: Territory) => {
+    let score = t.opportunityScore;
+    if (t.signalSource && corePainIds.has(t.signalSource.toLowerCase())) {
+      score += 0.60; // Direct grounded core purchase pain
+    } else if (t.painAlignment && t.painAlignment.length > 0) {
+      score += 0.25; // Directly grounded in operational buying pain
+    }
+    return score;
+  };
+
+  const sorted = territoriesToSort.sort((a, b) => getStrategicPrecedence(b) - getStrategicPrecedence(a) || b.opportunityScore - a.opportunityScore || a.name.localeCompare(b.name));
 
   const compressed = compressTerritories(sorted);
 
@@ -1707,34 +1759,51 @@ function buildSignalClaimSeeds(
 ): ClaimSeed | null {
   if (mapped.length === 0) return null;
 
-  const pains = mapped.filter(m => m.category === "pain" || m.category === "root_cause");
-  const desires = mapped.filter(m => m.category === "desire" || m.category === "pattern");
-  const drivers = mapped.filter(m => m.category === "psychological_driver");
-
-  const enemySources = pains.length > 0 ? pains : (drivers.length > 0 ? drivers : mapped.slice(0, 2));
-  const contrastSources = desires.length > 0 ? desires : (drivers.length > 0 ? drivers : mapped.slice(0, 2));
+  // Signal Authority Classification (Fix 1)
+  // PRIMARY_STRATEGIC: Operational pains and root-cause failure signals
+  const primaryPains = mapped.filter(m => m.category === "pain" || m.category === "root_cause");
+  // SECONDARY_STRATEGIC: Desires, expected outcomes, and behavioral friction patterns
+  const secondaryDesires = mapped.filter(m => m.category === "desire" || m.category === "pattern");
+  // PSYCHOLOGICAL_CONTEXT: Emotional drivers, identity cues, social sentiment (belonging, anxiety)
+  const psychologicalDrivers = mapped.filter(m => m.category === "psychological_driver");
 
   const domainNoun = inferDomainNoun(productDna);
 
-  // Seed strings are DISPLAY/fallback text (and get judged by the gate
-  // battery when grounding falls back) — strip machine taxonomy prefixes like
-  // "Problem behind objection: " so the fallback reads as a claim, not a raw
-  // signal dump. sourceLabels/painLabels/etc. below keep the RAW labels —
-  // grounding keyword matching is unaffected.
   const stripTaxonomyPrefix = (label: string): string => {
     const stripped = label.replace(/^[a-z][a-z0-9 _\/-]{2,40}:\s*/i, "").trim();
     return stripped.length >= 3 ? stripped : label.trim();
   };
+
+  // Primary Enemy Authority: Must derive from operational pains / root causes first.
+  // Supporting psychological drivers only serve as contextual nuance, never the primary system enemy.
+  let enemySources: MappedSignalCluster[] = [];
+  if (primaryPains.length > 0) {
+    enemySources = primaryPains;
+  } else if (secondaryDesires.length > 0) {
+    enemySources = secondaryDesires;
+  } else if (psychologicalDrivers.length > 0) {
+    enemySources = psychologicalDrivers;
+  } else {
+    enemySources = mapped.slice(0, 2);
+  }
 
   const enemyParts = [...new Set(enemySources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))];
   const enemySeed = enemyParts.length > 0
     ? `${domainNoun} failure: ${enemyParts.join(" + ")}`
     : `${domainNoun} system breakdown`;
 
-  // Degenerate-contrast guard: when desires are empty, contrastSources can
-  // collapse onto the same labels as enemySources, historically producing
-  // "X vs current X". Exclude the enemy's lead label from the contrast side;
-  // if nothing distinct remains, phrase the gain from business context instead.
+  // Primary Contrast Authority: Must derive from operational desires / Product Truth.
+  let contrastSources: MappedSignalCluster[] = [];
+  if (secondaryDesires.length > 0) {
+    contrastSources = secondaryDesires;
+  } else if (primaryPains.length > 0) {
+    contrastSources = primaryPains;
+  } else if (psychologicalDrivers.length > 0) {
+    contrastSources = psychologicalDrivers;
+  } else {
+    contrastSources = mapped.slice(0, 2);
+  }
+
   const contrastParts = [...new Set(contrastSources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))]
     .filter(p => p.toLowerCase() !== (enemyParts[0] || "").toLowerCase());
   const dnaGain = (productDna?.coreProblemSolved || productDna?.coreOffer || "").toString().trim();
@@ -1758,8 +1827,8 @@ function buildSignalClaimSeeds(
     narrativeSeed,
     sourceSignalIds: mapped.map(m => m.id),
     sourceLabels: mapped.map(m => m.label.toLowerCase()),
-    painLabels: pains.map(p => p.label.toLowerCase()),
-    desireLabels: desires.map(d => d.label.toLowerCase()),
+    painLabels: primaryPains.map(p => p.label.toLowerCase()),
+    desireLabels: secondaryDesires.map(d => d.label.toLowerCase()),
     rootCauseLabels: mapped.filter(m => m.category === "root_cause").map(r => r.label.toLowerCase()),
   };
 }
@@ -1938,6 +2007,7 @@ async function layer11_positioningStatementGeneration(
   temperature: number = 0.3,
   strategic?: RunStrategicContext,
   strategicLanes?: any[],
+  positioningPains?: any[],
 ): Promise<Territory[]> {
   if (territories.length === 0) return territories;
 
@@ -1968,21 +2038,12 @@ async function layer11_positioningStatementGeneration(
     }
 
     const productDnaBlock = productDna ? formatProductDNAForPrompt(productDna) : "";
-    // T13 (AI Proposes / Code Validates): inject the strategic doctrine (product
-    // anchor + prior validated decisions) so the model proposes claims already
-    // aligned to the locked anchor. Omitted cleanly when no doctrine was threaded
-    // — never a synthesized/fake doctrine (D5).
     const doctrineBlock = strategic ? buildDoctrineBlock(strategic) : "";
     if (!strategic) console.log("[PositioningEngine-V3] DOCTRINE_ABSENT — no strategic context threaded; omitting doctrine block");
     const aelBlock = formatAELForPrompt(analyticalEnrichment || null);
     const causalDirective = buildCausalDirectiveForPrompt(analyticalEnrichment || null);
     if (aelBlock) console.log(`[PositioningEngine-V3] AEL_INJECTED | enrichmentSize=${aelBlock.length}chars | causalDirective=${causalDirective.length}chars`);
 
-    // Grounding contract (shared): resolve the product anchor — the locked
-    // doctrine anchor first, else one derived from business context (never fabricated
-    // — deriveAnchorFromProductDna returns null when DNA is empty). Then build the
-    // additive contract block + a citable [RC#]/[CC#]/[BB#] AEL index. Positioning
-    // previously exposed only prose AEL with no citable tags.
     let positioningAnchor: ProductAnchor | null = strategic ? strategic.doctrine.productAnchor : null;
     if (!positioningAnchor) {
       const derivedAnchor = deriveAnchorFromProductDna(productDna);
@@ -2053,12 +2114,30 @@ Also return three additional fields per territory:
       ? `STRATEGIC LANES CONTEXT:\n${strategicLanes.map(l => `- Lane ID: "${l.laneId}"\n  Title: "${l.title}"\n  Description: "${l.description}"\n  Pains: ${JSON.stringify(l.painIds)}`).join("\n")}`
       : "";
 
+    const authorityHierarchyBlock = Array.isArray(positioningPains) && positioningPains.length > 0
+      ? `\n═══ AUTHORITY HIERARCHY (MANDATORY SEMANTIC ANCHOR) ═══
+- PRIMARY AUTHORITY (CORE PURCHASE PAIN):
+${positioningPains.map(p => `  * "${p.canonical}" (ID: ${p.painId})`).join("\n")}
+The positioning statements MUST address the operational buying problem stated in these CORE pain(s).
+
+- BOUNDING AUTHORITIES:
+  * Approved Lane(s): ${Array.isArray(strategicLanes) ? strategicLanes.map(l => `"${l.title}"`).join(", ") : "n/a"}
+  * Product Truth & Mechanism: "${productDna?.uniqueMechanism || ""}"
+  * Approved Differentiation: "${strategic?.doctrine?.productAnchor?.differentiatingFeature || productDna?.strategicAdvantage || ""}"
+
+- ENRICHMENT ONLY (do NOT let these override or replace the CORE buying problem):
+  * Analytical Enrichment Layer (AEL) causal insights
+  * Audience psychological drivers
+  * Secondary supporting pains
+`
+      : "";
+
     const prompt = hasSignals
       ? `You are a strategic positioning REFINER. Your job is to SHARPEN the provided claim seeds into precise positioning statements. You must NOT generate new concepts — only refine what is given.
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${lanesStr ? `\n${lanesStr}\n` : ""}${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
+${authorityHierarchyBlock}${lanesStr ? `\n${lanesStr}\n` : ""}${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
 TERRITORIES WITH CLAIM SEEDS AND SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
@@ -2069,10 +2148,10 @@ Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job
 2. Translate signal labels into domain-specific operational language for this business type
 3. Keep the core meaning of each seed — do NOT replace it with unrelated concepts
 
-FIELD RULES:
-- enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive from the pain/root_cause signal labels listed in the SOURCE SIGNALS.
-- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST derive from the desire/pattern signal labels, AND MUST anchor the resolution to this product's differentiating feature / Unique mechanism / Strategic advantage (named in the GROUNDING CONTRACT and DOMAIN TRANSLATION REQUIREMENT above) so that no generic competitor could truthfully repeat the claim unchanged. A claim any competitor could copy verbatim WILL BE REJECTED.
-- narrativeDirection: Sharpen the Narrative seed into one sentence. MUST synthesize the actual signal labels — not invent new concepts — and MUST state the outcome in terms of this product's differentiating feature / Unique mechanism / Strategic advantage (named in the GROUNDING CONTRACT above), not category-generic language.
+FIELD RULES (AUTHORITY HIERARCHY ENFORCED):
+- enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive directly from the operational pain/root_cause signal labels listed in the SOURCE SIGNALS that cause or sustain the CORE_PURCHASE pain. Do NOT create a catch-all compound enemy combining secondary psychological drivers (e.g. belonging, community, anxiety) or unrelated buyer objections.
+- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST represent ONE COHERENT COMMERCIAL CONTRAST grounded in this product's differentiating feature / Unique mechanism / Strategic advantage. Do NOT concatenate multiple semantically independent secondary themes (e.g. operational autonomy + belonging + comparison-shopping + transformation commitment) into a composite axis.
+- narrativeDirection: Sharpen the Narrative seed into one concise sentence synthesizing the core operational failure and its resolution via Product Truth, without category-generic filler.
 - domainFailure: The operational/system failure this signal cluster represents in this specific domain.
 - operationalProblem: What concretely breaks in the buyer's workflow.
 - proofRequirement: What evidence would resolve this (e.g., "live demo", "case study with metrics").
@@ -2080,9 +2159,9 @@ FIELD RULES:
 - mappedSignalIds: Copy the Source signal IDs from the claim seeds. These are pre-assigned — do NOT change them.
 
 HARD CONSTRAINTS:
-- Your output MUST preserve the meaning of the claim seeds. If you cannot refine a seed, return it as-is.
-- Do NOT introduce concepts, problems, or solutions not present in the SOURCE SIGNALS.
-- Every word in your output must trace back to a SOURCE SIGNAL label. If unsure, use the signal label directly.
+- Do NOT elevate supporting emotional, behavioral, or social signals into the primary positioning territory or enemy definition merely because they appear in audience evidence.
+- Primary positioning must be causally anchored to the approved CORE_PURCHASE problem and Product Truth. Psychological context may enrich secondary framing only unless its direct commercial relevance to the core purchase decision is explicitly established.
+- Your output MUST preserve the core operational meaning of the claim seeds without fabricating unrelated concepts.
 - If a territory has no claim seeds, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
@@ -2093,16 +2172,16 @@ Return ONLY the JSON array.`
 
 MARKET CATEGORY: ${category}
 PRIMARY AUDIENCE SEGMENT: ${topSegment}
-${lanesStr ? `\n${lanesStr}\n` : ""}${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
+${authorityHierarchyBlock}${lanesStr ? `\n${lanesStr}\n` : ""}${productDnaBlock ? `\n${productDnaBlock}\n` : ""}${doctrineBlock ? `\n${doctrineBlock}\n` : ""}${aelBlock}${aelRefIndex}${causalDirective}${groundingContractBlock}${domainTranslationInstruction}
 TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
 ${rejectionBlock}
 RULES:
 1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each territory name as the operational failure it represents for this specific business type and offer. Use domain-operational language — not generic emotional framing — in every field.
-2. COMPRESSION: Focus on the FIRST territory as the PRIMARY positioning. Express it as a specific root-cause SYSTEM FAILURE — not an emotional category. If the territory is broad, compress it into the ONE operational failure that causes it.
+2. COMPRESSION & ATOMICITY: Focus on the FIRST territory as the PRIMARY positioning. Express it as a single specific root-cause SYSTEM FAILURE that causes the CORE buying pain. Do NOT combine multiple independent themes into a compound axis.
 3. enemyDefinition: Name the specific operational/system failure in this market for this type of buyer. Not emotions — operational breakdown. Must include a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
-4. contrastAxis: Name what operationally the buyer gains vs what currently fails — specific to this business domain.
+4. contrastAxis: Name ONE clear commercial contrast of what operationally the buyer gains vs what currently fails — specific to this business domain and Product Truth.
 5. narrativeDirection: One sentence using domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
 6. laneRelevance: For each active lane, output a mapping under "laneRelevance" (object with keys of Lane ID mapping to a short statement on how this positioning territory applies to that specific lane context).
 
@@ -2527,8 +2606,17 @@ async function runPositioningEngineInternal(
   const eligibleObjections = painRegistry.filter(p => p.classification === "OBJECTION" && Array.isArray(p.allowedUses) && p.allowedUses.includes("offer_objection"));
   let positioningPains = [...corePains, ...eligibleObjections];
   if (Array.isArray(strategicLanes) && strategicLanes.length > 0) {
-    const lanePainIds = new Set(strategicLanes.flatMap(l => l.painIds || []));
-    positioningPains = positioningPains.filter(p => lanePainIds.has(p.painId));
+    const lanePainIds = new Set(strategicLanes.flatMap(l => [
+      ...(Array.isArray(l.corePainIds) ? l.corePainIds : []),
+      ...(Array.isArray(l.associatedPains) ? l.associatedPains : []),
+      ...(l.primaryPainId ? [l.primaryPainId] : []),
+      ...(Array.isArray(l.painIds) ? l.painIds : []),
+      ...(l.primaryCorePainId ? [l.primaryCorePainId] : []),
+      ...(Array.isArray(l.supportingPainIds) ? l.supportingPainIds : [])
+    ].filter(Boolean)));
+    if (lanePainIds.size > 0) {
+      positioningPains = positioningPains.filter(p => lanePainIds.has(p.painId || p.id));
+    }
   }
 
   if (!positioningPains || positioningPains.length === 0) {
@@ -2741,7 +2829,7 @@ async function runPositioningEngineInternal(
   const contentDna = safeJsonParse(activeMiSnapshot.contentDnaData, []);
   const miTrajectory = safeJsonParse(activeMiSnapshot.trajectoryData, {});
   const competitionIntensityFromMI = miTrajectory.competitionIntensityScore || 0;
-  let opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI, productDna);
+  let opportunityGaps = layer7_opportunityGapDetection(narrativeSaturation, audienceSnapshot, marketPower, category, narrativeMap, contentDna, competitionIntensityFromMI, productDna, positioningPains);
   console.log(`[PositioningEngine-V3] L7 Opportunities: ${opportunityGaps.length} viable territories`);
 
   if (parsedStructuredSignals) {
@@ -2750,12 +2838,15 @@ async function runPositioningEngineInternal(
 
     // FIX-B: produce territory NAMES for signal-injected root_cause + psych_driver
     // clusters via ONE batched grounded-LLM call instead of the static
-    // translateToSystemTerritory phrase lookup. This changes ONLY the NAME input —
-    // every gate/judge/threshold below is untouched. Resolve the anchor exactly as
-    // layer11 does (locked doctrine anchor, else derived from business context, never
-    // fabricated). Fail-closed: on any failure each territory falls back to
-    // translateToSystemTerritory and is explicitly marked template_fallback.
+    // translateToSystemTerritory phrase lookup.
+    const coreNamingClusters = (positioningPains || []).map(p => ({
+      id: p.painId,
+      label: p.canonical,
+      signalType: "root_cause" as const,
+      evidence: p.evidence || []
+    }));
     const namingClusters = [
+      ...coreNamingClusters,
       ...parsedStructuredSignals.root_causes.map(rc => ({ id: rc.id, label: rc.label, signalType: "root_cause" as const, evidence: rc.evidence || [] })),
       ...parsedStructuredSignals.psychological_drivers.map(pd => ({ id: pd.id, label: pd.label, signalType: "psych_driver" as const, evidence: pd.evidence || [] })),
     ];
@@ -2770,8 +2861,7 @@ async function runPositioningEngineInternal(
     }
 
     // Explicit if/else — NOT `??` (D1 semantic/no-semantic-fallback). LLM name when
-    // present, else the static template name with a loud fallback log. The provenance
-    // is stamped on territoryNameSource so downstream surfaces can see it.
+    // present, else the static template name with a loud fallback log.
     const resolveTerritoryName = (
       cluster: { id: string; label: string; signalType: "root_cause" | "psych_driver" },
     ): { name: string; source: "llm" | "template_fallback" } => {
@@ -2783,6 +2873,32 @@ async function runPositioningEngineInternal(
       console.log(`[PositioningEngine-V3] TERRITORY_NAME_FALLBACK | cluster=${cluster.id} | signalType=${cluster.signalType} | name="${fallbackName}"`);
       return { name: fallbackName, source: "template_fallback" };
     };
+
+    // Inject CORE positioning pains with highest opportunity priority
+    for (const p of (positioningPains || [])) {
+      const resolved = resolveTerritoryName({ id: p.painId, label: p.canonical, signalType: "root_cause" });
+      const existingIdx = opportunityGaps.findIndex(o => o.territory.toLowerCase() === resolved.name.toLowerCase());
+      if (existingIdx >= 0) {
+        opportunityGaps[existingIdx].opportunityScore = 0.95;
+        opportunityGaps[existingIdx].audienceDemand = 1.0;
+        opportunityGaps[existingIdx].painSignals = purifyEvidence(p.evidence || []).slice(0, 3);
+        opportunityGaps[existingIdx].signalSource = p.painId;
+        opportunityGaps[existingIdx].territoryNameSource = resolved.source;
+      } else {
+        signalTerritories.push({
+          territory: resolved.name,
+          saturationLevel: 0,
+          audienceDemand: 1.0,
+          competitorAuthority: 0,
+          opportunityScore: 0.95,
+          painSignals: purifyEvidence(p.evidence || []).slice(0, 3),
+          desireSignals: [],
+          signalSource: p.painId,
+          territoryNameSource: resolved.source,
+        });
+        existingNames.add(resolved.name.toLowerCase());
+      }
+    }
 
     for (const rc of parsedStructuredSignals.root_causes) {
       const resolved = resolveTerritoryName({ id: rc.id, label: rc.label, signalType: "root_cause" });
@@ -2820,10 +2936,20 @@ async function runPositioningEngineInternal(
       }
     }
 
+    const getOppPrecedence = (o: OpportunityGap) => {
+      let score = o.opportunityScore;
+      if (o.painSignals && o.painSignals.length > 0) {
+        score += 0.25; // Operational buying pain grounding
+      }
+      return score;
+    };
+
     if (signalTerritories.length > 0) {
       opportunityGaps = [...opportunityGaps, ...signalTerritories]
-        .sort((a, b) => b.opportunityScore - a.opportunityScore);
-      console.log(`[PositioningEngine-V3] SIGNAL_INJECTED_TERRITORIES | added=${signalTerritories.length} from root_causes+psych_drivers | total=${opportunityGaps.length}`);
+        .sort((a, b) => getOppPrecedence(b) - getOppPrecedence(a) || b.opportunityScore - a.opportunityScore);
+      console.log(`[PositioningEngine-V3] SIGNAL_INJECTED_TERRITORIES | added=${signalTerritories.length} from core_pains+root_causes+psych_drivers | total=${opportunityGaps.length}`);
+    } else {
+      opportunityGaps = opportunityGaps.sort((a, b) => getOppPrecedence(b) - getOppPrecedence(a) || b.opportunityScore - a.opportunityScore);
     }
   }
 
@@ -2839,6 +2965,7 @@ async function runPositioningEngineInternal(
   let territories = layer10_strategicTerritorySelection(
     opportunityGaps, narrativeMap, narrativeSaturation,
     marketPower, differentiationAxes, segmentPriority, trustGaps, flankingMode,
+    positioningPains,
   );
   console.log(`[PositioningEngine-V3] L10 Territories: ${territories.length} selected`);
 
@@ -2978,7 +3105,7 @@ async function runPositioningEngineInternal(
         }
         console.log(`[PositioningEngine-V3] ANCHOR_EVIDENCE | engine=positioning | site=first_prompt | attempt=${specificityAttempt + 1} | present=${posPromptAnchorSource === "none" ? "no" : "yes"} | source=${posPromptAnchorSource}`);
       }
-      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature, strategic, strategicLanes);
+      generatedTerritories = await layer11_positioningStatementGeneration(territoriesSnapshot, category, segmentPriority, accountId, activeMiSnapshot, productDna, analyticalEnrichment, parsedStructuredSignals, specificityRejectionContext || undefined, attemptTemperature, strategic, strategicLanes, positioningPains);
       console.log(`[PositioningEngine-V3] L11 SIGNAL_DIRECT_COMPOSITION | aelProvided=${!!analyticalEnrichment} | signalBound=${!!parsedStructuredSignals}${specificityAttempt > 0 ? " | retryAttempt=" + (specificityAttempt + 1) : ""}`);
 
       const specificityCheck = validateTerritorySpecificity(generatedTerritories);

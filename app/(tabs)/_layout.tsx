@@ -9,6 +9,7 @@ import { AccountSwitcherModal } from '@/components/AccountSwitcherModal';
 
 const NAV_ITEMS = [
   { name: 'index', label: 'Dashboard', icon: 'grid' },
+  { name: 'setup', label: 'Setup Workspace', icon: 'zap' },
   { name: 'what-to-do-today', label: 'What To Do Today', icon: 'check-square' },
   { name: 'strategy-plan', label: 'Strategy Plan', icon: 'map' },
   { name: 'market-intelligence', label: 'Market Intelligence', icon: 'globe' },
@@ -160,6 +161,11 @@ function SidebarContent({ controller, isCollapsed, onNavigate }: { controller: A
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
 
   const handlePress = (name: string) => {
+    if (name === 'setup') {
+      router.push('/setup');
+      onNavigate();
+      return;
+    }
     const target = name === 'index' ? '/' : `/(tabs)/${name}`;
     router.navigate(target as any);
     onNavigate();
@@ -205,11 +211,20 @@ function SidebarContent({ controller, isCollapsed, onNavigate }: { controller: A
     );
   };
 
+  const visibleNavItems = NAV_ITEMS.filter(item => {
+    // Only show Setup in sidebar when the account is NOT ready / setup is incomplete
+    if (item.name === 'setup') {
+      return !controller.isSetupComplete;
+    }
+    return true;
+  });
+
   return (
     <>
       <ScrollView style={styles.navScroll} showsVerticalScrollIndicator={false}>
-        {NAV_ITEMS.map((item) => {
+        {visibleNavItems.map((item) => {
           const isSelected = currentRouteName === item.name || currentRouteName.startsWith(item.name);
+          const isSetup = item.name === 'setup';
           let badgeValue: number | null = null;
           if (item.name === 'what-to-do-today') badgeValue = controller.badges.whatToDoToday;
           if (item.name === 'watchtower') badgeValue = controller.badges.watchtower;
@@ -221,27 +236,37 @@ function SidebarContent({ controller, isCollapsed, onNavigate }: { controller: A
               style={[
                 styles.navItem,
                 isSelected && styles.navItemSelected,
-                isCollapsed && styles.navItemCollapsed
+                isCollapsed && styles.navItemCollapsed,
+                isSetup && { backgroundColor: 'rgba(124, 58, 237, 0.12)', borderColor: 'rgba(124, 58, 237, 0.3)', borderWidth: 1 }
               ]}
             >
               <Feather 
                 name={item.icon as any} 
                 size={18} 
-                color={isSelected ? '#FFFFFF' : '#9CA3AF'} 
+                color={isSelected ? '#FFFFFF' : (isSetup ? '#A78BFA' : '#9CA3AF')} 
               />
               {!isCollapsed && (
                 <Text style={[
                   styles.navLabel,
-                  isSelected && styles.navLabelSelected
+                  isSelected && styles.navLabelSelected,
+                  isSetup && { color: '#E9D5FF', fontWeight: '700' }
                 ]}>
                   {item.label}
                 </Text>
               )}
               
-              {!isCollapsed && badgeValue !== null && (
-                <View style={[styles.navBadge, isSelected && styles.navBadgeSelected]}>
-                  <Text style={[styles.navBadgeText, isSelected && styles.navBadgeTextSelected]}>{badgeValue}</Text>
-                </View>
+              {!isCollapsed && (
+                isSetup ? (
+                  <View style={[styles.navBadge, { backgroundColor: '#7C3AED' }]}>
+                    <Text style={[styles.navBadgeText, { color: '#FFFFFF', fontSize: 10, fontWeight: '700' }]}>SETUP</Text>
+                  </View>
+                ) : (
+                  badgeValue !== null && (
+                    <View style={[styles.navBadge, isSelected && styles.navBadgeSelected]}>
+                      <Text style={[styles.navBadgeText, isSelected && styles.navBadgeTextSelected]}>{badgeValue}</Text>
+                    </View>
+                  )
+                )
               )}
             </Pressable>
           );
@@ -318,7 +343,7 @@ export default function AppShellLayout() {
             sceneStyle: { backgroundColor: ShellTheme.colors.appBackground } 
           }}
         >
-          {NAV_ITEMS.map(item => <Tabs.Screen key={item.name} name={item.name} />)}
+          {NAV_ITEMS.filter(item => item.name !== 'setup').map(item => <Tabs.Screen key={item.name} name={item.name} />)}
           <Tabs.Screen name="studio" options={{ href: null }} />
           <Tabs.Screen name="calendar" options={{ href: null }} />
           <Tabs.Screen name="ai-management" options={{ href: null }} />
@@ -355,7 +380,7 @@ export default function AppShellLayout() {
             sceneStyle: { backgroundColor: ShellTheme.colors.appBackground } 
           }}
         >
-          {NAV_ITEMS.map(item => <Tabs.Screen key={item.name} name={item.name} />)}
+          {NAV_ITEMS.filter(item => item.name !== 'setup').map(item => <Tabs.Screen key={item.name} name={item.name} />)}
           <Tabs.Screen name="studio" options={{ href: null }} />
           <Tabs.Screen name="calendar" options={{ href: null }} />
           <Tabs.Screen name="ai-management" options={{ href: null }} />

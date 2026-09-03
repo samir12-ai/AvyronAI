@@ -1,4 +1,4 @@
-CREATE TABLE "business_understanding_snapshots" (
+CREATE TABLE IF NOT EXISTS "business_understanding_snapshots" (
 	"id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"account_id" varchar NOT NULL,
 	"campaign_id" varchar NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE "business_understanding_snapshots" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "campaign_offerings" (
+CREATE TABLE IF NOT EXISTS "campaign_offerings" (
 	"id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"account_id" varchar NOT NULL,
 	"campaign_id" varchar NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE "campaign_offerings" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "offering_input_evidence" (
+CREATE TABLE IF NOT EXISTS "offering_input_evidence" (
 	"id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"account_id" varchar NOT NULL,
 	"campaign_id" varchar NOT NULL,
@@ -31,7 +31,7 @@ CREATE TABLE "offering_input_evidence" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "website_snapshots" (
+CREATE TABLE IF NOT EXISTS "website_snapshots" (
 	"id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"account_id" varchar NOT NULL,
 	"campaign_id" varchar NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE "website_snapshots" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX "business_understanding_snapshots_tenant_idx" ON "business_understanding_snapshots" USING btree ("account_id","campaign_id");--> statement-breakpoint
-CREATE INDEX "campaign_offerings_tenant_idx" ON "campaign_offerings" USING btree ("account_id","campaign_id");--> statement-breakpoint
-CREATE INDEX "offering_input_evidence_tenant_idx" ON "offering_input_evidence" USING btree ("account_id","campaign_id");--> statement-breakpoint
-CREATE INDEX "website_snapshots_tenant_idx" ON "website_snapshots" USING btree ("account_id","campaign_id");
+CREATE INDEX IF NOT EXISTS "business_understanding_snapshots_tenant_idx" ON "business_understanding_snapshots" USING btree ("account_id","campaign_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "campaign_offerings_tenant_idx" ON "campaign_offerings" USING btree ("account_id","campaign_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "offering_input_evidence_tenant_idx" ON "offering_input_evidence" USING btree ("account_id","campaign_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "website_snapshots_tenant_idx" ON "website_snapshots" USING btree ("account_id","campaign_id");

@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 
 async function main() {
   const accountId = "a2d87878-a1e9-41ea-a8a5-90beff569673";
-  const campaignId = "campaign_1786718877499_3jk4zv";
+  const campaignId = "campaign_1773576062201_6t0oxi";
   const secret = process.env.JWT_SECRET || process.env.SESSION_SECRET || "avyron-secret";
   
   const token = jwt.sign(
@@ -12,7 +12,7 @@ async function main() {
     { expiresIn: "14d", audience: "avyron-ai", issuer: "avyron-auth" }
   );
 
-  const res = await fetch(`http://127.0.0.1:5000/api/plans/active/${campaignId}?accountId=${accountId}`, {
+  const res = await fetch(`http://127.0.0.1:8808/api/plans/active/${campaignId}?accountId=${accountId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
@@ -20,6 +20,10 @@ async function main() {
   });
 
   const data = await res.json();
+  console.log("Response status:", res.status);
+  console.log("Run ID:", data.runId);
+  console.log("Plan ID:", data.planId || data.plan?.id);
+  console.log("Is Latest:", data.isLatest);
   console.log("data.plan keys:", Object.keys(data.plan || {}));
   const sections = data.plan?.sections;
   console.log("sections keys:", Object.keys(sections || {}));

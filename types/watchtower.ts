@@ -147,7 +147,13 @@ export interface WatchtowerEventDetailResponse {
   observation: {
     whatChanged: string | null;
     evidenceNotes: string[];
+    whyItMatters?: string | null;
+    diff?: {
+      prev?: unknown;
+      curr?: unknown;
+    } | null;
   };
+  strategicBrief?: WatchtowerStrategicBriefData | null;
   competitors: {
     competitorId: string;
     competitorName: string | null;
@@ -163,4 +169,45 @@ export interface WatchtowerEventDetailResponse {
     baselineSnapshotId?: string | null;
     comparisonSnapshotId?: string | null;
   };
+}
+
+export interface StrategicBriefClaim {
+  claimId: string;
+  claimText: string;
+  claimType: string;
+  factuality: string;
+  criticality: string;
+  evidenceRefs?: string[];
+}
+
+export interface StrategicBriefContent {
+  executiveSummary?: string;
+  marketSignificance?: string;
+  directionOfMovement?: string;
+  impactOnOurStrategy?: string;
+  strategicImportance?: string;
+  affectedStrategyAreas?: string[];
+  strategicInterpretation?: string;
+  likelyStrategicObjective?: string;
+  recommendation?: string;
+  assumptions?: string[];
+  missingEvidence?: string[];
+  claims?: StrategicBriefClaim[];
+  evidenceRefs?: string[];
+  modelProposedConfidence?: number;
+}
+
+export interface WatchtowerStrategicBriefData {
+  id?: string;
+  eventId: string;
+  status: 'ready' | 'generating' | 'queued' | 'awaiting_analysis' | 'insufficient_evidence' | 'failed';
+  brief?: StrategicBriefContent | null;
+  evidenceRegistry?: Record<string, unknown> | null;
+  contextLineage?: Record<string, unknown> | null;
+  sourceVersions?: Record<string, unknown> | null;
+  finalValidatedConfidence?: number | null;
+  modelProposedConfidence?: number | null;
+  confidenceAdjustmentReasons?: string[] | null;
+  completedAt?: string | null;
+  isLatest?: boolean;
 }

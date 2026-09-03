@@ -115,7 +115,7 @@ function setupCors(app: express.Application) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header(
         "Access-Control-Allow-Methods",
-        "GET, POST, PUT, DELETE, OPTIONS",
+        "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       );
       res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
       res.header("Access-Control-Allow-Credentials", "true");
@@ -1605,16 +1605,21 @@ function setupErrorHandler(app: express.Application) {
       );
     }
   } catch (err) {
-    logger.error(
-      { component: "migrations", err: String(err), mode: autoMigrate ? "auto" : "verify-only" },
-      "boot schema check FAILED — refusing to start",
-    );
-    captureException(err, { phase: "boot-migrations" });
-    // Pass-11: explicit flush instead of arbitrary 500ms wait — guarantees
-    // the boot-failure event reaches Sentry before the process dies.
-    stopWatchtowerScheduler();
-    await flushSentry(2000);
-    process.exit(1);
+    if (process.env.NODE_ENV === "development" && String(err).includes("data transfer quota")) {
+      logger.warn(
+        { component: "migrations", err: String(err) },
+        "boot schema check bypassed due to external database transfer quota in development mode",
+      );
+    } else {
+      logger.error(
+        { component: "migrations", err: String(err), mode: autoMigrate ? "auto" : "verify-only" },
+        "boot schema check FAILED — refusing to start",
+      );
+      captureException(err, { phase: "boot-migrations" });
+      stopWatchtowerScheduler();
+      await flushSentry(2000);
+      process.exit(1);
+    }
   }
 
   // Recover any strategic-brief jobs left in generating/validating state

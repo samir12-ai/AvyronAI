@@ -6,7 +6,8 @@ export type AudiencePainClass =
   | "OBJECTION"
   | "POST_PURCHASE_FRICTION"
   | "SUPPORTING"
-  | "UNKNOWN";
+  | "UNKNOWN"
+  | "NOT_EVALUATED";
 
 export type PainUse =
   | "positioning"
@@ -88,7 +89,7 @@ export interface AuthoritativeAudiencePain {
   segmentName?: string;
   /** Strategic role designation (e.g. CORE_BUYER, CORE_USER, OBJECTION) */
   strategicRole?: string;
-  /** Which classifier produced `classification` (deterministic_v1 | llm_v1+judge_v1). */
+  /** Which classifier produced `classification` (initial_neutral_registry | strategic_pain_pipeline_v3). */
   classifierVersion: string;
   /** Human-auditable reason for the classification decision. */
   classificationReason: string;
@@ -127,14 +128,15 @@ const USES_BY_CLASS: Record<AudiencePainClass, PainUse[]> = {
   POST_PURCHASE_FRICTION: ["retention"],
   SUPPORTING: ["awareness", "funnel", "persuasion", "channel"],
   UNKNOWN: [],
+  NOT_EVALUATED: [],
 };
 
 export function allowedUsesForClass(classification: AudiencePainClass): PainUse[] {
-  return [...USES_BY_CLASS[classification]];
+  return [...(USES_BY_CLASS[classification] || [])];
 }
 
 export function prohibitedUsesForClass(classification: AudiencePainClass): PainUse[] {
-  const allowed = USES_BY_CLASS[classification];
+  const allowed = USES_BY_CLASS[classification] || [];
   return (Object.keys(USES_BY_CLASS) as AudiencePainClass[])
     .flatMap((kind) => USES_BY_CLASS[kind])
     .filter((use, position, all) => all.indexOf(use) === position && !allowed.includes(use));
@@ -155,13 +157,27 @@ function stableId(snapshotId: string, text: string): string {
   return `pain_${crypto.createHash("sha256").update(`${snapshotId}:${normalized}`).digest("hex").slice(0, 16)}`;
 }
 
+/**
+ * @deprecated Legacy deterministic heuristic. FORBIDDEN from production strategic pain authority.
+ * Strategic pain authority is established exclusively by `judgeStrategicPainDecision` via `refineAudiencePainRegistry`.
+ */
 export function classifyAudiencePainDetailed(text: string): { classification: AudiencePainClass; reason: string } {
-  // Deterministic keyword hijacking has been removed.
-  // The LLM + Semantic Judge are the sole authority on semantic function.
-  // We return UNKNOWN. If the LLM fails to classify, the pain remains UNKNOWN.
-  return { classification: "UNKNOWN", reason: "no deterministic rules allowed; requires llm authority" };
+  const norm = text.toLowerCase();
+  if (/\b(refund|delivery|shipping|account access|return|chargeback|after purchase|after delivery|broken|damaged)\b/i.test(norm)) {
+    return { classification: "POST_PURCHASE_FRICTION", reason: "post-purchase fulfillment/refund friction pattern" };
+  }
+  if (/\b(price|pricing|cost|expensive|budget|proof concerns|delay approval|objection|trust|risk)\b/i.test(norm)) {
+    return { classification: "OBJECTION", reason: "price or proof objection pattern" };
+  }
+  if (/\b(struggle|problem|difficult|cannot|hard|frustrated|fail|slow|lack|need|seek|report|opacity|see-through)\b/i.test(norm)) {
+    return { classification: "CORE_PURCHASE", reason: "core problem/struggle pattern" };
+  }
+  return { classification: "UNKNOWN", reason: "legacy unclassified pattern fallback" };
 }
 
+/**
+ * @deprecated Legacy deterministic heuristic. FORBIDDEN from production strategic pain authority.
+ */
 export function classifyAudiencePain(text: string): AudiencePainClass {
   return classifyAudiencePainDetailed(text).classification;
 }
@@ -184,8 +200,8 @@ export function extractCanonicalSegmentPains(segments: any[]): any[] {
   const extracted: any[] = [];
   segments.forEach((seg: any, sIdx: number) => {
     const segName = seg.name ? String(seg.name).trim() : `Segment ${sIdx + 1}`;
-    const cleanSegName = segName.toLowerCase();
-    const segId = seg.id || `seg_${crypto.createHash("sha256").update(cleanSegName).digest("hex").slice(0, 16)}`;
+    // Audience owns segment identity: consume canonical seg.id directly
+    const segId = seg.id || `seg_legacy_${sIdx + 1}`;
     const role = seg.role || seg.roleClaim?.value || seg.demographics?.role || "PRACTITIONER";
     const roleClaimId = seg.roleClaim?.claimId || seg.roleClaimId;
     const segmentDefinition = typeof seg.segmentDefinition === "object" ? seg.segmentDefinition?.claim : seg.segmentDefinition;
@@ -228,33 +244,30 @@ export function buildAudiencePainRegistry(
   const segmentIdByName = new Map<string, string>();
   const segmentNameById = new Map<string, string>();
   if (Array.isArray(segments)) {
-    segments.forEach((seg: any) => {
-      if (seg?.name) {
-        const cleanName = seg.name.trim();
-        const derivedId = seg.id || `seg_${crypto.createHash("sha256").update(cleanName).digest("hex").slice(0, 16)}`;
-        segmentIdByName.set(cleanName.toLowerCase(), derivedId);
-        segmentNameById.set(derivedId, cleanName);
+    segments.forEach((seg: any, sIdx: number) => {
+      if (seg) {
+        const cleanName = seg.name ? String(seg.name).trim() : `Segment ${sIdx + 1}`;
+        const canonicalId = seg.id || `seg_legacy_${sIdx + 1}`;
+        segmentIdByName.set(cleanName.toLowerCase(), canonicalId);
+        segmentNameById.set(canonicalId, cleanName);
         segmentNameById.set(cleanName, cleanName);
-        seg.id = derivedId;
+        if (!seg.id) seg.id = canonicalId;
       }
     });
   }
 
   const result = pains.flatMap((raw, index) => {
     const canonical = painText(raw);
-    const suppliedClass = raw?.classification && Object.hasOwn(USES_BY_CLASS, raw.classification)
+    const suppliedClass = raw?.classification && Object.hasOwn(USES_BY_CLASS, raw.classification) && raw.classification !== "NOT_EVALUATED"
       ? raw.classification as AudiencePainClass
       : null;
-    const detailed = classifyAudiencePainDetailed(canonical);
-    const classification = suppliedClass ?? detailed.classification;
+    const classification: AudiencePainClass = suppliedClass ?? "NOT_EVALUATED";
     const classificationReason = typeof raw?.classificationReason === "string" && raw.classificationReason.length > 0
       ? raw.classificationReason
-      : suppliedClass
-        ? "classification supplied by upstream registry record"
-        : detailed.reason;
+      : (suppliedClass ? "classification supplied by upstream registry record" : "initial unassessed pain claim");
     const classifierVersion = typeof raw?.classifierVersion === "string" && raw.classifierVersion.length > 0
       ? raw.classifierVersion
-      : DETERMINISTIC_CLASSIFIER_VERSION;
+      : "initial_neutral_registry";
     const evidenceUids = values(raw?.evidenceUids ?? raw?.evidenceIds ?? raw?.evidence ?? raw?.groundingRefs);
     const sourceSignalIds = values(raw?.sourceSignalIds ?? raw?.signalIds ?? raw?.sourceSignals ?? raw?.parentSignalId);
     const sourceTypes = values(raw?.sourceTypes ?? raw?.sourceType);
@@ -317,14 +330,10 @@ export function buildAudiencePainRegistry(
       ? Math.max(0, Math.min(1, raw.evidenceStrength))
       : undefined;
 
-    const allowedUses = Array.isArray(raw?.allowedUses)
-      ? raw.allowedUses.filter((use: unknown): use is PainUse => typeof use === "string" && (USES_BY_CLASS[classification] as string[]).includes(use))
-      : USES_BY_CLASS[classification];
-
     const makeRecordForSegment = (targetSegmentId: string | null, suffixId?: string) => {
       const segList = targetSegmentId ? [targetSegmentId] : segmentIds;
       const defaultFit: "ELIGIBLE" | "INELIGIBLE" | "UNKNOWN" = 
-        raw?.productFit === "ELIGIBLE" || raw?.productFit === "INELIGIBLE"
+        raw?.productFit === "ELIGIBLE" || raw?.productFit === "INELIGIBLE" || raw?.productFit === "UNKNOWN"
           ? raw.productFit
           : "UNKNOWN";
 
@@ -337,6 +346,17 @@ export function buildAudiencePainRegistry(
       const pid = suffixId 
         ? `${typeof raw?.painId === "string" ? raw.painId : (typeof raw?.claimId === "string" ? raw.claimId : stableId(lineage.audienceSnapshotId, canonical))}_${suffixId}`
         : (typeof raw?.painId === "string" ? raw.painId : (typeof raw?.claimId === "string" ? raw.claimId : stableId(lineage.audienceSnapshotId, canonical)));
+
+      // FAIL CLOSED: UNKNOWN / NOT_EVALUATED never auto-promotes to eligible=true
+      const eligible: boolean = 
+        raw?.eligible !== undefined 
+          ? Boolean(raw.eligible) 
+          : (productFit === "ELIGIBLE" && classification !== "UNKNOWN" && classification !== "NOT_EVALUATED" && canonical.length > 0);
+
+      // NO EARLY PERMISSIONS: allowedUses is empty until judge confirms classification and eligibility
+      const allowedUses: PainUse[] = Array.isArray(raw?.allowedUses)
+        ? raw.allowedUses.filter((use: unknown): use is PainUse => typeof use === "string" && (USES_BY_CLASS[classification] as string[]).includes(use))
+        : (eligible && classification !== "NOT_EVALUATED" && classification !== "UNKNOWN" ? USES_BY_CLASS[classification] : []);
 
       return {
         painId: pid,
@@ -356,7 +376,7 @@ export function buildAudiencePainRegistry(
         strategicBridge: raw?.strategicBridge,
         boundary: raw?.boundary,
         productTruthFactIds: raw?.productTruthFactIds,
-        eligible: raw?.eligible === false ? false : productFit === "ELIGIBLE" && canonical.length > 0,
+        eligible,
         allowedUses,
         prohibitedUses: (Object.keys(USES_BY_CLASS) as AudiencePainClass[])
           .flatMap((kind) => USES_BY_CLASS[kind])
@@ -372,6 +392,7 @@ export function buildAudiencePainRegistry(
         occurrenceCount,
         evidenceSummaries: Array.isArray(raw?.evidenceSummaries) ? raw.evidenceSummaries : undefined,
         rootCauseIds,
+        segmentId: segList[0] || (targetSegmentId ?? undefined),
         segmentIds: segList,
         strategicRole,
         classifierVersion,
@@ -393,7 +414,7 @@ export function buildAudiencePainRegistry(
 
 export function selectPainForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain {
   const registry = (pains || []) as AuthoritativeAudiencePain[];
-  const pain = registry.find((pain) => Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use) && pain.classification !== "UNKNOWN" && (pain.classification as any) !== "EXCLUDE");
+  const pain = registry.find((pain) => Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use) && pain.classification !== "UNKNOWN" && pain.classification !== "NOT_EVALUATED" && (pain.classification as any) !== "EXCLUDE");
   if (!pain) {
     throw new Error(`NO_ELIGIBLE_PAIN: No authoritative pain found for use '${use}'`);
   }
@@ -402,7 +423,7 @@ export function selectPainForUse(pains: any[], use: PainUse): AuthoritativeAudie
 
 export function selectPainsForUse(pains: any[], use: PainUse): AuthoritativeAudiencePain[] {
   const registry = (pains || []) as AuthoritativeAudiencePain[];
-  return registry.filter((pain) => Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use) && pain.classification !== "UNKNOWN" && (pain.classification as any) !== "EXCLUDE");
+  return registry.filter((pain) => Array.isArray(pain.allowedUses) && pain.allowedUses.includes(use) && pain.classification !== "UNKNOWN" && pain.classification !== "NOT_EVALUATED" && (pain.classification as any) !== "EXCLUDE");
 }
 
 /**
@@ -605,7 +626,7 @@ export function attachTargetCoverageToPainRegistry(
     return registry.map((p) => ({ ...p, targetCovered: false }));
   }
   if (targetCoverage.status === "NOT_EVALUATED") {
-    return registry.map((p) => ({ ...p, targetCovered: undefined }));
+    return registry.map((p) => ({ ...p, targetCovered: false }));
   }
 
   const coverageMap = new Map<string, {cov: boolean | undefined, dec: "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED"}>();
@@ -624,14 +645,13 @@ export function attachTargetCoverageToPainRegistry(
   const segmentIdToName = new Map<string, string>();
   if (Array.isArray(audienceSegments)) {
     audienceSegments.forEach((seg) => {
-      if (seg?.name) {
-        const cleanName = String(seg.name).trim();
-        const lowerName = cleanName.toLowerCase();
-        const derivedId = `seg_${crypto.createHash("sha256").update(lowerName).digest("hex").slice(0, 16)}`;
-        segmentIdToName.set(derivedId, cleanName);
-        segmentIdToName.set(lowerName, cleanName);
-        if (seg.id) {
+      if (seg) {
+        const cleanName = seg.name ? String(seg.name).trim() : "";
+        if (seg.id && cleanName) {
           segmentIdToName.set(seg.id, cleanName);
+        }
+        if (cleanName) {
+          segmentIdToName.set(cleanName.toLowerCase(), cleanName);
         }
       }
     });

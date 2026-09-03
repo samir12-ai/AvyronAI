@@ -281,8 +281,50 @@ export function CampaignProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     async function init() {
       setIsLoading(true);
-      await Promise.all([refreshCampaigns(), refreshSelection()]);
-      if (!cancelled) setIsLoading(false);
+      try {
+        const [cRes, sRes] = await Promise.all([
+          authFetch(getApiUrl('/api/campaigns')).then(r => r.ok ? r.json() : { campaigns: [] }).catch(() => ({ campaigns: [] })),
+          authFetch(getApiUrl('/api/campaigns/selected')).then(r => r.ok ? r.json() : { selected: false }).catch(() => ({ selected: false })),
+        ]);
+        if (currentUserIdRef.current !== userId) return;
+        const fetchedCampaigns = cRes.campaigns || [];
+        setCampaigns(fetchedCampaigns);
+        if (sRes.selected && sRes.selection) {
+          setSelectedCampaign(sRes.selection);
+          setWarning(sRes.warning || null);
+        } else if (fetchedCampaigns.length > 0) {
+          const first = fetchedCampaigns[0];
+          try {
+            const selRes = await authFetch(getApiUrl('/api/campaigns/select'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                campaignId: first.id,
+                campaignName: first.name,
+                platform: first.platform,
+                goalType: first.goalType,
+                campaignLocation: first.location,
+              }),
+            });
+            if (selRes.ok) {
+              const selData = await selRes.json();
+              if (currentUserIdRef.current === userId) {
+                setSelectedCampaign(selData.selection);
+                setWarning(null);
+              }
+            }
+          } catch (e) {
+            console.warn('[CampaignContext] auto-select first campaign error:', e);
+          }
+        } else {
+          setSelectedCampaign(null);
+          setWarning(null);
+        }
+      } catch (err) {
+        console.error('[CampaignContext] init error:', err);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
     }
     init();
     return () => { cancelled = true; };

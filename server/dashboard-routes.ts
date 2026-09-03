@@ -112,7 +112,32 @@ interface AIActionItem {
   priorityJustification: string;
 }
 
+import { assembleDashboardOverview } from "./dashboard/overview-engine";
+
 export function registerDashboardRoutes(app: Express) {
+  app.get("/api/dashboard/overview", requireCampaign, async (req: Request, res: Response) => {
+    try {
+      const { accountId, campaignId } = (req as any).campaignContext;
+      const user = (req as any).user;
+      const overview = await assembleDashboardOverview(
+        accountId,
+        campaignId,
+        user?.id,
+        user?.role
+      );
+      return res.json({
+        success: true,
+        data: overview,
+      });
+    } catch (err: any) {
+      console.error("[Dashboard] overview error:", err);
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  });
+
   app.get("/api/dashboard/ai-actions", requireCampaign, async (req: Request, res: Response) => {
     try {
       const { accountId, campaignId } = (req as any).campaignContext;

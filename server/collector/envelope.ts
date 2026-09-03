@@ -21,7 +21,10 @@ export type CollectorEntityType =
   | "competitor_website"
   | "competitor_instagram"
   | "competitor_tiktok"
-  | "competitor_reviews";
+  | "competitor_reviews"
+  | "competitor_google_search"
+  | "competitor_linkedin"
+  | "competitor_x";
 
 export interface CollectorProvenance {
   /** True iff the envelope was served from a previously persisted row. */

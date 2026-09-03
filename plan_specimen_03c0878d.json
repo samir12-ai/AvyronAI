@@ -1,0 +1,2242 @@
+{
+  "strategicSummary": {
+    "strategy": "The strategy positions Avyron AI’s Live Market Mirror as a definitive solution addressing two distinct but critical failure points in B2B SaaS GTM: the fragmentation and manual complexity of operational automation workflows, and the data quality and integration gaps undermining sales and marketing effectiveness. By explicitly targeting the shift from ineffective, fragmented manual prospecting and disconnected data silos toward autonomous, validated, real-time integrated systems leveraging semantic AI judgment, this strategy captures a unique competitive posture. It contrasts with entrenched static reporting and manual campaign setups dominant in the market by emphasizing continuous, live evidence streaming combined with AI-driven semantic validation. The core commercial choice is to deliver scalable autonomous workflows reducing reliance on deep domain expertise while enhancing decision quality through reliable data integration—all prioritized under a proof-led persuasion architecture routed through YouTube Organic and Email Marketing channels.",
+    "targetAudience": "Lane 1: Automation to Reduce Operational Complexity in B2B SaaS - Audience comprises operational leaders and SaaS users frustrated by manual busywork and lacking domain expertise needed to scale operations. The pain points include the high effort to maintain automation and fear of losing control in automated processes. The strategic decision is to highlight ease of automation setup, scalability benefits, and minimized manual interventions directly addressing these concerns, positioning Avyron AI as enabling autonomous systems that self-adapt based on trust signals. Lane 2: Data Quality and System Integration for Enhanced GTM Execution - Audience includes GTM leaders and SaaS users battling with fragmented, inaccurate data and complex integrations that impede targeting and sales/marketing alignment. The pain centers on poor data hygiene and integration difficulties. The plan commits to emphasizing proven reliability of data streams, seamless CRM and marketing system integration, and the resulting uplift in targeting precision and sales effectiveness to overcome skepticism and integration fears.",
+    "growthObjective": "Generate 30 qualified leads in 90 days sourced from SMB founders, marketing leaders, and marketing agencies keen on evidence-backed marketing strategies and competitive intelligence. Based on funnel math, reaching approximately 8,000 targeted impressions with a 2.5% CTR yields 200 clicks, converting through conversations and subsequent stages to meet the qualified lead target. The selected content rhythm and channel mix supports staged funnel progression: awareness through proof led entry awareness route on YouTube Organic, persuasion via proof led persuasion architecture [locked axis: From ineffective, fragmented manual pros], and nurturing through Email Marketing.",
+    "rationale": "The chosen path leverages the unique differentiation of Avyron AI’s continuous real-time market evidence streaming and semantic AI validation, which competitors lack, to credibly overcome entrenched objections about automation complexity and data accuracy. By maintaining Strategic Lanes distinctly, the plan avoids confusing messaging or undifferentiated pain bundling, preserving relevance across operational automation and GTM data integration use cases. The explicit tradeoff is to avoid generic or unvalidated automation promises and integration claims, instead leaning on proof-led content and real evidence-based messaging. This means prioritizing demonstrated ease of use, verified data reliability, and tangible scalability outcomes over aspirational branding or unproven technical integrations. The chosen channels and content frequency reflect efficient budget utilization and prospect behavior on YouTube and email, focusing on high-impact proof points rather than broad, unfocused volume."
+  },
+  "monthlyObjective": {
+    "objective": "Generate qualified leads for the B2B SaaS automation and GTM data integration solutions",
+    "type": "leads",
+    "targetMetric": "Qualified Leads",
+    "targetValue": "30"
+  },
+  "kpiStructure": {
+    "primaryKPI": {
+      "name": "Qualified Leads",
+      "target": "30",
+      "cadence": "weekly"
+    },
+    "secondaryKPI": {
+      "name": "Clicks (CTR 2.5%)",
+      "target": "200",
+      "cadence": "weekly"
+    },
+    "performanceExpectations": "With the locked content rhythm and proof-led persuasion via YouTube Organic and Email Marketing, expected weekly qualified leads are ~2.5 (30 over 12 weeks). CTR and conversion rates align with funnel math derived from competitor benchmarks."
+  },
+  "contentDistribution": {
+    "reelsPerWeek": 1,
+    "postsPerWeek": 1,
+    "storiesPerDay": 0,
+    "carouselsPerWeek": 1,
+    "videosPerWeek": 0,
+    "rationale": "[HOLD-RESTRICTED] Reels (4/wk) are prioritized to deliver bite-sized proof-driven stories, each targeting either operational automation ease or data integration reliability distinctively per lane, driving high engagement and awareness. Carousels (2/wk) serve as structured explainer vehicles addressing complex pain points such as automation setup simplicity and data hygiene methodology, directly supporting proof led persuasion. Daily stories maintain ongoing presence, reinforcing day-to-day credibility without diluting focus. Weekly posts provide deeper insight and calls to action aligned with funnel conversion touchpoints. This rhythm balances volume and depth to advance prospects systematically along the funnel while respecting the monthly budget constraint. — Content volume reduced by 50% due to budget hold decision",
+    "contentPillars": [
+      {
+        "pillar": "Proof-driven Automation Simplification",
+        "percentage": "50%",
+        "examples": [
+          "Reels highlighting step-by-step setting automation in Avyron AI's system addressing complexity objections",
+          "Carousels demonstrating before/after operational time savings"
+        ]
+      },
+      {
+        "pillar": "Reliable Data Quality & Integration Outcomes",
+        "percentage": "50%",
+        "examples": [
+          "Carousels illustrating CRM and marketing integration workflows with proof of improved targeting",
+          "Reels sharing case snippets of improved data hygiene and decision confidence"
+        ]
+      }
+    ]
+  },
+  "creativeTesting": {
+    "tests": [
+      {
+        "testName": "Automation Ease Proof vs Traditional Claims",
+        "variable": "Messaging focus contrasting proof-based ease storytelling vs generic automation benefit claims",
+        "duration": "2 weeks",
+        "rationale": "To validate impact of proof led messaging in reducing automation complexity objections and increasing engagement"
+      },
+      {
+        "testName": "Data Integration Reliability Proof vs Feature-led Messaging",
+        "variable": "Proof-led data quality storytelling vs feature-centric integration descriptions",
+        "duration": "2 weeks",
+        "rationale": "To determine which messaging improves trust and response given the skepticism around integration complexity"
+      }
+    ]
+  },
+  "budgetAllocation": {
+    "totalBudget": "1000$",
+    "breakdown": [
+      {
+        "category": "Content Creation",
+        "percentage": 50,
+        "purpose": "Produce reels, carousels, and posts optimized for the proof led messaging and lane-specific demands"
+      },
+      {
+        "category": "Channel Management & Optimization",
+        "percentage": 30,
+        "purpose": "Manage YouTube Organic presence and Email Marketing sequences, including lead nurturing workflows aligned with persuasion architecture"
+      },
+      {
+        "category": "Performance Analytics & Testing",
+        "percentage": 20,
+        "purpose": "Analyze funnel performance metrics and creative test outcomes to inform rapid tactical refinements"
+      }
+    ]
+  },
+  "kpiMonitoring": {
+    "metrics": [
+      {
+        "kpi": "Qualified Leads",
+        "target": "30",
+        "frequency": "weekly",
+        "alertThreshold": "If weekly qualified leads fall below 1.5 for two consecutive weeks"
+      },
+      {
+        "kpi": "CTR",
+        "target": "2.5%",
+        "frequency": "weekly",
+        "alertThreshold": "CTR drops below 2% for two consecutive weeks"
+      },
+      {
+        "kpi": "Email Open Rate",
+        "target": "20%",
+        "frequency": "weekly",
+        "alertThreshold": "Open rate falls below 15% across campaigns"
+      }
+    ],
+    "reportingCadence": "Weekly review, monthly deep-dive"
+  },
+  "competitiveWatch": {
+    "targets": [
+      {
+        "competitor": "Direct AI-driven SaaS automation providers",
+        "watchMetrics": [
+          "product messaging changes",
+          "lead acquisition tactics"
+        ],
+        "checkFrequency": "weekly"
+      },
+      {
+        "competitor": "Data integration tool vendors",
+        "watchMetrics": [
+          "integration claim credibility",
+          "proof content deployment"
+        ],
+        "checkFrequency": "weekly"
+      }
+    ],
+    "strategyFeed": [
+      {
+        "insight": "Emergence of competitors highlighting zero-setup automation claims",
+        "actionableResponse": "Reinforce proof-led messaging focusing on real-world ease and control, explicitly addressing setup fears",
+        "priority": "high"
+      },
+      {
+        "insight": "Increase in industry skepticism about data accuracy claims",
+        "actionableResponse": "Accelerate deployment of case-study and evidence-based content demonstrating validated data improvement",
+        "priority": "medium"
+      }
+    ]
+  },
+  "riskTriggers": {
+    "triggers": [
+      {
+        "trigger": "Low engagement on proof content despite frequency",
+        "condition": "Engagement metrics (CTR, watch time) fall >15% below baseline for 2 weeks",
+        "action": "Reassess messaging tone and creative formats, escalate creative testing focus on alternative proof narratives",
+        "severity": "high",
+        "optimizationPlaybook": "1) Pause underperforming assets, 2) Implement rapid A/B testing on new hooks, 3) Reallocate budget towards higher-engagement formats, 4) Conduct quick qualitative feedback sessions"
+      },
+      {
+        "trigger": "Failure to hit qualified lead target at mid-point (45 days)",
+        "condition": "Less than 12 qualified leads generated at 45-day mark",
+        "action": "Intensify email nurture cadence and introduce alternative secondary channels; validate funnel drop-off points via analytics",
+        "severity": "high",
+        "optimizationPlaybook": "1) Deep-dive funnel analysis, 2) Adjust CTA and sequencing, 3) Optimize targeting in YouTube Organic, 4) Consider small ad budget increment if organic ceiling detected"
+      },
+      {
+        "trigger": "Channel conflict detected between primary and secondary platforms",
+        "condition": "Conflicting messages or audience crossover causes audience confusion as shown in sentiment analysis",
+        "action": "Audit messaging for lane purity, reinforce lane-specific messaging boundaries in content calendar",
+        "severity": "medium",
+        "optimizationPlaybook": "1) Document instances of messaging collision, 2) Retrain content creators on lane distinction, 3) Schedule lane-specific content segregation in platform plans"
+      },
+      {
+        "trigger": "CROSS_ENGINE_STRATEGY_ALIGNMENT",
+        "condition": "Semantic Judge Verdict: The positioning emphasizes a trust-adaptive autonomous workflow powered by Avyron AI’s 'Migrated' feature, which integrates real-time trust signals. However, the offer states 'Eliminate Inefficiency and lost revenue opportunities caused by manual prospecting processes and managing multiple disconnected tools,' which does not clearly connect to the unique mechanism or the specific benefits of the 'Migrated' feature. This creates a disconnect between the promise of the positioning and the core outcome of the offer, leading to confusion about the actual value proposition.",
+        "action": "Align positioning and offer on primary lane execution during weekly review",
+        "severity": "low",
+        "optimizationPlaybook": "Review positioning vs offer alignment against latest lane performance data"
+      }
+    ],
+    "escalationPath": [
+      "Monitor weekly KPIs and engagement trends",
+      "Escalate to Senior Director review within 48 hours upon trigger activation"
+    ],
+    "earlyWarningSystem": [
+      {
+        "signal": "Drop in Email Open Rates below 15%",
+        "threshold": "Sustained over 2 campaigns",
+        "response": "Pause email sends, audit list health, revise messaging subject lines"
+      },
+      {
+        "signal": "YouTube Viewer retention fall below 40% average watch time",
+        "threshold": "Over 2 consecutive reel videos",
+        "response": "Refresh video hook creatives, test new reel formats"
+      }
+    ]
+  },
+  "executionBlueprintDnaLink": {
+    "contentPillarToDna": [
+      {
+        "pillar": "Proof-driven Automation Simplification",
+        "dnaElements": [
+          "Real-time market evidence streaming",
+          "Semantic AI judge validation",
+          "Proof-led persuasion architecture"
+        ],
+        "hookApproach": "Demonstrate tangible stepwise automation gains with real user-data snippets",
+        "ctaStyle": "Invitation to trial or demo showcasing effortless setup"
+      },
+      {
+        "pillar": "Reliable Data Quality & Integration Outcomes",
+        "dnaElements": [
+          "Continuous real-time data integration",
+          "AI semantic filtering",
+          "Proof led entry awareness route"
+        ],
+        "hookApproach": "Highlight discrepancy reduction and targeting lift validated in live scenarios",
+        "ctaStyle": "Download technical integration guide or case study lead capture"
+      }
+    ],
+    "weeklyDnaApplication": "Each week’s content pieces are explicitly mapped to either the Automation or Data Quality lane, employing hooks derived from real-time evidence and semantic validation. The content calendar enforces lane-specific messages without overlap, sequencing proof-led awareness (YouTube reels) followed by structured persuasion (carousels, emails), culminating in conversion-focused posts. All content strictly avoid unvalidated claims and maintain clear, evidence-backed narrative continuity across channels."
+  },
+  "brandSpine": null,
+  "approvedLanes": [
+    {
+      "laneId": "lane_a92dbae22915",
+      "id": "lane_a92dbae22915",
+      "title": "Automation to Reduce Operational Complexity in B2B SaaS",
+      "description": "Focuses on enabling autonomous systems to reduce manual busywork and scale operations without deep domain expertise.",
+      "primaryPainId": "seg_2_pain_1",
+      "corePainIds": [
+        "seg_2_pain_1",
+        "seg_2_pain_2"
+      ],
+      "supportingPainIds": [],
+      "painIds": [
+        "seg_2_pain_1",
+        "seg_2_pain_2"
+      ],
+      "painDecisionIds": [
+        "spd_orch_1787644517560_adpq9i_seg_2_pain_1",
+        "spd_orch_1787644517560_adpq9i_seg_2_pain_2"
+      ],
+      "productTruthFactIds": [
+        "a48db4a5-db59-4818-9ae4-02365b25155e",
+        "17ed389c-3a1a-4f8a-9451-91c61a193e88",
+        "e2bcf5fb-3e81-4786-bd69-0f0ff2eb50aa",
+        "9601dc9b-0a23-4f1f-911a-825f45a7bde2",
+        "66aa38a5-0ac0-4bb3-b284-7f3841d88d63",
+        "0d55ff88-0cc9-4bd8-9057-b9f55facb871",
+        "1468e73d-bac4-44fd-a9d6-f3d30dfe3829",
+        "b165eafa-8f8a-4881-b393-e369381be3cf",
+        "2baf74a5-d2b2-4a13-917b-c2ff30f05a36",
+        "4d3105c4-4635-4cfb-b0b6-32856bda2125",
+        "e92a3171-1b2c-461e-bc97-112125a4ff51",
+        "6e2a5f04-d405-47bc-85cf-d0a01a166b5b",
+        "fe2a218e-9fe9-41ef-8b9a-e31b1891c90c",
+        "be579882-ed4b-4677-aef6-8036d4a276be",
+        "9a204b93-4b13-4fba-8ada-c0d0d344a1c3"
+      ],
+      "jobId": "orch_1787644517560_adpq9i",
+      "campaignId": "campaign_1773576062201_6t0oxi",
+      "segmentIds": [
+        "seg_f25a4c42a3ac4af4"
+      ],
+      "segmentId": "seg_f25a4c42a3ac4af4",
+      "desires": [
+        "Automate repetitive tasks to save time",
+        "Build scalable systems that run independently",
+        "Reduce reliance on specialized domain knowledge"
+      ],
+      "objections": [
+        "Concerns about complexity of automation setup",
+        "Fear of losing control over operational processes"
+      ],
+      "valueContext": "These users seek AI-powered autonomous agents within business workflows to improve efficiency and enable scaling by reducing manual intervention.",
+      "proofNeeds": [
+        "Automation demos",
+        "Case studies showing operational efficiency gains"
+      ],
+      "messagingDirection": "Highlight ease of automation, scalability benefits, and reduction in manual busywork to appeal to operational leaders and SaaS users.",
+      "commercialRelevance": "Targets users motivated to invest in tools that reduce operational costs and enable business growth through automation."
+    },
+    {
+      "laneId": "lane_2cc4822946ef",
+      "id": "lane_2cc4822946ef",
+      "title": "Data Quality and System Integration for Enhanced GTM Execution",
+      "description": "Addresses challenges in maintaining clean data and integrated insights to improve targeting and sales/marketing decision-making.",
+      "primaryPainId": "seg_3_pain_1",
+      "corePainIds": [
+        "seg_3_pain_1"
+      ],
+      "supportingPainIds": [],
+      "painIds": [
+        "seg_3_pain_1"
+      ],
+      "painDecisionIds": [
+        "spd_orch_1787644517560_adpq9i_seg_3_pain_1"
+      ],
+      "productTruthFactIds": [
+        "a48db4a5-db59-4818-9ae4-02365b25155e",
+        "17ed389c-3a1a-4f8a-9451-91c61a193e88",
+        "e2bcf5fb-3e81-4786-bd69-0f0ff2eb50aa",
+        "9601dc9b-0a23-4f1f-911a-825f45a7bde2",
+        "66aa38a5-0ac0-4bb3-b284-7f3841d88d63",
+        "0d55ff88-0cc9-4bd8-9057-b9f55facb871",
+        "1468e73d-bac4-44fd-a9d6-f3d30dfe3829",
+        "b165eafa-8f8a-4881-b393-e369381be3cf",
+        "2baf74a5-d2b2-4a13-917b-c2ff30f05a36",
+        "4d3105c4-4635-4cfb-b0b6-32856bda2125",
+        "e92a3171-1b2c-461e-bc97-112125a4ff51",
+        "6e2a5f04-d405-47bc-85cf-d0a01a166b5b",
+        "fe2a218e-9fe9-41ef-8b9a-e31b1891c90c",
+        "be579882-ed4b-4677-aef6-8036d4a276be",
+        "9a204b93-4b13-4fba-8ada-c0d0d344a1c3"
+      ],
+      "jobId": "orch_1787644517560_adpq9i",
+      "campaignId": "campaign_1773576062201_6t0oxi",
+      "segmentIds": [
+        "seg_70720b85ed7548fe"
+      ],
+      "segmentId": "seg_70720b85ed7548fe",
+      "desires": [
+        "Improve data hygiene and accuracy",
+        "Integrate CRM and marketing systems seamlessly",
+        "Gain actionable insights for better targeting"
+      ],
+      "objections": [
+        "Concerns about integration complexity",
+        "Skepticism about data accuracy improvements"
+      ],
+      "valueContext": "These users prioritize data quality and system integration to enable more effective go-to-market strategies and better sales/marketing alignment.",
+      "proofNeeds": [
+        "Integration case studies",
+        "Data quality improvement metrics"
+      ],
+      "messagingDirection": "Emphasize reliability of data, ease of integration, and impact on targeting and sales effectiveness.",
+      "commercialRelevance": "Appeals to users seeking to optimize CRM and marketing investments to drive revenue growth through better data-driven decisions."
+    }
+  ],
+  "buyerConversionJourneys": [
+    {
+      "laneId": "lane_2cc4822946ef",
+      "laneLabel": "Data Quality and System Integration for Enhanced GTM Execution",
+      "primaryPainId": "seg_3_pain_1",
+      "segmentIds": [
+        "seg_70720b85ed7548fe"
+      ],
+      "sourceFunnelSnapshotId": "b84da915-aa96-4c5e-afaa-f50a1f228c69",
+      "sourcePersuasionSnapshotId": "19a6eab5-10ee-418a-9548-c2d402c32fb6",
+      "journeyName": "Avyron AI TrustSignal Transparency Webinar",
+      "journeyType": "Standard",
+      "whyThisJourney": "The webinar begins by directly addressing buyers’ fear of losing money due to opaque pricing and refund delays, using Avyron AI’s automatic unification of billing and refund data to demonstrate clear, transparent financial trust mechanisms. Next, it dismantles distrust in vendor honesty by showcasing live evidence streaming and semantic Judge verification that proves refund fairness and timely resolution, backed by third-party testimonials and real-time customer support case studies. The webinar then tackles confusion in the saturated market by contrasting Avyron AI’s dynamic, live market intelligence with competitors’ static reports, clarifying unique value and driving urgency to switch. Finally, it resolves fears about post-purchase support by detailing Avyron AI’s streamlined billing and refund communication channel with guaranteed rapid responses, building confidence in ongoing service reliability.",
+      "entryTrigger": {
+        "mechanismType": "audit",
+        "purpose": "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+        "awarenessEnforcement": {
+          "enforcedBy": "route:proof_led_entry + trigger:trust_breakdown",
+          "awarenessRoute": "proof_led_entry",
+          "triggerClass": "trust_breakdown",
+          "trustState": "high — proof and authority signals required before engagement",
+          "originalMechanism": "audit",
+          "finalMechanism": "audit",
+          "wasOverridden": false,
+          "allowedMechanisms": [
+            "audit",
+            "discovery",
+            "content_education"
+          ],
+          "blockedMechanisms": [
+            "challenge",
+            "diagnostic"
+          ],
+          "selectionReason": "Derived from trigger_class \"trust_breakdown\" preferred list → \"audit\" (enforced by route:proof_led_entry + trigger:trust_breakdown)"
+        }
+      },
+      "stages": [
+        {
+          "stageId": "education",
+          "stageName": "education",
+          "goal": "engagement",
+          "buyerState": "",
+          "coreMessage": "Build understanding of the solution approach",
+          "contentAction": "mechanism_demonstration",
+          "proof": [
+            {
+              "stage": "education",
+              "proofType": "process_proof",
+              "placement": "process_proof at education stage",
+              "purpose": "Demonstrate methodology",
+              "proofName": "{\"stage\":\"education\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at education stage\",\"purpose\":\"Demonstrate methodology\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "education",
+              "proofType": "framework_proof",
+              "placement": "framework_proof at education stage",
+              "purpose": "Show structured approach",
+              "proofName": "{\"stage\":\"education\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at education stage\",\"purpose\":\"Show structured approach\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "engagement",
+          "stageName": "engagement",
+          "goal": "commitment",
+          "buyerState": "",
+          "coreMessage": "Deliver value through live presentation",
+          "contentAction": "webinar_content",
+          "proof": [
+            {
+              "stage": "engagement",
+              "proofType": "process_proof",
+              "placement": "process_proof at engagement stage",
+              "purpose": "Demonstrate live workflow",
+              "proofName": "{\"stage\":\"engagement\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at engagement stage\",\"purpose\":\"Demonstrate live workflow\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "engagement",
+              "proofType": "framework_proof",
+              "placement": "framework_proof at engagement stage",
+              "purpose": "Show structured framework",
+              "proofName": "{\"stage\":\"engagement\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at engagement stage\",\"purpose\":\"Show structured framework\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "consideration",
+          "stageName": "consideration",
+          "goal": "intent",
+          "buyerState": "",
+          "coreMessage": "Present proof and build conviction",
+          "contentAction": "proof_content",
+          "proof": [
+            {
+              "stage": "consideration",
+              "proofType": "comparative_proof",
+              "placement": "comparative_proof at consideration stage",
+              "purpose": "Demonstrate competitive advantage",
+              "proofName": "{\"stage\":\"consideration\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at consideration stage\",\"purpose\":\"Demonstrate competitive advantage\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "decision",
+          "stageName": "decision",
+          "goal": "decision",
+          "buyerState": "",
+          "coreMessage": "Remove final objections and present offer",
+          "contentAction": "offer_presentation",
+          "proof": [
+            {
+              "stage": "decision",
+              "proofType": "comparative_proof",
+              "placement": "comparative_proof at decision stage",
+              "purpose": "Show competitive advantage",
+              "proofName": "{\"stage\":\"decision\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at decision stage\",\"purpose\":\"Show competitive advantage\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "decision",
+              "proofType": "transparency_proof",
+              "placement": "transparency_proof at decision stage",
+              "purpose": "Final outcome validation & transparency",
+              "proofName": "{\"stage\":\"decision\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at decision stage\",\"purpose\":\"Final outcome validation & transparency\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "conversion",
+          "stageName": "conversion",
+          "goal": "purchase",
+          "buyerState": "",
+          "coreMessage": "Facilitate commitment and purchase",
+          "contentAction": "conversion_content",
+          "proof": [
+            {
+              "stage": "conversion",
+              "proofType": "transparency_proof",
+              "placement": "transparency_proof at conversion stage",
+              "purpose": "Remove final objections",
+              "proofName": "{\"stage\":\"conversion\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at conversion stage\",\"purpose\":\"Remove final objections\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        }
+      ],
+      "persuasionStrategy": {
+        "mode": "proof_led",
+        "modeLabel": "Direct & Verified",
+        "coreBeliefTransformation": {
+          "currentBelief": "",
+          "desiredBelief": ""
+        },
+        "messageSequence": [
+          {
+            "step": "step_1",
+            "stepLabel": "acknowledge_pain",
+            "rationale": "acknowledge_pain"
+          },
+          {
+            "step": "step_2",
+            "stepLabel": "disrupt_assumption",
+            "rationale": "disrupt_assumption"
+          },
+          {
+            "step": "step_3",
+            "stepLabel": "educate_on_problem",
+            "rationale": "educate_on_problem"
+          },
+          {
+            "step": "step_4",
+            "stepLabel": "demonstrate_understanding",
+            "rationale": "demonstrate_understanding"
+          },
+          {
+            "step": "step_5",
+            "stepLabel": "introduce_mechanism",
+            "rationale": "introduce_mechanism"
+          },
+          {
+            "step": "step_6",
+            "stepLabel": "reinforce_with_proof",
+            "rationale": "reinforce_with_proof"
+          },
+          {
+            "step": "step_7",
+            "stepLabel": "build_authority",
+            "rationale": "build_authority"
+          },
+          {
+            "step": "step_8",
+            "stepLabel": "remove_risk",
+            "rationale": "remove_risk"
+          },
+          {
+            "step": "step_9",
+            "stepLabel": "soft_next_step",
+            "rationale": "soft_next_step"
+          }
+        ],
+        "objections": [
+          {
+            "objectionId": "feasibility",
+            "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "complexity",
+            "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "feasibility",
+            "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+            "response": "",
+            "requiredProof": ""
+          }
+        ],
+        "trustStrategy": {
+          "buyerRiskState": "Skeptical Evaluation",
+          "trustDeficit": "Buyers trust peer-validated, real-time billing transparency signals but do not extend that trust to Avyron AI because no differentiating feature set has been established to prove superior live evidence streaming and semantic verification over competitors relying on static reporting",
+          "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+          "proofArtifact": "A live, continuously updated dashboard showing unified billing and refund statements alongside real-time customer feedback streams and refund status indicators, accessible within the Avyron AI platform",
+          "primaryCialdiniPrinciple": "authority",
+          "principleRationale": "The critical financial risk from unauthorized scattered insight pipelines and poor data quality and refund delays ([SEG1], [OBJ2], [TRUST2]) requires a trust transfer grounded in credible, evidence-based dominance. Avyron AI’s TrustSignal Prospecting Pipeline Simplicity_and_Ease mechanism demands process proof and transparent mechanism explanation before buyers accept outcome claims, making authority the natural principle to overcome mechanism disbelief ([TRUST2])."
+        }
+      }
+    },
+    {
+      "laneId": "lane_a92dbae22915",
+      "laneLabel": "Automation to Reduce Operational Complexity in B2B SaaS",
+      "primaryPainId": "seg_2_pain_1",
+      "segmentIds": [
+        "seg_f25a4c42a3ac4af4"
+      ],
+      "sourceFunnelSnapshotId": "bbc39129-03aa-49a5-9556-1d75f1e0b813",
+      "sourcePersuasionSnapshotId": "7ae80248-60e3-4bd2-a82a-c3329dfcd4c0",
+      "journeyName": "Avyron AI TrustSignal Webinar Funnel",
+      "journeyType": "Standard",
+      "whyThisJourney": "The webinar opens by addressing buyers’ fear of losing money due to opaque pricing and refund delays, directly confronting financial trust deficits with live demonstrations of Avyron AI’s unified billing transparency and real-time refund status integration. Next, the webinar features third-party testimonials and real customer case studies highlighting Avyron AI’s rapid, professional customer support to dismantle distrust from poor service and scam allegations. Attendees then see a live walkthrough of the TrustSignal Prospecting Pipeline Simplicity_and_Ease, showing how this product solves fragmented manual prospecting workflows better than competitors’ static, defensive reporting, thus overcoming buyer confusion in a saturated market. The final interaction invites prospects to a consultation to explore how Avyron AI’s live market mirror and semantic Judge verification can be tailored to their billing and refund transparency needs, encouraging commitment with clear proof and personalized engagement.",
+      "entryTrigger": {
+        "mechanismType": "audit",
+        "purpose": "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+        "awarenessEnforcement": {
+          "enforcedBy": "route:proof_led_entry + trigger:trust_breakdown",
+          "awarenessRoute": "proof_led_entry",
+          "triggerClass": "trust_breakdown",
+          "trustState": "high — proof and authority signals required before engagement",
+          "originalMechanism": "audit",
+          "finalMechanism": "audit",
+          "wasOverridden": false,
+          "allowedMechanisms": [
+            "audit",
+            "discovery",
+            "content_education"
+          ],
+          "blockedMechanisms": [
+            "challenge",
+            "diagnostic"
+          ],
+          "selectionReason": "Derived from trigger_class \"trust_breakdown\" preferred list → \"audit\" (enforced by route:proof_led_entry + trigger:trust_breakdown)"
+        }
+      },
+      "stages": [
+        {
+          "stageId": "education",
+          "stageName": "education",
+          "goal": "engagement",
+          "buyerState": "",
+          "coreMessage": "Build understanding of the solution approach",
+          "contentAction": "mechanism_demonstration",
+          "proof": [
+            {
+              "stage": "education",
+              "proofType": "process_proof",
+              "placement": "process_proof at education stage",
+              "purpose": "Demonstrate methodology",
+              "proofName": "{\"stage\":\"education\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at education stage\",\"purpose\":\"Demonstrate methodology\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "education",
+              "proofType": "framework_proof",
+              "placement": "framework_proof at education stage",
+              "purpose": "Show structured approach",
+              "proofName": "{\"stage\":\"education\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at education stage\",\"purpose\":\"Show structured approach\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "engagement",
+          "stageName": "engagement",
+          "goal": "commitment",
+          "buyerState": "",
+          "coreMessage": "Deliver value through live presentation",
+          "contentAction": "webinar_content",
+          "proof": [
+            {
+              "stage": "engagement",
+              "proofType": "process_proof",
+              "placement": "process_proof at engagement stage",
+              "purpose": "Demonstrate live workflow",
+              "proofName": "{\"stage\":\"engagement\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at engagement stage\",\"purpose\":\"Demonstrate live workflow\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "engagement",
+              "proofType": "framework_proof",
+              "placement": "framework_proof at engagement stage",
+              "purpose": "Show structured framework",
+              "proofName": "{\"stage\":\"engagement\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at engagement stage\",\"purpose\":\"Show structured framework\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "consideration",
+          "stageName": "consideration",
+          "goal": "intent",
+          "buyerState": "",
+          "coreMessage": "Present proof and build conviction",
+          "contentAction": "proof_content",
+          "proof": [
+            {
+              "stage": "consideration",
+              "proofType": "comparative_proof",
+              "placement": "comparative_proof at consideration stage",
+              "purpose": "Demonstrate competitive advantage",
+              "proofName": "{\"stage\":\"consideration\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at consideration stage\",\"purpose\":\"Demonstrate competitive advantage\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "decision",
+          "stageName": "decision",
+          "goal": "decision",
+          "buyerState": "",
+          "coreMessage": "Remove final objections and present offer",
+          "contentAction": "offer_presentation",
+          "proof": [
+            {
+              "stage": "decision",
+              "proofType": "comparative_proof",
+              "placement": "comparative_proof at decision stage",
+              "purpose": "Show competitive advantage",
+              "proofName": "{\"stage\":\"decision\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at decision stage\",\"purpose\":\"Show competitive advantage\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "decision",
+              "proofType": "transparency_proof",
+              "placement": "transparency_proof at decision stage",
+              "purpose": "Final outcome validation & transparency",
+              "proofName": "{\"stage\":\"decision\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at decision stage\",\"purpose\":\"Final outcome validation & transparency\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "conversion",
+          "stageName": "conversion",
+          "goal": "purchase",
+          "buyerState": "",
+          "coreMessage": "Facilitate commitment and purchase",
+          "contentAction": "conversion_content",
+          "proof": [
+            {
+              "stage": "conversion",
+              "proofType": "transparency_proof",
+              "placement": "transparency_proof at conversion stage",
+              "purpose": "Remove final objections",
+              "proofName": "{\"stage\":\"conversion\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at conversion stage\",\"purpose\":\"Remove final objections\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        }
+      ],
+      "persuasionStrategy": {
+        "mode": "proof_led",
+        "modeLabel": "Direct & Verified",
+        "coreBeliefTransformation": {
+          "currentBelief": "",
+          "desiredBelief": ""
+        },
+        "messageSequence": [
+          {
+            "step": "step_1",
+            "stepLabel": "acknowledge_pain",
+            "rationale": "acknowledge_pain"
+          },
+          {
+            "step": "step_2",
+            "stepLabel": "disrupt_assumption",
+            "rationale": "disrupt_assumption"
+          },
+          {
+            "step": "step_3",
+            "stepLabel": "educate_on_problem",
+            "rationale": "educate_on_problem"
+          },
+          {
+            "step": "step_4",
+            "stepLabel": "demonstrate_understanding",
+            "rationale": "demonstrate_understanding"
+          },
+          {
+            "step": "step_5",
+            "stepLabel": "introduce_mechanism",
+            "rationale": "introduce_mechanism"
+          },
+          {
+            "step": "step_6",
+            "stepLabel": "reinforce_with_proof",
+            "rationale": "reinforce_with_proof"
+          },
+          {
+            "step": "step_7",
+            "stepLabel": "build_authority",
+            "rationale": "build_authority"
+          },
+          {
+            "step": "step_8",
+            "stepLabel": "remove_risk",
+            "rationale": "remove_risk"
+          },
+          {
+            "step": "step_9",
+            "stepLabel": "soft_next_step",
+            "rationale": "soft_next_step"
+          }
+        ],
+        "objections": [
+          {
+            "objectionId": "feasibility",
+            "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "complexity",
+            "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "feasibility",
+            "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+            "response": "",
+            "requiredProof": ""
+          }
+        ],
+        "trustStrategy": {
+          "buyerRiskState": "Skeptical Evaluation",
+          "trustDeficit": "buyers trust peer-shared, real-time billing transparency and refund fairness evidence but do not extend this trust to Avyron AI because no differentiating feature set has been established to prove superior live market evidence integration and semantic verification",
+          "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+          "proofArtifact": "a live, continuously updated dashboard displaying unified billing and refund statements alongside real-time customer feedback and trust signal indicators, all verified by semantic Judge filters",
+          "primaryCialdiniPrinciple": "authority",
+          "principleRationale": "The TrustSignal Prospecting Pipeline Simplicity_and_Ease relies on a live, continuously updated dashboard with semantically verified billing and refund data, which demonstrates evidence-based dominance and expert validation, directly addressing [TRUST2] mechanism_disbelief and overcoming [TRUST1] competitor_similarity_distrust. This appeals to the primary segment [SEG1] B2B SaaS Buyers Concerned About Billing and Refund Practices who require transparent, credible proof to mitigate critical financial and reputational risks."
+        }
+      }
+    }
+  ],
+  "buyerConversionJourney": {
+    "laneId": "lane_2cc4822946ef",
+    "laneLabel": "Data Quality and System Integration for Enhanced GTM Execution",
+    "primaryPainId": "seg_3_pain_1",
+    "segmentIds": [
+      "seg_70720b85ed7548fe"
+    ],
+    "sourceFunnelSnapshotId": "b84da915-aa96-4c5e-afaa-f50a1f228c69",
+    "sourcePersuasionSnapshotId": "19a6eab5-10ee-418a-9548-c2d402c32fb6",
+    "journeyName": "Avyron AI TrustSignal Transparency Webinar",
+    "journeyType": "Standard",
+    "whyThisJourney": "The webinar begins by directly addressing buyers’ fear of losing money due to opaque pricing and refund delays, using Avyron AI’s automatic unification of billing and refund data to demonstrate clear, transparent financial trust mechanisms. Next, it dismantles distrust in vendor honesty by showcasing live evidence streaming and semantic Judge verification that proves refund fairness and timely resolution, backed by third-party testimonials and real-time customer support case studies. The webinar then tackles confusion in the saturated market by contrasting Avyron AI’s dynamic, live market intelligence with competitors’ static reports, clarifying unique value and driving urgency to switch. Finally, it resolves fears about post-purchase support by detailing Avyron AI’s streamlined billing and refund communication channel with guaranteed rapid responses, building confidence in ongoing service reliability.",
+    "entryTrigger": {
+      "mechanismType": "audit",
+      "purpose": "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+      "awarenessEnforcement": {
+        "enforcedBy": "route:proof_led_entry + trigger:trust_breakdown",
+        "awarenessRoute": "proof_led_entry",
+        "triggerClass": "trust_breakdown",
+        "trustState": "high — proof and authority signals required before engagement",
+        "originalMechanism": "audit",
+        "finalMechanism": "audit",
+        "wasOverridden": false,
+        "allowedMechanisms": [
+          "audit",
+          "discovery",
+          "content_education"
+        ],
+        "blockedMechanisms": [
+          "challenge",
+          "diagnostic"
+        ],
+        "selectionReason": "Derived from trigger_class \"trust_breakdown\" preferred list → \"audit\" (enforced by route:proof_led_entry + trigger:trust_breakdown)"
+      }
+    },
+    "stages": [
+      {
+        "stageId": "education",
+        "stageName": "education",
+        "goal": "engagement",
+        "buyerState": "",
+        "coreMessage": "Build understanding of the solution approach",
+        "contentAction": "mechanism_demonstration",
+        "proof": [
+          {
+            "stage": "education",
+            "proofType": "process_proof",
+            "placement": "process_proof at education stage",
+            "purpose": "Demonstrate methodology",
+            "proofName": "{\"stage\":\"education\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at education stage\",\"purpose\":\"Demonstrate methodology\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          },
+          {
+            "stage": "education",
+            "proofType": "framework_proof",
+            "placement": "framework_proof at education stage",
+            "purpose": "Show structured approach",
+            "proofName": "{\"stage\":\"education\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at education stage\",\"purpose\":\"Show structured approach\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          }
+        ],
+        "cta": ""
+      },
+      {
+        "stageId": "engagement",
+        "stageName": "engagement",
+        "goal": "commitment",
+        "buyerState": "",
+        "coreMessage": "Deliver value through live presentation",
+        "contentAction": "webinar_content",
+        "proof": [
+          {
+            "stage": "engagement",
+            "proofType": "process_proof",
+            "placement": "process_proof at engagement stage",
+            "purpose": "Demonstrate live workflow",
+            "proofName": "{\"stage\":\"engagement\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at engagement stage\",\"purpose\":\"Demonstrate live workflow\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          },
+          {
+            "stage": "engagement",
+            "proofType": "framework_proof",
+            "placement": "framework_proof at engagement stage",
+            "purpose": "Show structured framework",
+            "proofName": "{\"stage\":\"engagement\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at engagement stage\",\"purpose\":\"Show structured framework\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          }
+        ],
+        "cta": ""
+      },
+      {
+        "stageId": "consideration",
+        "stageName": "consideration",
+        "goal": "intent",
+        "buyerState": "",
+        "coreMessage": "Present proof and build conviction",
+        "contentAction": "proof_content",
+        "proof": [
+          {
+            "stage": "consideration",
+            "proofType": "comparative_proof",
+            "placement": "comparative_proof at consideration stage",
+            "purpose": "Demonstrate competitive advantage",
+            "proofName": "{\"stage\":\"consideration\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at consideration stage\",\"purpose\":\"Demonstrate competitive advantage\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          }
+        ],
+        "cta": ""
+      },
+      {
+        "stageId": "decision",
+        "stageName": "decision",
+        "goal": "decision",
+        "buyerState": "",
+        "coreMessage": "Remove final objections and present offer",
+        "contentAction": "offer_presentation",
+        "proof": [
+          {
+            "stage": "decision",
+            "proofType": "comparative_proof",
+            "placement": "comparative_proof at decision stage",
+            "purpose": "Show competitive advantage",
+            "proofName": "{\"stage\":\"decision\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at decision stage\",\"purpose\":\"Show competitive advantage\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          },
+          {
+            "stage": "decision",
+            "proofType": "transparency_proof",
+            "placement": "transparency_proof at decision stage",
+            "purpose": "Final outcome validation & transparency",
+            "proofName": "{\"stage\":\"decision\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at decision stage\",\"purpose\":\"Final outcome validation & transparency\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          }
+        ],
+        "cta": ""
+      },
+      {
+        "stageId": "conversion",
+        "stageName": "conversion",
+        "goal": "purchase",
+        "buyerState": "",
+        "coreMessage": "Facilitate commitment and purchase",
+        "contentAction": "conversion_content",
+        "proof": [
+          {
+            "stage": "conversion",
+            "proofType": "transparency_proof",
+            "placement": "transparency_proof at conversion stage",
+            "purpose": "Remove final objections",
+            "proofName": "{\"stage\":\"conversion\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at conversion stage\",\"purpose\":\"Remove final objections\"}",
+            "proofStatus": "ESTABLISHED_PROOF"
+          }
+        ],
+        "cta": ""
+      }
+    ],
+    "persuasionStrategy": {
+      "mode": "proof_led",
+      "modeLabel": "Direct & Verified",
+      "coreBeliefTransformation": {
+        "currentBelief": "",
+        "desiredBelief": ""
+      },
+      "messageSequence": [
+        {
+          "step": "step_1",
+          "stepLabel": "acknowledge_pain",
+          "rationale": "acknowledge_pain"
+        },
+        {
+          "step": "step_2",
+          "stepLabel": "disrupt_assumption",
+          "rationale": "disrupt_assumption"
+        },
+        {
+          "step": "step_3",
+          "stepLabel": "educate_on_problem",
+          "rationale": "educate_on_problem"
+        },
+        {
+          "step": "step_4",
+          "stepLabel": "demonstrate_understanding",
+          "rationale": "demonstrate_understanding"
+        },
+        {
+          "step": "step_5",
+          "stepLabel": "introduce_mechanism",
+          "rationale": "introduce_mechanism"
+        },
+        {
+          "step": "step_6",
+          "stepLabel": "reinforce_with_proof",
+          "rationale": "reinforce_with_proof"
+        },
+        {
+          "step": "step_7",
+          "stepLabel": "build_authority",
+          "rationale": "build_authority"
+        },
+        {
+          "step": "step_8",
+          "stepLabel": "remove_risk",
+          "rationale": "remove_risk"
+        },
+        {
+          "step": "step_9",
+          "stepLabel": "soft_next_step",
+          "rationale": "soft_next_step"
+        }
+      ],
+      "objections": [
+        {
+          "objectionId": "feasibility",
+          "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "trust",
+          "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "complexity",
+          "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "feasibility",
+          "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "trust",
+          "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "trust",
+          "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+          "response": "",
+          "requiredProof": ""
+        }
+      ],
+      "trustStrategy": {
+        "buyerRiskState": "Skeptical Evaluation",
+        "trustDeficit": "Buyers trust peer-validated, real-time billing transparency signals but do not extend that trust to Avyron AI because no differentiating feature set has been established to prove superior live evidence streaming and semantic verification over competitors relying on static reporting",
+        "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+        "proofArtifact": "A live, continuously updated dashboard showing unified billing and refund statements alongside real-time customer feedback streams and refund status indicators, accessible within the Avyron AI platform",
+        "primaryCialdiniPrinciple": "authority",
+        "principleRationale": "The critical financial risk from unauthorized scattered insight pipelines and poor data quality and refund delays ([SEG1], [OBJ2], [TRUST2]) requires a trust transfer grounded in credible, evidence-based dominance. Avyron AI’s TrustSignal Prospecting Pipeline Simplicity_and_Ease mechanism demands process proof and transparent mechanism explanation before buyers accept outcome claims, making authority the natural principle to overcome mechanism disbelief ([TRUST2])."
+      }
+    }
+  },
+  "persuasionStrategy": {
+    "mode": "proof_led",
+    "modeLabel": "Direct & Verified",
+    "coreBeliefTransformation": {
+      "currentBelief": "",
+      "desiredBelief": ""
+    },
+    "messageSequence": [
+      {
+        "step": "step_1",
+        "stepLabel": "acknowledge_pain",
+        "rationale": "acknowledge_pain"
+      },
+      {
+        "step": "step_2",
+        "stepLabel": "disrupt_assumption",
+        "rationale": "disrupt_assumption"
+      },
+      {
+        "step": "step_3",
+        "stepLabel": "educate_on_problem",
+        "rationale": "educate_on_problem"
+      },
+      {
+        "step": "step_4",
+        "stepLabel": "demonstrate_understanding",
+        "rationale": "demonstrate_understanding"
+      },
+      {
+        "step": "step_5",
+        "stepLabel": "introduce_mechanism",
+        "rationale": "introduce_mechanism"
+      },
+      {
+        "step": "step_6",
+        "stepLabel": "reinforce_with_proof",
+        "rationale": "reinforce_with_proof"
+      },
+      {
+        "step": "step_7",
+        "stepLabel": "build_authority",
+        "rationale": "build_authority"
+      },
+      {
+        "step": "step_8",
+        "stepLabel": "remove_risk",
+        "rationale": "remove_risk"
+      },
+      {
+        "step": "step_9",
+        "stepLabel": "soft_next_step",
+        "rationale": "soft_next_step"
+      }
+    ],
+    "objections": [
+      {
+        "objectionId": "feasibility",
+        "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+        "response": "",
+        "requiredProof": ""
+      },
+      {
+        "objectionId": "trust",
+        "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+        "response": "",
+        "requiredProof": ""
+      },
+      {
+        "objectionId": "complexity",
+        "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+        "response": "",
+        "requiredProof": ""
+      },
+      {
+        "objectionId": "feasibility",
+        "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+        "response": "",
+        "requiredProof": ""
+      },
+      {
+        "objectionId": "trust",
+        "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+        "response": "",
+        "requiredProof": ""
+      },
+      {
+        "objectionId": "trust",
+        "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+        "response": "",
+        "requiredProof": ""
+      }
+    ],
+    "trustStrategy": {
+      "buyerRiskState": "Skeptical Evaluation",
+      "trustDeficit": "Buyers trust peer-validated, real-time billing transparency signals but do not extend that trust to Avyron AI because no differentiating feature set has been established to prove superior live evidence streaming and semantic verification over competitors relying on static reporting",
+      "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+      "proofArtifact": "A live, continuously updated dashboard showing unified billing and refund statements alongside real-time customer feedback streams and refund status indicators, accessible within the Avyron AI platform",
+      "primaryCialdiniPrinciple": "authority",
+      "principleRationale": "The critical financial risk from unauthorized scattered insight pipelines and poor data quality and refund delays ([SEG1], [OBJ2], [TRUST2]) requires a trust transfer grounded in credible, evidence-based dominance. Avyron AI’s TrustSignal Prospecting Pipeline Simplicity_and_Ease mechanism demands process proof and transparent mechanism explanation before buyers accept outcome claims, making authority the natural principle to overcome mechanism disbelief ([TRUST2])."
+    }
+  },
+  "_synthesisIntegrity": {
+    "lockedDecisionCoverage": 1,
+    "contradictions": [],
+    "degradedEngines": [],
+    "blockedEngines": [],
+    "strategyRootPresent": true,
+    "verdict": "FULLY_GROUNDED"
+  },
+  "signalComposition": {
+    "real": 0,
+    "competitor": 22,
+    "inferred": 12,
+    "fallback": 0,
+    "unknown": 0,
+    "total": 34,
+    "dominantType": "competitor",
+    "competitorRatio": 0.6470588235294118,
+    "realRatio": 0,
+    "inferredRatio": 0.35294117647058826,
+    "fallbackRatio": 0,
+    "unknownRatio": 0,
+    "trustedRatio": 0.6470588235294118
+  },
+  "planSource": "degraded_no_decisions",
+  "degraded": true,
+  "synthesisVerification": {
+    "passed": false,
+    "totalLocked": 8,
+    "preserved": 0,
+    "missing": [
+      "Disconnected Manual Prospecting Workflow Failures",
+      "The TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+      "Real-time market evidence streaming combined with AI-driven semantic validation",
+      "Automated real-time data integration with AI semantic validation enabling scalable knowledge systems",
+      "Continuous real-time data integration with AI semantic filtering for validated, consolidated insights",
+      "YouTube Organic",
+      "proof led entry awareness route",
+      "proof led persuasion architecture [locked axis: From ineffective, fragmented manual pros]"
+    ],
+    "verifiedAt": "2026-08-25T08:14:21.245Z"
+  },
+  "lockedDecisionLabels": [
+    "Disconnected Manual Prospecting Workflow Failures",
+    "The TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+    "Real-time market evidence streaming combined with AI-driven semantic validation",
+    "Automated real-time data integration with AI semantic validation enabling scalable knowledge systems",
+    "Continuous real-time data integration with AI semantic filtering for validated, consolidated insights",
+    "YouTube Organic",
+    "proof led entry awareness route",
+    "proof led persuasion architecture [locked axis: From ineffective, fragmented manual pros]"
+  ],
+  "audiencePainRoles": {
+    "mechanismCore": {
+      "painId": "seg_2_pain_1",
+      "classification": "CORE_PURCHASE",
+      "rootCauseIds": [],
+      "source": "mechanism"
+    },
+    "funnelPrimary": {
+      "painId": "seg_2_pain_1",
+      "classification": "CORE_PURCHASE",
+      "source": "funnel"
+    },
+    "persuasionMotivations": [
+      {
+        "painId": "seg_2_pain_1",
+        "classification": "CORE_PURCHASE",
+        "source": "persuasion"
+      },
+      {
+        "painId": "seg_2_pain_2",
+        "classification": "CORE_PURCHASE",
+        "source": "persuasion"
+      },
+      {
+        "painId": "seg_3_pain_1",
+        "classification": "CORE_PURCHASE",
+        "source": "persuasion"
+      }
+    ],
+    "violations": []
+  },
+  "explorationPlan": {
+    "explorationPercent": 20,
+    "totalExplorationCount": 1,
+    "rationale": "Exploration budget: 20% (base 20%). 1 of 4 weekly slots allocated to exploration. Industry baseline: 30.0% — exploration results evaluated against this threshold. Discovering: reel.",
+    "slots": [
+      {
+        "format": "reel",
+        "count": 1,
+        "intent": "discovery",
+        "hypothesis": "Using reels will increase audience engagement compared to our current content formats."
+      }
+    ]
+  },
+  "businessRepresentation": {
+    "strategicSummary": {
+      "strategy": "The strategy positions Avyron AI’s Live Market Mirror as a definitive solution addressing two distinct but critical failure points in B2B SaaS GTM: the fragmentation and manual complexity of operational automation workflows, and the data quality and integration gaps undermining sales and marketing effectiveness. By explicitly targeting the shift from ineffective, fragmented manual prospecting and disconnected data silos toward autonomous, validated, real-time integrated systems leveraging semantic AI judgment, this strategy captures a unique competitive posture. It contrasts with entrenched static reporting and manual campaign setups dominant in the market by emphasizing continuous, live evidence streaming combined with AI-driven semantic validation. The core commercial choice is to deliver scalable autonomous workflows reducing reliance on deep domain expertise while enhancing decision quality through reliable data integration—all prioritized under a proof-led persuasion architecture routed through YouTube Organic and Email Marketing channels.",
+      "targetAudience": "Lane 1: Automation to Reduce Operational Complexity in B2B SaaS - Audience comprises operational leaders and SaaS users frustrated by manual busywork and lacking domain expertise needed to scale operations. The pain points include the high effort to maintain automation and fear of losing control in automated processes. The strategic decision is to highlight ease of automation setup, scalability benefits, and minimized manual interventions directly addressing these concerns, positioning Avyron AI as enabling autonomous systems that self-adapt based on trust signals. Lane 2: Data Quality and System Integration for Enhanced GTM Execution - Audience includes GTM leaders and SaaS users battling with fragmented, inaccurate data and complex integrations that impede targeting and sales/marketing alignment. The pain centers on poor data hygiene and integration difficulties. The plan commits to emphasizing proven reliability of data streams, seamless CRM and marketing system integration, and the resulting uplift in targeting precision and sales effectiveness to overcome skepticism and integration fears.",
+      "growthObjective": "Generate 30 qualified leads in 90 days sourced from SMB founders, marketing leaders, and marketing agencies keen on evidence-backed marketing strategies and competitive intelligence. Based on funnel math, reaching approximately 8,000 targeted impressions with a 2.5% CTR yields 200 clicks, converting through conversations and subsequent stages to meet the qualified lead target. The selected content rhythm and channel mix supports staged funnel progression: awareness through proof led entry awareness route on YouTube Organic, persuasion via proof led persuasion architecture [locked axis: From ineffective, fragmented manual pros], and nurturing through Email Marketing.",
+      "rationale": "The chosen path leverages the unique differentiation of Avyron AI’s continuous real-time market evidence streaming and semantic AI validation, which competitors lack, to credibly overcome entrenched objections about automation complexity and data accuracy. By maintaining Strategic Lanes distinctly, the plan avoids confusing messaging or undifferentiated pain bundling, preserving relevance across operational automation and GTM data integration use cases. The explicit tradeoff is to avoid generic or unvalidated automation promises and integration claims, instead leaning on proof-led content and real evidence-based messaging. This means prioritizing demonstrated ease of use, verified data reliability, and tangible scalability outcomes over aspirational branding or unproven technical integrations. The chosen channels and content frequency reflect efficient budget utilization and prospect behavior on YouTube and email, focusing on high-impact proof points rather than broad, unfocused volume."
+    },
+    "monthlyObjective": {
+      "objective": "Generate qualified leads for the B2B SaaS automation and GTM data integration solutions"
+    },
+    "contentDistribution": {
+      "rationale": "[HOLD-RESTRICTED] Reels (4/wk) are prioritized to deliver bite-sized proof-driven stories, each targeting either operational automation ease or data integration reliability distinctively per lane, driving high engagement and awareness. Carousels (2/wk) serve as structured explainer vehicles addressing complex pain points such as automation setup simplicity and data hygiene methodology, directly supporting proof led persuasion. Daily stories maintain ongoing presence, reinforcing day-to-day credibility without diluting focus. Weekly posts provide deeper insight and calls to action aligned with funnel conversion touchpoints. This rhythm balances volume and depth to advance prospects systematically along the funnel while respecting the monthly budget constraint. — Content volume reduced by 50% due to budget hold decision",
+      "contentPillars": [
+        {
+          "pillar": "Proof-driven Automation Simplification",
+          "examples": [
+            "Reels highlighting step-by-step setting automation in Avyron AI's system addressing complexity objections",
+            "Carousels demonstrating before/after operational time savings"
+          ]
+        },
+        {
+          "pillar": "Reliable Data Quality & Integration Outcomes",
+          "examples": [
+            "Carousels illustrating CRM and marketing integration workflows with proof of improved targeting",
+            "Reels sharing case snippets of improved data hygiene and decision confidence"
+          ]
+        }
+      ]
+    },
+    "executionBlueprintDnaLink": {
+      "contentPillarToDna": [
+        {
+          "pillar": "Proof-driven Automation Simplification",
+          "hookApproach": "Demonstrate tangible stepwise automation gains with real user-data snippets",
+          "ctaStyle": "Invitation to trial or demo showcasing effortless setup"
+        },
+        {
+          "pillar": "Reliable Data Quality & Integration Outcomes",
+          "hookApproach": "Highlight discrepancy reduction and targeting lift validated in live scenarios",
+          "ctaStyle": "Download technical integration guide or case study lead capture"
+        }
+      ],
+      "weeklyDnaApplication": "Each week’s content pieces are explicitly mapped to either the Automation or Data Quality lane, employing hooks derived from real-time evidence and semantic validation. The content calendar enforces lane-specific messages without overlap, sequencing proof-led awareness (YouTube reels) followed by structured persuasion (carousels, emails), culminating in conversion-focused posts. All content strictly avoid unvalidated claims and maintain clear, evidence-backed narrative continuity across channels."
+    },
+    "buyerConversionJourneys": [
+      {
+        "laneId": "lane_2cc4822946ef",
+        "laneLabel": "Data Quality and System Integration for Enhanced GTM Execution",
+        "primaryPainId": "seg_3_pain_1",
+        "segmentIds": [
+          "seg_70720b85ed7548fe"
+        ],
+        "sourceFunnelSnapshotId": "b84da915-aa96-4c5e-afaa-f50a1f228c69",
+        "sourcePersuasionSnapshotId": "19a6eab5-10ee-418a-9548-c2d402c32fb6",
+        "journeyName": "Avyron AI TrustSignal Transparency Webinar",
+        "journeyType": "Standard",
+        "whyThisJourney": "The webinar begins by directly addressing buyers’ fear of losing money due to opaque pricing and refund delays, using Avyron AI’s automatic unification of billing and refund data to demonstrate clear, transparent financial trust mechanisms. Next, it dismantles distrust in vendor honesty by showcasing live evidence streaming and semantic Judge verification that proves refund fairness and timely resolution, backed by third-party testimonials and real-time customer support case studies. The webinar then tackles confusion in the saturated market by contrasting Avyron AI’s dynamic, live market intelligence with competitors’ static reports, clarifying unique value and driving urgency to switch. Finally, it resolves fears about post-purchase support by detailing Avyron AI’s streamlined billing and refund communication channel with guaranteed rapid responses, building confidence in ongoing service reliability.",
+        "entryTrigger": {
+          "mechanismType": "audit",
+          "purpose": "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+          "awarenessEnforcement": {
+            "enforcedBy": "route:proof_led_entry + trigger:trust_breakdown",
+            "awarenessRoute": "proof_led_entry",
+            "triggerClass": "trust_breakdown",
+            "trustState": "high — proof and authority signals required before engagement",
+            "originalMechanism": "audit",
+            "finalMechanism": "audit",
+            "wasOverridden": false,
+            "allowedMechanisms": [
+              "audit",
+              "discovery",
+              "content_education"
+            ],
+            "blockedMechanisms": [
+              "challenge",
+              "diagnostic"
+            ],
+            "selectionReason": "Derived from trigger_class \"trust_breakdown\" preferred list → \"audit\" (enforced by route:proof_led_entry + trigger:trust_breakdown)"
+          }
+        },
+        "stages": [
+          {
+            "stageId": "education",
+            "stageName": "education",
+            "goal": "engagement",
+            "buyerState": "",
+            "coreMessage": "Build understanding of the solution approach",
+            "contentAction": "mechanism_demonstration",
+            "proof": [
+              {
+                "stage": "education",
+                "proofType": "process_proof",
+                "placement": "process_proof at education stage",
+                "purpose": "Demonstrate methodology",
+                "proofName": "{\"stage\":\"education\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at education stage\",\"purpose\":\"Demonstrate methodology\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              },
+              {
+                "stage": "education",
+                "proofType": "framework_proof",
+                "placement": "framework_proof at education stage",
+                "purpose": "Show structured approach",
+                "proofName": "{\"stage\":\"education\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at education stage\",\"purpose\":\"Show structured approach\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "engagement",
+            "stageName": "engagement",
+            "goal": "commitment",
+            "buyerState": "",
+            "coreMessage": "Deliver value through live presentation",
+            "contentAction": "webinar_content",
+            "proof": [
+              {
+                "stage": "engagement",
+                "proofType": "process_proof",
+                "placement": "process_proof at engagement stage",
+                "purpose": "Demonstrate live workflow",
+                "proofName": "{\"stage\":\"engagement\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at engagement stage\",\"purpose\":\"Demonstrate live workflow\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              },
+              {
+                "stage": "engagement",
+                "proofType": "framework_proof",
+                "placement": "framework_proof at engagement stage",
+                "purpose": "Show structured framework",
+                "proofName": "{\"stage\":\"engagement\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at engagement stage\",\"purpose\":\"Show structured framework\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "consideration",
+            "stageName": "consideration",
+            "goal": "intent",
+            "buyerState": "",
+            "coreMessage": "Present proof and build conviction",
+            "contentAction": "proof_content",
+            "proof": [
+              {
+                "stage": "consideration",
+                "proofType": "comparative_proof",
+                "placement": "comparative_proof at consideration stage",
+                "purpose": "Demonstrate competitive advantage",
+                "proofName": "{\"stage\":\"consideration\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at consideration stage\",\"purpose\":\"Demonstrate competitive advantage\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "decision",
+            "stageName": "decision",
+            "goal": "decision",
+            "buyerState": "",
+            "coreMessage": "Remove final objections and present offer",
+            "contentAction": "offer_presentation",
+            "proof": [
+              {
+                "stage": "decision",
+                "proofType": "comparative_proof",
+                "placement": "comparative_proof at decision stage",
+                "purpose": "Show competitive advantage",
+                "proofName": "{\"stage\":\"decision\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at decision stage\",\"purpose\":\"Show competitive advantage\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              },
+              {
+                "stage": "decision",
+                "proofType": "transparency_proof",
+                "placement": "transparency_proof at decision stage",
+                "purpose": "Final outcome validation & transparency",
+                "proofName": "{\"stage\":\"decision\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at decision stage\",\"purpose\":\"Final outcome validation & transparency\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "conversion",
+            "stageName": "conversion",
+            "goal": "purchase",
+            "buyerState": "",
+            "coreMessage": "Facilitate commitment and purchase",
+            "contentAction": "conversion_content",
+            "proof": [
+              {
+                "stage": "conversion",
+                "proofType": "transparency_proof",
+                "placement": "transparency_proof at conversion stage",
+                "purpose": "Remove final objections",
+                "proofName": "{\"stage\":\"conversion\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at conversion stage\",\"purpose\":\"Remove final objections\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          }
+        ],
+        "persuasionStrategy": {
+          "mode": "proof_led",
+          "modeLabel": "Direct & Verified",
+          "coreBeliefTransformation": {
+            "currentBelief": "",
+            "desiredBelief": ""
+          },
+          "messageSequence": [
+            {
+              "step": "step_1",
+              "stepLabel": "acknowledge_pain",
+              "rationale": "acknowledge_pain"
+            },
+            {
+              "step": "step_2",
+              "stepLabel": "disrupt_assumption",
+              "rationale": "disrupt_assumption"
+            },
+            {
+              "step": "step_3",
+              "stepLabel": "educate_on_problem",
+              "rationale": "educate_on_problem"
+            },
+            {
+              "step": "step_4",
+              "stepLabel": "demonstrate_understanding",
+              "rationale": "demonstrate_understanding"
+            },
+            {
+              "step": "step_5",
+              "stepLabel": "introduce_mechanism",
+              "rationale": "introduce_mechanism"
+            },
+            {
+              "step": "step_6",
+              "stepLabel": "reinforce_with_proof",
+              "rationale": "reinforce_with_proof"
+            },
+            {
+              "step": "step_7",
+              "stepLabel": "build_authority",
+              "rationale": "build_authority"
+            },
+            {
+              "step": "step_8",
+              "stepLabel": "remove_risk",
+              "rationale": "remove_risk"
+            },
+            {
+              "step": "step_9",
+              "stepLabel": "soft_next_step",
+              "rationale": "soft_next_step"
+            }
+          ],
+          "objections": [
+            {
+              "objectionId": "feasibility",
+              "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "trust",
+              "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "complexity",
+              "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "feasibility",
+              "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "trust",
+              "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "trust",
+              "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+              "response": "",
+              "requiredProof": ""
+            }
+          ],
+          "trustStrategy": {
+            "buyerRiskState": "Skeptical Evaluation",
+            "trustDeficit": "Buyers trust peer-validated, real-time billing transparency signals but do not extend that trust to Avyron AI because no differentiating feature set has been established to prove superior live evidence streaming and semantic verification over competitors relying on static reporting",
+            "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+            "proofArtifact": "A live, continuously updated dashboard showing unified billing and refund statements alongside real-time customer feedback streams and refund status indicators, accessible within the Avyron AI platform",
+            "primaryCialdiniPrinciple": "authority",
+            "principleRationale": "The critical financial risk from unauthorized scattered insight pipelines and poor data quality and refund delays ([SEG1], [OBJ2], [TRUST2]) requires a trust transfer grounded in credible, evidence-based dominance. Avyron AI’s TrustSignal Prospecting Pipeline Simplicity_and_Ease mechanism demands process proof and transparent mechanism explanation before buyers accept outcome claims, making authority the natural principle to overcome mechanism disbelief ([TRUST2])."
+          }
+        }
+      },
+      {
+        "laneId": "lane_a92dbae22915",
+        "laneLabel": "Automation to Reduce Operational Complexity in B2B SaaS",
+        "primaryPainId": "seg_2_pain_1",
+        "segmentIds": [
+          "seg_f25a4c42a3ac4af4"
+        ],
+        "sourceFunnelSnapshotId": "bbc39129-03aa-49a5-9556-1d75f1e0b813",
+        "sourcePersuasionSnapshotId": "7ae80248-60e3-4bd2-a82a-c3329dfcd4c0",
+        "journeyName": "Avyron AI TrustSignal Webinar Funnel",
+        "journeyType": "Standard",
+        "whyThisJourney": "The webinar opens by addressing buyers’ fear of losing money due to opaque pricing and refund delays, directly confronting financial trust deficits with live demonstrations of Avyron AI’s unified billing transparency and real-time refund status integration. Next, the webinar features third-party testimonials and real customer case studies highlighting Avyron AI’s rapid, professional customer support to dismantle distrust from poor service and scam allegations. Attendees then see a live walkthrough of the TrustSignal Prospecting Pipeline Simplicity_and_Ease, showing how this product solves fragmented manual prospecting workflows better than competitors’ static, defensive reporting, thus overcoming buyer confusion in a saturated market. The final interaction invites prospects to a consultation to explore how Avyron AI’s live market mirror and semantic Judge verification can be tailored to their billing and refund transparency needs, encouraging commitment with clear proof and personalized engagement.",
+        "entryTrigger": {
+          "mechanismType": "audit",
+          "purpose": "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+          "awarenessEnforcement": {
+            "enforcedBy": "route:proof_led_entry + trigger:trust_breakdown",
+            "awarenessRoute": "proof_led_entry",
+            "triggerClass": "trust_breakdown",
+            "trustState": "high — proof and authority signals required before engagement",
+            "originalMechanism": "audit",
+            "finalMechanism": "audit",
+            "wasOverridden": false,
+            "allowedMechanisms": [
+              "audit",
+              "discovery",
+              "content_education"
+            ],
+            "blockedMechanisms": [
+              "challenge",
+              "diagnostic"
+            ],
+            "selectionReason": "Derived from trigger_class \"trust_breakdown\" preferred list → \"audit\" (enforced by route:proof_led_entry + trigger:trust_breakdown)"
+          }
+        },
+        "stages": [
+          {
+            "stageId": "education",
+            "stageName": "education",
+            "goal": "engagement",
+            "buyerState": "",
+            "coreMessage": "Build understanding of the solution approach",
+            "contentAction": "mechanism_demonstration",
+            "proof": [
+              {
+                "stage": "education",
+                "proofType": "process_proof",
+                "placement": "process_proof at education stage",
+                "purpose": "Demonstrate methodology",
+                "proofName": "{\"stage\":\"education\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at education stage\",\"purpose\":\"Demonstrate methodology\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              },
+              {
+                "stage": "education",
+                "proofType": "framework_proof",
+                "placement": "framework_proof at education stage",
+                "purpose": "Show structured approach",
+                "proofName": "{\"stage\":\"education\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at education stage\",\"purpose\":\"Show structured approach\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "engagement",
+            "stageName": "engagement",
+            "goal": "commitment",
+            "buyerState": "",
+            "coreMessage": "Deliver value through live presentation",
+            "contentAction": "webinar_content",
+            "proof": [
+              {
+                "stage": "engagement",
+                "proofType": "process_proof",
+                "placement": "process_proof at engagement stage",
+                "purpose": "Demonstrate live workflow",
+                "proofName": "{\"stage\":\"engagement\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at engagement stage\",\"purpose\":\"Demonstrate live workflow\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              },
+              {
+                "stage": "engagement",
+                "proofType": "framework_proof",
+                "placement": "framework_proof at engagement stage",
+                "purpose": "Show structured framework",
+                "proofName": "{\"stage\":\"engagement\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at engagement stage\",\"purpose\":\"Show structured framework\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "consideration",
+            "stageName": "consideration",
+            "goal": "intent",
+            "buyerState": "",
+            "coreMessage": "Present proof and build conviction",
+            "contentAction": "proof_content",
+            "proof": [
+              {
+                "stage": "consideration",
+                "proofType": "comparative_proof",
+                "placement": "comparative_proof at consideration stage",
+                "purpose": "Demonstrate competitive advantage",
+                "proofName": "{\"stage\":\"consideration\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at consideration stage\",\"purpose\":\"Demonstrate competitive advantage\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "decision",
+            "stageName": "decision",
+            "goal": "decision",
+            "buyerState": "",
+            "coreMessage": "Remove final objections and present offer",
+            "contentAction": "offer_presentation",
+            "proof": [
+              {
+                "stage": "decision",
+                "proofType": "comparative_proof",
+                "placement": "comparative_proof at decision stage",
+                "purpose": "Show competitive advantage",
+                "proofName": "{\"stage\":\"decision\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at decision stage\",\"purpose\":\"Show competitive advantage\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              },
+              {
+                "stage": "decision",
+                "proofType": "transparency_proof",
+                "placement": "transparency_proof at decision stage",
+                "purpose": "Final outcome validation & transparency",
+                "proofName": "{\"stage\":\"decision\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at decision stage\",\"purpose\":\"Final outcome validation & transparency\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          },
+          {
+            "stageId": "conversion",
+            "stageName": "conversion",
+            "goal": "purchase",
+            "buyerState": "",
+            "coreMessage": "Facilitate commitment and purchase",
+            "contentAction": "conversion_content",
+            "proof": [
+              {
+                "stage": "conversion",
+                "proofType": "transparency_proof",
+                "placement": "transparency_proof at conversion stage",
+                "purpose": "Remove final objections",
+                "proofName": "{\"stage\":\"conversion\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at conversion stage\",\"purpose\":\"Remove final objections\"}",
+                "proofStatus": "ESTABLISHED_PROOF"
+              }
+            ],
+            "cta": ""
+          }
+        ],
+        "persuasionStrategy": {
+          "mode": "proof_led",
+          "modeLabel": "Direct & Verified",
+          "coreBeliefTransformation": {
+            "currentBelief": "",
+            "desiredBelief": ""
+          },
+          "messageSequence": [
+            {
+              "step": "step_1",
+              "stepLabel": "acknowledge_pain",
+              "rationale": "acknowledge_pain"
+            },
+            {
+              "step": "step_2",
+              "stepLabel": "disrupt_assumption",
+              "rationale": "disrupt_assumption"
+            },
+            {
+              "step": "step_3",
+              "stepLabel": "educate_on_problem",
+              "rationale": "educate_on_problem"
+            },
+            {
+              "step": "step_4",
+              "stepLabel": "demonstrate_understanding",
+              "rationale": "demonstrate_understanding"
+            },
+            {
+              "step": "step_5",
+              "stepLabel": "introduce_mechanism",
+              "rationale": "introduce_mechanism"
+            },
+            {
+              "step": "step_6",
+              "stepLabel": "reinforce_with_proof",
+              "rationale": "reinforce_with_proof"
+            },
+            {
+              "step": "step_7",
+              "stepLabel": "build_authority",
+              "rationale": "build_authority"
+            },
+            {
+              "step": "step_8",
+              "stepLabel": "remove_risk",
+              "rationale": "remove_risk"
+            },
+            {
+              "step": "step_9",
+              "stepLabel": "soft_next_step",
+              "rationale": "soft_next_step"
+            }
+          ],
+          "objections": [
+            {
+              "objectionId": "feasibility",
+              "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "trust",
+              "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "complexity",
+              "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "feasibility",
+              "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "trust",
+              "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+              "response": "",
+              "requiredProof": ""
+            },
+            {
+              "objectionId": "trust",
+              "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+              "response": "",
+              "requiredProof": ""
+            }
+          ],
+          "trustStrategy": {
+            "buyerRiskState": "Skeptical Evaluation",
+            "trustDeficit": "buyers trust peer-shared, real-time billing transparency and refund fairness evidence but do not extend this trust to Avyron AI because no differentiating feature set has been established to prove superior live market evidence integration and semantic verification",
+            "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+            "proofArtifact": "a live, continuously updated dashboard displaying unified billing and refund statements alongside real-time customer feedback and trust signal indicators, all verified by semantic Judge filters",
+            "primaryCialdiniPrinciple": "authority",
+            "principleRationale": "The TrustSignal Prospecting Pipeline Simplicity_and_Ease relies on a live, continuously updated dashboard with semantically verified billing and refund data, which demonstrates evidence-based dominance and expert validation, directly addressing [TRUST2] mechanism_disbelief and overcoming [TRUST1] competitor_similarity_distrust. This appeals to the primary segment [SEG1] B2B SaaS Buyers Concerned About Billing and Refund Practices who require transparent, credible proof to mitigate critical financial and reputational risks."
+          }
+        }
+      }
+    ],
+    "buyerConversionJourney": {
+      "laneId": "lane_2cc4822946ef",
+      "laneLabel": "Data Quality and System Integration for Enhanced GTM Execution",
+      "primaryPainId": "seg_3_pain_1",
+      "segmentIds": [
+        "seg_70720b85ed7548fe"
+      ],
+      "sourceFunnelSnapshotId": "b84da915-aa96-4c5e-afaa-f50a1f228c69",
+      "sourcePersuasionSnapshotId": "19a6eab5-10ee-418a-9548-c2d402c32fb6",
+      "journeyName": "Avyron AI TrustSignal Transparency Webinar",
+      "journeyType": "Standard",
+      "whyThisJourney": "The webinar begins by directly addressing buyers’ fear of losing money due to opaque pricing and refund delays, using Avyron AI’s automatic unification of billing and refund data to demonstrate clear, transparent financial trust mechanisms. Next, it dismantles distrust in vendor honesty by showcasing live evidence streaming and semantic Judge verification that proves refund fairness and timely resolution, backed by third-party testimonials and real-time customer support case studies. The webinar then tackles confusion in the saturated market by contrasting Avyron AI’s dynamic, live market intelligence with competitors’ static reports, clarifying unique value and driving urgency to switch. Finally, it resolves fears about post-purchase support by detailing Avyron AI’s streamlined billing and refund communication channel with guaranteed rapid responses, building confidence in ongoing service reliability.",
+      "entryTrigger": {
+        "mechanismType": "audit",
+        "purpose": "Allow prospects to evaluate their current state against a structured assessment before entering the conversion path",
+        "awarenessEnforcement": {
+          "enforcedBy": "route:proof_led_entry + trigger:trust_breakdown",
+          "awarenessRoute": "proof_led_entry",
+          "triggerClass": "trust_breakdown",
+          "trustState": "high — proof and authority signals required before engagement",
+          "originalMechanism": "audit",
+          "finalMechanism": "audit",
+          "wasOverridden": false,
+          "allowedMechanisms": [
+            "audit",
+            "discovery",
+            "content_education"
+          ],
+          "blockedMechanisms": [
+            "challenge",
+            "diagnostic"
+          ],
+          "selectionReason": "Derived from trigger_class \"trust_breakdown\" preferred list → \"audit\" (enforced by route:proof_led_entry + trigger:trust_breakdown)"
+        }
+      },
+      "stages": [
+        {
+          "stageId": "education",
+          "stageName": "education",
+          "goal": "engagement",
+          "buyerState": "",
+          "coreMessage": "Build understanding of the solution approach",
+          "contentAction": "mechanism_demonstration",
+          "proof": [
+            {
+              "stage": "education",
+              "proofType": "process_proof",
+              "placement": "process_proof at education stage",
+              "purpose": "Demonstrate methodology",
+              "proofName": "{\"stage\":\"education\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at education stage\",\"purpose\":\"Demonstrate methodology\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "education",
+              "proofType": "framework_proof",
+              "placement": "framework_proof at education stage",
+              "purpose": "Show structured approach",
+              "proofName": "{\"stage\":\"education\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at education stage\",\"purpose\":\"Show structured approach\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "engagement",
+          "stageName": "engagement",
+          "goal": "commitment",
+          "buyerState": "",
+          "coreMessage": "Deliver value through live presentation",
+          "contentAction": "webinar_content",
+          "proof": [
+            {
+              "stage": "engagement",
+              "proofType": "process_proof",
+              "placement": "process_proof at engagement stage",
+              "purpose": "Demonstrate live workflow",
+              "proofName": "{\"stage\":\"engagement\",\"proofType\":\"process_proof\",\"placement\":\"process_proof at engagement stage\",\"purpose\":\"Demonstrate live workflow\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "engagement",
+              "proofType": "framework_proof",
+              "placement": "framework_proof at engagement stage",
+              "purpose": "Show structured framework",
+              "proofName": "{\"stage\":\"engagement\",\"proofType\":\"framework_proof\",\"placement\":\"framework_proof at engagement stage\",\"purpose\":\"Show structured framework\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "consideration",
+          "stageName": "consideration",
+          "goal": "intent",
+          "buyerState": "",
+          "coreMessage": "Present proof and build conviction",
+          "contentAction": "proof_content",
+          "proof": [
+            {
+              "stage": "consideration",
+              "proofType": "comparative_proof",
+              "placement": "comparative_proof at consideration stage",
+              "purpose": "Demonstrate competitive advantage",
+              "proofName": "{\"stage\":\"consideration\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at consideration stage\",\"purpose\":\"Demonstrate competitive advantage\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "decision",
+          "stageName": "decision",
+          "goal": "decision",
+          "buyerState": "",
+          "coreMessage": "Remove final objections and present offer",
+          "contentAction": "offer_presentation",
+          "proof": [
+            {
+              "stage": "decision",
+              "proofType": "comparative_proof",
+              "placement": "comparative_proof at decision stage",
+              "purpose": "Show competitive advantage",
+              "proofName": "{\"stage\":\"decision\",\"proofType\":\"comparative_proof\",\"placement\":\"comparative_proof at decision stage\",\"purpose\":\"Show competitive advantage\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            },
+            {
+              "stage": "decision",
+              "proofType": "transparency_proof",
+              "placement": "transparency_proof at decision stage",
+              "purpose": "Final outcome validation & transparency",
+              "proofName": "{\"stage\":\"decision\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at decision stage\",\"purpose\":\"Final outcome validation & transparency\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        },
+        {
+          "stageId": "conversion",
+          "stageName": "conversion",
+          "goal": "purchase",
+          "buyerState": "",
+          "coreMessage": "Facilitate commitment and purchase",
+          "contentAction": "conversion_content",
+          "proof": [
+            {
+              "stage": "conversion",
+              "proofType": "transparency_proof",
+              "placement": "transparency_proof at conversion stage",
+              "purpose": "Remove final objections",
+              "proofName": "{\"stage\":\"conversion\",\"proofType\":\"transparency_proof\",\"placement\":\"transparency_proof at conversion stage\",\"purpose\":\"Remove final objections\"}",
+              "proofStatus": "ESTABLISHED_PROOF"
+            }
+          ],
+          "cta": ""
+        }
+      ],
+      "persuasionStrategy": {
+        "mode": "proof_led",
+        "modeLabel": "Direct & Verified",
+        "coreBeliefTransformation": {
+          "currentBelief": "",
+          "desiredBelief": ""
+        },
+        "messageSequence": [
+          {
+            "step": "step_1",
+            "stepLabel": "acknowledge_pain",
+            "rationale": "acknowledge_pain"
+          },
+          {
+            "step": "step_2",
+            "stepLabel": "disrupt_assumption",
+            "rationale": "disrupt_assumption"
+          },
+          {
+            "step": "step_3",
+            "stepLabel": "educate_on_problem",
+            "rationale": "educate_on_problem"
+          },
+          {
+            "step": "step_4",
+            "stepLabel": "demonstrate_understanding",
+            "rationale": "demonstrate_understanding"
+          },
+          {
+            "step": "step_5",
+            "stepLabel": "introduce_mechanism",
+            "rationale": "introduce_mechanism"
+          },
+          {
+            "step": "step_6",
+            "stepLabel": "reinforce_with_proof",
+            "rationale": "reinforce_with_proof"
+          },
+          {
+            "step": "step_7",
+            "stepLabel": "build_authority",
+            "rationale": "build_authority"
+          },
+          {
+            "step": "step_8",
+            "stepLabel": "remove_risk",
+            "rationale": "remove_risk"
+          },
+          {
+            "step": "step_9",
+            "stepLabel": "soft_next_step",
+            "rationale": "soft_next_step"
+          }
+        ],
+        "objections": [
+          {
+            "objectionId": "feasibility",
+            "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "complexity",
+            "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "feasibility",
+            "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+            "response": "",
+            "requiredProof": ""
+          },
+          {
+            "objectionId": "trust",
+            "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+            "response": "",
+            "requiredProof": ""
+          }
+        ],
+        "trustStrategy": {
+          "buyerRiskState": "Skeptical Evaluation",
+          "trustDeficit": "Buyers trust peer-validated, real-time billing transparency signals but do not extend that trust to Avyron AI because no differentiating feature set has been established to prove superior live evidence streaming and semantic verification over competitors relying on static reporting",
+          "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+          "proofArtifact": "A live, continuously updated dashboard showing unified billing and refund statements alongside real-time customer feedback streams and refund status indicators, accessible within the Avyron AI platform",
+          "primaryCialdiniPrinciple": "authority",
+          "principleRationale": "The critical financial risk from unauthorized scattered insight pipelines and poor data quality and refund delays ([SEG1], [OBJ2], [TRUST2]) requires a trust transfer grounded in credible, evidence-based dominance. Avyron AI’s TrustSignal Prospecting Pipeline Simplicity_and_Ease mechanism demands process proof and transparent mechanism explanation before buyers accept outcome claims, making authority the natural principle to overcome mechanism disbelief ([TRUST2])."
+        }
+      }
+    },
+    "persuasionStrategy": {
+      "mode": "proof_led",
+      "modeLabel": "Direct & Verified",
+      "coreBeliefTransformation": {
+        "currentBelief": "",
+        "desiredBelief": ""
+      },
+      "messageSequence": [
+        {
+          "step": "step_1",
+          "stepLabel": "acknowledge_pain",
+          "rationale": "acknowledge_pain"
+        },
+        {
+          "step": "step_2",
+          "stepLabel": "disrupt_assumption",
+          "rationale": "disrupt_assumption"
+        },
+        {
+          "step": "step_3",
+          "stepLabel": "educate_on_problem",
+          "rationale": "educate_on_problem"
+        },
+        {
+          "step": "step_4",
+          "stepLabel": "demonstrate_understanding",
+          "rationale": "demonstrate_understanding"
+        },
+        {
+          "step": "step_5",
+          "stepLabel": "introduce_mechanism",
+          "rationale": "introduce_mechanism"
+        },
+        {
+          "step": "step_6",
+          "stepLabel": "reinforce_with_proof",
+          "rationale": "reinforce_with_proof"
+        },
+        {
+          "step": "step_7",
+          "stepLabel": "build_authority",
+          "rationale": "build_authority"
+        },
+        {
+          "step": "step_8",
+          "stepLabel": "remove_risk",
+          "rationale": "remove_risk"
+        },
+        {
+          "step": "step_9",
+          "stepLabel": "soft_next_step",
+          "rationale": "soft_next_step"
+        }
+      ],
+      "objections": [
+        {
+          "objectionId": "feasibility",
+          "objection": "{\"canonical\":\"lack of support\",\"frequency\":9,\"evidence\":[\"This platform has the worst customer service I have ever seen. Dont use . Gary is so unprofessional\",\"This platform has the worst customer ser",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "trust",
+          "objection": "{\"canonical\":\"fear of commitment\",\"frequency\":5,\"evidence\":[\"Qual o problema de vocês, está constando que minha consta está cancelada assim como eu solicitei e ficam tentando fazer cobrança do meu car",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "complexity",
+          "objection": "{\"canonical\":\"complexity / too hard\",\"frequency\":16,\"evidence\":[\"Want to sign more clients, boost sales, and scale your coaching business in 2026?\\n\\nIt all comes down to 4 essential strategies, and w",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "feasibility",
+          "objection": "{\"canonical\":\"Audience struggles to achieve desired results\",\"frequency\":3,\"evidence\":[\"Struggling to find fresh ad ideas? Staring at a blank screen is a creativity killer. 🧠 The secret to consistent",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "trust",
+          "objection": "{\"canonical\":\"Industry providers lack specialized understanding\",\"frequency\":1,\"evidence\":[\"you don't exist. Right now, most brands have no idea where they stand. Only 3% of markete\"],\"evidenceCount\"",
+          "response": "",
+          "requiredProof": ""
+        },
+        {
+          "objectionId": "trust",
+          "objection": "{\"canonical\":\"Industry lacks transparency\",\"frequency\":1,\"evidence\":[\"eryone says “post daily,” but no one tells you exactly how. MarketingBlocks closes that gap\"],\"evidenceCount\":1,\"confidenceScore\"",
+          "response": "",
+          "requiredProof": ""
+        }
+      ],
+      "trustStrategy": {
+        "buyerRiskState": "Skeptical Evaluation",
+        "trustDeficit": "Buyers trust peer-validated, real-time billing transparency signals but do not extend that trust to Avyron AI because no differentiating feature set has been established to prove superior live evidence streaming and semantic verification over competitors relying on static reporting",
+        "transferMechanismName": "TrustSignal Prospecting Pipeline Simplicity_and_Ease",
+        "proofArtifact": "A live, continuously updated dashboard showing unified billing and refund statements alongside real-time customer feedback streams and refund status indicators, accessible within the Avyron AI platform",
+        "primaryCialdiniPrinciple": "authority",
+        "principleRationale": "The critical financial risk from unauthorized scattered insight pipelines and poor data quality and refund delays ([SEG1], [OBJ2], [TRUST2]) requires a trust transfer grounded in credible, evidence-based dominance. Avyron AI’s TrustSignal Prospecting Pipeline Simplicity_and_Ease mechanism demands process proof and transparent mechanism explanation before buyers accept outcome claims, making authority the natural principle to overcome mechanism disbelief ([TRUST2])."
+      }
+    }
+  },
+  "commercialReasoningRejected": [
+    {
+      "module": "awareness.narrativeReframe",
+      "reason": "FINAL_REJECTED",
+      "detail": "The 'namedPrinciple' is a slogan rather than a real mental-model shift, and the 'specificMove' is a communication tactic instead of a reasoning step the buyer does in their head.",
+      "emittedAt": 1787645253890
+    }
+  ],
+  "_provenance": {
+    "commercialReasoningDegraded": true,
+    "aelPartialPropagated": false
+  },
+  "validationState": "weak"
+}

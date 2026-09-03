@@ -3,13 +3,18 @@ import express, { Request, Response, Router } from 'express';
 import { registerPerceptionRoutes } from '../perception-routes';
 import { db } from '../db';
 
-// Mock DB
+const createMockQuery = (res: any = []) => {
+  const promise = Promise.resolve(res);
+  (promise as any).limit = vi.fn().mockResolvedValue(res);
+  return promise;
+};
+
 vi.mock('../db', () => ({
   db: {
     select: vi.fn().mockReturnThis(),
     from: vi.fn().mockReturnThis(),
     leftJoin: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue([]),
+    where: vi.fn().mockImplementation(() => createMockQuery([])),
     execute: vi.fn(),
   },
 }));
@@ -29,6 +34,7 @@ vi.mock('@shared/schema', () => ({
   sivSemanticWindows: {},
   bossRuns: {},
   ciScrapeRuns: {},
+  watchtowerStrategicBriefs: {},
 }));
 
 vi.mock('../watchtower/translator', () => ({
@@ -72,7 +78,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   };
 
   it('should return 404 if event is deleted or not found', async () => {
-    (db as any).where.mockResolvedValueOnce([]); // No row
+    (db as any).where.mockImplementationOnce(() => createMockQuery([])); // No row
     
     await runRoute('event-123');
     expect(statusMock).toHaveBeenCalledWith(404);
@@ -80,10 +86,10 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   });
 
   it('should return 404 on unauthorized cross-tenant access', async () => {
-    (db as any).where.mockResolvedValueOnce([{
+    (db as any).where.mockImplementationOnce(() => createMockQuery([{
       event: { id: 'event-123', campaignId: 'campaign-2', accountId: 'tenant-b' },
       competitor: null
-    }]);
+    }]));
 
     await runRoute('event-123');
     expect(statusMock).toHaveBeenCalledWith(404);
@@ -93,7 +99,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   it('should map the typed contract strictly', async () => {
     const mockDate = new Date('2026-08-01T12:00:00Z');
     
-    (db as any).where.mockResolvedValueOnce([{
+    (db as any).where.mockImplementationOnce(() => createMockQuery([{
       event: { 
         id: 'evt-1', 
         campaignId: 'campaign-1', 
@@ -117,7 +123,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
         id: 'comp-1',
         name: 'Rival Corp'
       }
-    }]);
+    }]));
 
     await runRoute('evt-1');
     
@@ -141,7 +147,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
   });
 
   it('should return missing evidence state when evidence is empty', async () => {
-    (db as any).where.mockResolvedValueOnce([{
+    (db as any).where.mockImplementationOnce(() => createMockQuery([{
       event: { 
         id: 'evt-2', 
         campaignId: 'campaign-1', 
@@ -149,7 +155,7 @@ describe('GET /api/perception/watchtower-events/:eventId', () => {
         evidence: null,
       },
       competitor: null
-    }]);
+    }]));
 
     await runRoute('evt-2');
     

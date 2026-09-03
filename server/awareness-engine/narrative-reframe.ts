@@ -185,6 +185,10 @@ Hard rules:
 - "whyBuyerCanAcceptIt" must reference the buyer's ACTUAL current beliefs or rejection history above — not a generic "buyers want X".
 - "discomfortCost" must hurt — if the cost is "they need to think a little differently" you have failed. The cost should be a status, identity, or sunk-cost surrender.
 - Do NOT mention forbidden domains (medical, legal, political, financial regulated advice).
+- CAPABILITY & PRODUCT TRUTH BOUNDARY:
+  - "newModel", "whatBecomesObvious", and "bridgeMechanism" MUST strictly align with the Product Truth facts and capabilities of THIS product.
+  - You MUST NOT invent or claim product capabilities (such as automated billing/refund dashboards, payment dispute reconciliation, or customer support management) unless explicitly stated in the Product Anchor above.
+  - If buyer pains mention competitor billing/refund complaints, do NOT frame our product as a refund/billing automation tool. Frame the reframe around our ACTUAL capabilities (e.g. modular autonomous digital agents, workflow automation, and verified continuous intelligence).
 
 ${FEW_SHOT}
 
@@ -233,6 +237,7 @@ Reject if ANY of:
 4. "discomfortCost.privateAdmission" doesn't actually hurt — if it could be said in a sales deck without embarrassment, it's not a real cost.
 5. "newModel" merely re-words "currentModel" without changing the classification of the problem.
 6. The reframe could apply to ANY product in ANY category — it must be specific to this buyer's situation.
+7. CAPABILITY INVENTIONS: Claims capabilities (e.g. automated refund processing, billing tools, dispute management, or customer service portals) outside the Product Anchor / Product Truth.
 
 Return JSON: {"verdict":"ACCEPTED"|"REJECTED","reason":"<one sentence>"}`;
 

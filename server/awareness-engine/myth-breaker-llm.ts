@@ -84,6 +84,7 @@ ${rejectedBlock}
 5. contradictionLogic must explain in plain language: "The audience believes X because of Y. The actual root cause is Z, so the right answer is W."
 6. No marketing jargon. No "transform", "unlock", "leverage", "scale", "optimize", "next-level".
 7. Return ONLY valid JSON.
+8. CAPABILITY & PRODUCT TRUTH BOUNDARY: Do NOT claim the product provides capabilities (such as automated refund processing, billing tools, dispute management, or customer support) outside the Product Anchor / Product Truth. Frame the contradiction around the real product capabilities (e.g. modular autonomous digital agents, workflow automation, and verified continuous intelligence).
 
 Return JSON:
 {

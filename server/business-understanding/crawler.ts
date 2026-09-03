@@ -14,26 +14,61 @@ export interface OwnBusinessPageEvidence {
 }
 
 function cleanHtmlToText(html: string): string {
-  return html
-    .replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, "")
-    .replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, "")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
+  // Extract Title
+  const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+
+  // Extract Meta Description
+  const metaDescMatch = html.match(/<meta\b[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i) ||
+                        html.match(/<meta\b[^>]*content=["']([^"']*)["'][^>]*name=["']description["']/i) ||
+                        html.match(/<meta\b[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i);
+  const metaDesc = metaDescMatch ? metaDescMatch[1].trim() : '';
+
+  // Extract Headings
+  const headings: string[] = [];
+  const headingRegex = /<(h1|h2|h3)\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  let hMatch;
+  while ((hMatch = headingRegex.exec(html)) !== null) {
+    const text = hMatch[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text && text.length > 2 && text.length < 150 && !headings.includes(text)) {
+      headings.push(text);
+    }
+  }
+
+  // Strip scripts, styles, svg, and tags
+  const bodyText = html
+    .replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, '')
+    .replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, '')
+    .replace(/<svg\b[^<]*>([\s\S]*?)<\/svg>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
     .trim();
+
+  const parts: string[] = [];
+  if (title) parts.push(`[TITLE]: ${title}`);
+  if (metaDesc) parts.push(`[META DESCRIPTION]: ${metaDesc}`);
+  if (headings.length > 0) parts.push(`[KEY HEADINGS]: ${headings.slice(0, 10).join(' | ')}`);
+  if (bodyText) parts.push(`[PAGE CONTENT]: ${bodyText}`);
+
+  return parts.join('\n\n');
 }
 
 function classifyPageType(urlStr: string): OwnBusinessPageEvidence["pageType"] {
   const lower = urlStr.toLowerCase();
-  if (lower.includes("/pricing") || lower.includes("/plans")) return "PRICING";
+  if (lower.includes("/pricing") || lower.includes("/plans") || lower.includes("/packages")) return "PRICING";
   if (lower.includes("/feature") || lower.includes("/capability")) return "FEATURES";
-  if (lower.includes("/product") || lower.includes("/platform")) return "PRODUCT";
-  if (lower.includes("/solution")) return "SOLUTIONS";
+  if (lower.includes("/product") || lower.includes("/platform") || lower.includes("/shop") || lower.includes("/collection") || lower.includes("/catalog") || lower.includes("/category") || lower.includes("/store") || lower.includes("/item")) return "PRODUCT";
+  if (lower.includes("/solution") || lower.includes("/services") || lower.includes("/offerings")) return "SOLUTIONS";
   if (lower.includes("/integration")) return "INTEGRATIONS";
   if (lower.includes("/use-case") || lower.includes("/industry")) return "USE_CASE";
-  if (lower.includes("/how-it-works") || lower.includes("/architecture")) return "HOW_IT_WORKS";
-  if (lower.includes("/customer") || lower.includes("/case-stud")) return "CASE_STUDY";
+  if (lower.includes("/how-it-works") || lower.includes("/architecture") || lower.includes("/process")) return "HOW_IT_WORKS";
+  if (lower.includes("/customer") || lower.includes("/case-stud") || lower.includes("/review") || lower.includes("/testimonials")) return "CASE_STUDY";
   if (lower.includes("/docs") || lower.includes("/documentation")) return "DOCS";
-  if (lower.includes("/about") || lower.includes("/company")) return "ABOUT";
+  if (lower.includes("/about") || lower.includes("/company") || lower.includes("/story") || lower.includes("/who-we-are")) return "ABOUT";
   return "OTHER";
 }
 

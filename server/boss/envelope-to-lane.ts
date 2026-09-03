@@ -14,6 +14,7 @@ export interface LanePayload extends Record<string, unknown> {
   acquisition_id: string;
   patterns?: string[];
   objections?: string[];
+  pricing?: string[];
   pains?: string[];
   desires?: string[];
   frequency?: number;
@@ -95,6 +96,7 @@ export function translateEnvelopeToLanePayload(env: CollectorEnvelope): LanePayl
       const headlines = strArr(env.payload.headlines);
       const ctas = strArr(env.payload.cta_labels);
       const offers = strArr(env.payload.offer_phrases);
+      const pricing = strArr(env.payload.pricing_anchors || env.payload.pricing);
       if (headlines.length) { out.patterns = headlines; sources.push("payload.headlines"); }
       if (ctas.length) {
         out.patterns = [...(out.patterns ?? []), ...ctas];
@@ -104,6 +106,10 @@ export function translateEnvelopeToLanePayload(env: CollectorEnvelope): LanePayl
         // Offer phrases are observed-claims, not literal "objections" — see audit §3.5.
         out.objections = offers;
         sources.push("payload.offer_phrases");
+      }
+      if (pricing.length) {
+        out.pricing = pricing;
+        sources.push("payload.pricing_anchors");
       }
       return out;
     }
@@ -135,6 +141,50 @@ export function translateEnvelopeToLanePayload(env: CollectorEnvelope): LanePayl
       // Phase 3: reviews intentionally NOT translated into a lane payload.
       // The acquisition was still recorded — see audit §3.5 / R-3.4.
       return null;
+    }
+
+    case "competitor_google_search": {
+      const results = Array.isArray(env.payload.search_results) ? env.payload.search_results : [];
+      const snippets = results
+        .map((r: any) => typeof r === "string" ? r : (r.text || `${r.title || ""}: ${r.snippet || r.description || ""}`).trim())
+        .filter(Boolean);
+      if (snippets.length) {
+        out.patterns = snippets;
+        sources.push("payload.search_results");
+      }
+      return out;
+    }
+
+    case "competitor_linkedin": {
+      const posts = Array.isArray(env.payload.posts) ? env.payload.posts : [];
+      const texts = posts
+        .map((p: any) => typeof p === "string" ? p : (p.text || p.content || p.commentary || "").trim())
+        .filter(Boolean);
+      if (texts.length) {
+        out.patterns = texts;
+        sources.push("payload.linkedin_posts");
+      }
+      if (posts.length > 0) {
+        out.frequency = posts.length;
+        sources.push("payload.posts.length");
+      }
+      return out;
+    }
+
+    case "competitor_x": {
+      const tweets = Array.isArray(env.payload.tweets) ? env.payload.tweets : [];
+      const texts = tweets
+        .map((t: any) => typeof t === "string" ? t : (t.text || t.full_text || "").trim())
+        .filter(Boolean);
+      if (texts.length) {
+        out.patterns = texts;
+        sources.push("payload.x_tweets");
+      }
+      if (tweets.length > 0) {
+        out.frequency = tweets.length;
+        sources.push("payload.tweets.length");
+      }
+      return out;
     }
   }
 }

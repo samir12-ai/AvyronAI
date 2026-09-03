@@ -123,6 +123,10 @@ ${rejectedBlock}
 6. commercialFunction MUST be ONE sentence answering "What is this doing commercially?" — citing the specific transfer (from X to Y).
 7. Do NOT use generic words: "trust", "credibility", "authority", "social proof" without a concrete referent.
 8. If you cannot find specific evidence for a field, say "INSUFFICIENT_EVIDENCE — would need [specific signal]" — do NOT fabricate.
+9. PRODUCT TRUTH & CAPABILITY BOUNDING:
+   - transferMechanism.name, description, and proofArtifact MUST strictly align with the Product Truth facts and capabilities of THIS product.
+   - You MUST NOT claim or invent product capabilities (such as automated billing/refund dashboards, financial reconciliation, dispute management, or customer support guarantees) unless explicitly stated in the Product Anchor / Product Truth facts above.
+   - If market evidence describes competitor billing/refund complaints or poor customer service, do NOT convert those competitor complaints into our product features. Address market skepticism through transparent workflow demonstrations, live diagnostic audits, or verifiable methodology of our ACTUAL product capabilities.
 
 Return ONLY valid JSON:
 {
@@ -149,7 +153,8 @@ Return ONLY valid JSON:
     "Step 4: designed mechanism to bridge ...",
     "Step 5: ruled out alternative mechanisms because ..."
   ]
-}`;
+}
+`;
 }
 
 function buildJudgePrompt(designJson: string): string {
@@ -161,6 +166,7 @@ Your job: reject anything that is generic, label-only, or trivial. Accept only d
 - buyerRiskState is vague ("they need to trust us") instead of specific ("buyer fears looking incompetent to CFO")
 - transferMechanism.name is a category label ("authority") instead of a named mechanism
 - transferMechanism.proofArtifact is abstract ("case studies") instead of physical ("3 named-CMO logos with LinkedIn + monthly metric")
+- CAPABILITY INVENTIONS: Claims capabilities (e.g. automated billing portals, refund management, customer service case studies, payment dispute reconciliation) that are outside the Product Anchor / Product Truth facts.
 - failureModes are generic or fewer than 2
 - commercialFunction does not name SPECIFIC source-to-claim transfer
 - Any field reads like a textbook definition rather than a real-world design choice

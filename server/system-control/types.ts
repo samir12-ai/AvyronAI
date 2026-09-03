@@ -353,6 +353,13 @@ export interface SystemControlVerdict {
    * structure on synthetic data, not production-quality grounding. B4
    * (explicit classification over hidden ambiguity).
    */
+  /**
+   * Semantic boundary separation: true iff a structural causal strategy failure
+   * blocks strategy plan synthesis. Spend-only halts (e.g. BUDGET_HALT in BUILD mode)
+   * leave strategyBlocked = false while setting spendBlocked = true.
+   */
+  strategyBlocked?: boolean;
+  spendBlocked?: boolean;
   syntheticAuditMode?: boolean;
 }
 

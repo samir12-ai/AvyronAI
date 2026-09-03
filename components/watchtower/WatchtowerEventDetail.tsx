@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useWatchtowerEventDetail } from '@/hooks/useWatchtowerEventDetail';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
 
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: Props) {
+  const router = useRouter();
   const { data: detailData, isLoading, isError, error } = useWatchtowerEventDetail(campaignId, eventId);
 
   if (!eventId) return null;
@@ -58,20 +60,20 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
     );
   }
 
-  const { event, presentation, observation, competitors, lineage } = detailData;
+  const { event, presentation, observation, competitors, lineage, strategicBrief } = detailData;
 
   const getImpactColor = (impact: string) => {
-    const i = impact.toLowerCase();
-    if (i.includes('high')) return '#DC2626';
+    const i = (impact || '').toLowerCase();
+    if (i.includes('high') || i.includes('major')) return '#DC2626';
     if (i.includes('medium')) return '#F59E0B';
-    if (i.includes('low')) return '#3B82F6';
+    if (i.includes('low') || i.includes('mild')) return '#3B82F6';
     return '#7C3AED';
   };
 
   const getStatusColor = (status: string) => {
-    const s = status.toLowerCase();
+    const s = (status || '').toLowerCase();
     if (s.includes('confirmed')) return '#10B981';
-    if (s.includes('first') || s.includes('candidate')) return '#3B82F6';
+    if (s.includes('first') || s.includes('candidate') || s.includes('review')) return '#3B82F6';
     if (s.includes('archived') || s.includes('dismissed') || s.includes('closed') || s.includes('superseded')) return '#6B7280'; 
     return '#8B5CF6'; 
   };
@@ -79,7 +81,8 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
   const impactColor = getImpactColor(presentation.impactLabel);
   const statusBadgeColor = getStatusColor(presentation.statusLabel);
   const evidenceNotes = observation.evidenceNotes || [];
-  const isLineageIncomplete = !lineage.complete || evidenceNotes.length === 0;
+  const isCandidate = event.status === 'candidate';
+  const brief = strategicBrief?.brief;
 
   return (
     <View style={styles.container}>
@@ -96,7 +99,7 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
               </View>
               <View style={[styles.badge, { backgroundColor: statusBadgeColor + '25', borderColor: statusBadgeColor + '40' }]}>
                 <Text style={[styles.badgeText, { color: statusBadgeColor, textTransform: 'uppercase' }]}>
-                  {presentation.statusLabel}
+                  {presentation.statusLabel === 'First Observation' ? 'UNDER REVIEW' : presentation.statusLabel}
                 </Text>
               </View>
             </View>
@@ -120,7 +123,7 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
           <View style={styles.metaCol}>
             <Text style={styles.metaLabel}>Confirmed</Text>
             <Text style={styles.metaValue} numberOfLines={1}>
-              {event.confirmedAt ? formatWatchtowerDate(event.confirmedAt) : 'Not confirmed yet'}
+              {event.confirmedAt ? formatWatchtowerDate(event.confirmedAt) : 'Awaiting 2nd fetch'}
             </Text>
           </View>
           <View style={styles.metaDivider} />
@@ -134,44 +137,46 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
       {/* SCROLLABLE CONTENT */}
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
         
-        {/* 1. EXECUTIVE SUMMARY */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionBlockHeader}>
-            <View style={[styles.iconCircle, { backgroundColor: '#3B82F620' }]}>
-              <Feather name="file-text" size={16} color="#3B82F6" />
+        {/* REASONING DETAIL LINK BANNER */}
+        <Pressable
+          style={{
+            backgroundColor: '#8B5CF618',
+            borderColor: '#8B5CF660',
+            borderWidth: 1.5,
+            borderRadius: 12,
+            padding: 18,
+            marginBottom: 20,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            cursor: 'pointer' as any,
+          }}
+          onPress={() => router.push(`/(tabs)/reasoning-evidence?tab=events&eventId=${eventId}` as any)}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+            <Feather name="cpu" size={20} color="#8B5CF6" />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: '#E0E7FF', marginBottom: 4 }}>View Full Market Intelligence in Reasoning</Text>
+              <Text style={{ fontSize: 12, color: '#A5B4FC' }}>Complete analysis including what changed, strategic interpretation, impact assessment, and adaptive recommendations</Text>
             </View>
-            <Text style={styles.sectionBlockTitle}>Executive Summary</Text>
           </View>
-          <Text style={[styles.sectionBlockBody, { fontSize: 16, lineHeight: 26, color: '#F9FAFB' }]}>
-            {observation.whatChanged || 'A strategic shift was detected in the market.'}
-          </Text>
-        </View>
+          <Feather name="arrow-right" size={20} color="#8B5CF6" />
+        </Pressable>
 
-        {/* 2. EVENT CLASSIFICATION */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionBlockHeader}>
-            <View style={[styles.iconCircle, { backgroundColor: '#8B5CF620' }]}>
-              <Feather name="tag" size={16} color="#8B5CF6" />
-            </View>
-            <Text style={styles.sectionBlockTitle}>Event Classification</Text>
-          </View>
-          <View style={styles.classificationGrid}>
-            <View style={styles.classificationCard}>
-              <Text style={styles.classificationLabel}>Severity</Text>
-              <Text style={[styles.classificationValue, { color: impactColor }]}>{presentation.impactLabel.toUpperCase()}</Text>
-            </View>
-            <View style={styles.classificationCard}>
-              <Text style={styles.classificationLabel}>Category</Text>
-              <Text style={[styles.classificationValue, { color: '#F9FAFB' }]}>{presentation.category}</Text>
-            </View>
-            <View style={styles.classificationCard}>
-              <Text style={styles.classificationLabel}>Status</Text>
-              <Text style={[styles.classificationValue, { color: statusBadgeColor }]}>{presentation.statusLabel.toUpperCase()}</Text>
+        {/* UNDER REVIEW PROVISIONAL NOTICE */}
+        {isCandidate && (
+          <View style={styles.provisionalNotice}>
+            <Feather name="info" size={18} color="#3B82F6" style={{ marginTop: 2 }} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.provisionalNoticeTitle}>Under Review (First Observation)</Text>
+              <Text style={styles.provisionalNoticeText}>
+                This strategic observation is awaiting its scheduled second independent confirmation fetch. Strategic interpretation is provisional until confirmed.
+              </Text>
             </View>
           </View>
-        </View>
+        )}
 
-        {/* 3. CONFIRMATION LIFECYCLE */}
+        {/* CONFIRMATION LIFECYCLE */}
         <View style={styles.sectionBlock}>
           <View style={styles.sectionBlockHeader}>
             <View style={[styles.iconCircle, { backgroundColor: '#10B98120' }]}>
@@ -201,40 +206,19 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
               <View style={styles.timelineContent}>
                 <Text style={styles.timelineTitle}>{event.confirmedAt ? 'Verified & Confirmed' : 'Awaiting Confirmation'}</Text>
                 <Text style={styles.timelineTime}>
-                  {event.confirmedAt ? formatWatchtowerDate(event.confirmedAt) : 'Pending next scheduled fetch'}
+                  {event.confirmedAt ? formatWatchtowerDate(event.confirmedAt) : 'Pending next scheduled independent fetch'}
                 </Text>
               </View>
             </View>
           </View>
         </View>
 
-        {/* 4. EVIDENCE & SOURCE */}
-        <View style={styles.sectionBlock}>
-          <View style={styles.sectionBlockHeader}>
-            <View style={[styles.iconCircle, { backgroundColor: '#F59E0B20' }]}>
-              <Feather name="search" size={16} color="#F59E0B" />
-            </View>
-            <Text style={styles.sectionBlockTitle}>Evidence & Source Information</Text>
-          </View>
-
-          {evidenceNotes.length > 0 ? (
-            <View style={styles.evidenceList}>
-              {evidenceNotes.map((note, idx) => (
-                <View key={idx} style={styles.evidenceItem}>
-                  <View style={styles.evidenceDot} />
-                  <Text style={styles.evidenceText}>{note}</Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.diffContainer}>
-              <Text style={styles.diffText}>Direct source links not captured for this specific event type.</Text>
-            </View>
-          )}
+        {/* FOOTER */}
+        <View style={{ marginTop: 24, alignItems: 'center', opacity: 0.6, marginBottom: 40 }}>
+          <Text style={{ fontSize: 12, color: '#9CA3AF', textAlign: 'center' }}>
+            Watchtower monitors market changes. Full analysis lives in Reasoning.
+          </Text>
         </View>
-
-
-
       </ScrollView>
     </View>
   );
@@ -336,20 +320,25 @@ const styles = StyleSheet.create({
     padding: 32,
     gap: 32,
   },
-  lineageWarning: {
+  provisionalNotice: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#D9770615',
-    padding: 16,
-    borderRadius: 8,
+    alignItems: 'flex-start',
+    backgroundColor: '#1E3A8A25',
+    borderColor: '#3B82F640',
     borderWidth: 1,
-    borderColor: '#D9770630',
+    borderRadius: 8,
+    padding: 16,
   },
-  lineageWarningText: {
-    color: '#D97706',
+  provisionalNoticeTitle: {
     fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 12,
+    fontWeight: '700',
+    color: '#93C5FD',
+    marginBottom: 4,
+  },
+  provisionalNoticeText: {
+    fontSize: 13,
+    color: '#BFDBFE',
+    lineHeight: 20,
   },
   sectionBlock: {
   },
@@ -378,6 +367,138 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginLeft: 52,
   },
+  cardContainer: {
+    marginLeft: 52,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#1E2535',
+    borderRadius: 8,
+    padding: 20,
+  },
+  cardBodyText: {
+    fontSize: 14,
+    color: '#D1D5DB',
+    lineHeight: 22,
+  },
+  subCard: {
+    backgroundColor: '#1C212B',
+    padding: 14,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#2A3347',
+  },
+  subCardLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9CA3AF',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 6,
+  },
+  subCardBody: {
+    fontSize: 14,
+    color: '#F3F4F6',
+    lineHeight: 20,
+  },
+  cardGrid: {
+    marginLeft: 52,
+    flexDirection: 'row',
+    gap: 16,
+  },
+  gridCard: {
+    flex: 1,
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#1E2535',
+    borderRadius: 8,
+    padding: 16,
+  },
+  gridCardLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6B7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  gridCardValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#F9FAFB',
+    lineHeight: 20,
+  },
+  recommendationBox: {
+    backgroundColor: '#10B98115',
+    borderWidth: 1,
+    borderColor: '#10B98130',
+    borderRadius: 6,
+    padding: 16,
+  },
+  recommendationText: {
+    fontSize: 14,
+    color: '#D1FAE5',
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 8,
+  },
+  bulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 7,
+    marginRight: 10,
+  },
+  bulletText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#D1D5DB',
+    lineHeight: 20,
+  },
+  claimsList: {
+    marginLeft: 52,
+    gap: 12,
+  },
+  claimCard: {
+    backgroundColor: '#161B22',
+    borderWidth: 1,
+    borderColor: '#1E2535',
+    borderRadius: 8,
+    padding: 16,
+  },
+  claimHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  claimIdText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#EC4899',
+  },
+  claimBadgeRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  miniBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  miniBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  claimBodyText: {
+    fontSize: 13,
+    color: '#E5E7EB',
+    lineHeight: 20,
+  },
   evidenceList: {
     marginLeft: 52,
     gap: 12,
@@ -405,83 +526,43 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     lineHeight: 20,
   },
-  competitorTable: {
+  diffContainer: {
     marginLeft: 52,
+    padding: 24,
+    backgroundColor: '#161B22',
     borderWidth: 1,
     borderColor: '#1E2535',
     borderRadius: 8,
-    backgroundColor: '#161B22',
-    overflow: 'hidden',
   },
-  competitorTableHeader: {
-    flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#1C212B',
-    borderBottomWidth: 1,
-    borderColor: '#1E2535',
-  },
-  tableHeaderLabel: {
-    fontSize: 11,
-    color: '#6B7280',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  competitorTableRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-  },
-  competitorTableRowBorder: {
-    borderBottomWidth: 1,
-    borderColor: '#1E2535',
-  },
-  competitorNameCol: {
-    flex: 1.2,
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#F9FAFB',
-    paddingRight: 16,
-  },
-  competitorDescCol: {
-    flex: 2,
-    fontSize: 14,
+  diffText: {
     color: '#9CA3AF',
-    lineHeight: 20,
-    paddingRight: 16,
+    fontSize: 14,
+    fontStyle: 'italic',
   },
-  competitorImpactCol: {
-    width: 80,
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'right',
-  },
-  classificationGrid: {
+  lineageGrid: {
     flexDirection: 'row',
     gap: 16,
-    marginLeft: 52,
+    marginTop: 8,
   },
-  classificationCard: {
+  lineageCol: {
     flex: 1,
-    backgroundColor: '#161B22',
-    padding: 16,
-    borderRadius: 8,
+    backgroundColor: '#1C212B',
+    padding: 10,
+    borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#1E2535',
+    borderColor: '#2A3347',
   },
-  classificationLabel: {
-    fontSize: 11,
+  lineageLabel: {
+    fontSize: 10,
     color: '#6B7280',
     fontWeight: '600',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  classificationValue: {
-    fontSize: 14,
-    fontWeight: '700',
+  lineageValue: {
+    fontSize: 12,
+    color: '#93C5FD',
+    fontFamily: 'monospace',
   },
   timelineList: {
     marginLeft: 52,
@@ -531,20 +612,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E2535',
     zIndex: 1,
   },
-  diffContainer: {
-    marginLeft: 52,
-    padding: 24,
-    backgroundColor: '#161B22',
-    borderWidth: 1,
-    borderColor: '#1E2535',
-    borderRadius: 8,
-  },
-  diffText: {
-    color: '#9CA3AF',
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-
   skeletonTitle: {
     height: 32,
     width: '60%',

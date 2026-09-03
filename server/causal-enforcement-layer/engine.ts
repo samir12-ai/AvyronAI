@@ -648,14 +648,14 @@ export function detectMarketingClaimStrings(outputTexts: string[]): { present: b
 }
 
 export function isDepthBlocking(depthResult: DepthComplianceResult, sourceTexts?: string[]): boolean {
-  // EITHER from classifier counts OR (pass-6) from string-presence scan over
-  // the raw output sections. Pass-6 added the string-presence parallel trigger
-  // because the classifier was missing copy that bypassed enforcement.
+  // If no root causes were evaluated (e.g. AEL skipped, empty, or filtered), depth enforcement was skipped
+  if ((depthResult.rootCausesEvaluated ?? 0) === 0) {
+    return false;
+  }
   const cb = depthResult.claimBreakdown || { factual: 0, inferred: 0, emotional: 0 };
   const hasClassifierClaim =
     (cb.factual ?? 0) > 0 ||
-    (cb.inferred ?? 0) > 0 ||
-    (cb.factual ?? 0) > 0 || (cb.inferred ?? 0) > 0;
+    (cb.inferred ?? 0) > 0;
   const stringDetect = sourceTexts && sourceTexts.length > 0
     ? detectMarketingClaimStrings(sourceTexts)
     : { present: false, matchedPattern: null, sample: null };

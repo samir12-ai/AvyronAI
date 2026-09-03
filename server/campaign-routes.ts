@@ -781,13 +781,20 @@ export function registerCampaignRoutes(app: Express) {
         ))
         .limit(1);
 
-      const data = {
-        spend: Number(spend) || 0,
-        revenue: Number(revenue) || 0,
-        leads: Number(leads) || 0,
-        conversions: Number(conversions) || 0,
-        impressions: Number(impressions) || 0,
-        clicks: Number(clicks) || 0,
+      const parseMetric = (v: any) => {
+        if (v === undefined || v === null || v === "") return null;
+        const n = Number(v);
+        return isNaN(n) ? null : n;
+      };
+
+      const existingRecord = existing[0];
+      const data: any = {
+        spend: spend !== undefined ? (parseMetric(spend) ?? 0) : (existingRecord?.spend ?? 0),
+        revenue: revenue !== undefined ? (parseMetric(revenue) ?? 0) : (existingRecord?.revenue ?? 0),
+        leads: leads !== undefined ? (parseMetric(leads) ?? 0) : (existingRecord?.leads ?? 0),
+        conversions: conversions !== undefined ? (parseMetric(conversions) ?? 0) : (existingRecord?.conversions ?? 0),
+        impressions: impressions !== undefined ? (parseMetric(impressions) ?? 0) : (existingRecord?.impressions ?? 0),
+        clicks: clicks !== undefined ? (parseMetric(clicks) ?? 0) : (existingRecord?.clicks ?? 0),
         updatedAt: new Date(),
       };
 
@@ -808,8 +815,8 @@ export function registerCampaignRoutes(app: Express) {
         result = inserted[0];
       }
 
-      const cpa = result.conversions > 0 ? +(result.spend / result.conversions).toFixed(2) : 0;
-      const roas = result.spend > 0 ? +(result.revenue / result.spend).toFixed(2) : 0;
+      const cpa = (result.conversions ?? 0) > 0 ? +((result.spend ?? 0) / result.conversions).toFixed(2) : 0;
+      const roas = (result.spend ?? 0) > 0 ? +((result.revenue ?? 0) / result.spend).toFixed(2) : 0;
 
       console.log(`[Campaigns] Manual metrics saved for campaign ${campaignId}: spend=${result.spend}, revenue=${result.revenue}, conversions=${result.conversions}`);
 

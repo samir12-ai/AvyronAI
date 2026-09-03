@@ -10,6 +10,7 @@ import {
   DOCTRINE_VERSION,
   resolveDoctrine,
   parseProductAnchor,
+  computeAnchorHash,
   type EngineDecisionSummary,
   type ProductAnchor,
   type RunStrategicContext,
@@ -69,8 +70,7 @@ export async function loadCampaignProductAnchor(
  * Fail-loud: DB errors propagate. The run already depends on these tables, so a
  * failure here is a genuine environment failure, surfaced rather than swallowed.
  */
-import { businessUnderstandingSnapshots } from "@shared/schema";
-import { desc } from "drizzle-orm";
+import { resolveCurrentBusinessUnderstandingOrThrow } from "../business-understanding/resolver";
 
 export async function seedDoctrine(
   ctx: DoctrineCtxLike,
@@ -79,39 +79,31 @@ export async function seedDoctrine(
 ): Promise<void> {
   if (!ctx.ssc) return;
 
-  // Tenant-scoped Business Understanding read
-  const snaps = await db
-    .select({ payload: businessUnderstandingSnapshots.businessUnderstanding })
-    .from(businessUnderstandingSnapshots)
-    .where(
-      and(
-        eq(businessUnderstandingSnapshots.campaignId, campaignId),
-        eq(businessUnderstandingSnapshots.accountId, accountId)
-      )
-    )
-    .orderBy(desc(businessUnderstandingSnapshots.createdAt))
-    .limit(1);
+  // Strict Current Authority Lineage Resolution (Fail-Closed)
+  const buResult = await resolveCurrentBusinessUnderstandingOrThrow({
+    accountId,
+    campaignId,
+  });
 
-  if (snaps.length === 0 || !snaps[0].payload) {
-    throw new Error(`[Doctrine] FAIL-CLOSED: No Business Understanding found for campaign ${campaignId}. Architecture requires canonical BusinessUnderstandingPayload.`);
-  }
-
-  const payload: any = snaps[0].payload;
+  const payload: any = buResult.payload;
   
   if (payload.status !== "COMPLETE") {
     throw new Error(`[Doctrine] FAIL-CLOSED: Business Understanding is INCOMPLETE for campaign ${campaignId}.`);
   }
 
-  // We assign the new canonical doctrine
+  const productAnchor = await loadCampaignProductAnchor(campaignId, accountId);
+
+  // We assign the new canonical doctrine with the authoritative productAnchor
   ctx.ssc.doctrine = {
     version: DOCTRINE_VERSION,
-    resolution: "anchored", // Kept for compatibility, though meaning is now canonical
+    resolution: productAnchor ? "anchored" : "business_level_degraded",
     businessUnderstanding: payload,
-    anchorHash: payload.businessUnderstandingAuthorityId, // Salt uses authority id
+    productAnchor: productAnchor ?? null,
+    anchorHash: payload.businessUnderstandingAuthorityId || (productAnchor ? computeAnchorHash(productAnchor) : ""),
   } as any;
 
   console.log(
-    `[Doctrine] SEEDED | campaign=${campaignId} | businessUnderstandingAuthorityId=${payload.businessUnderstandingAuthorityId}`
+    `[Doctrine] SEEDED | campaign=${campaignId} | businessUnderstandingAuthorityId=${payload.businessUnderstandingAuthorityId} | productAnchor=${productAnchor ? productAnchor.name : "none"}`
   );
 }
 
@@ -138,15 +130,24 @@ export function appendPriorDecision(
  * block rather than synthesizing a fake one (D5). Keeps each index.ts call site
  * to one argument.
  */
+import { buildEnginePerformanceView } from "../performance-loop/strategy-router";
+
 export function runStrategicContextOf(
   ctx: DoctrineCtxLike,
+  engineName?: string,
 ): RunStrategicContext | undefined {
   const doctrine = ctx.ssc?.doctrine;
   if (!doctrine) return undefined;
   const priorDecisions = Array.isArray(ctx.ssc?.priorDecisions)
     ? ctx.ssc.priorDecisions
     : [];
-  return { doctrine, priorDecisions };
+
+  const rawPerfCtx = (ctx as any)?.performanceContext || null;
+  const performanceContext = rawPerfCtx
+    ? buildEnginePerformanceView(engineName || "GENERIC", rawPerfCtx)
+    : null;
+
+  return { doctrine, priorDecisions, performanceContext, rawPerformanceContext: rawPerfCtx };
 }
 
 /**

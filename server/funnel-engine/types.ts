@@ -16,6 +16,8 @@ export interface FunnelAudienceInput {
   audiencePains: any[];
   desireMap: Record<string, any>;
   audienceSegments: any[];
+  laneId?: string;
+  laneContext?: any;
   /**
    * Authoritative pain registry from the orchestrator run context (Task 163).
    * Optional — legacy `audiencePains` stays untouched as the raw input; the
@@ -101,6 +103,10 @@ export interface PriorityMatrixDecision {
 }
 
 export interface FunnelCandidate {
+  laneId?: string;
+  laneLabel?: string;
+  primaryCorePainId?: string;
+  segmentIds?: string[];
   funnelName: string;
   funnelType: string;
   stageMap: FunnelStage[];
@@ -152,6 +158,9 @@ export interface FrictionPoint {
 }
 
 export interface FunnelResult {
+  laneId?: string;
+  primaryCorePainId?: string;
+  segmentIds?: string[];
   status: string;
   statusMessage: string | null;
   primaryFunnel: FunnelCandidate;

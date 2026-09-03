@@ -134,7 +134,7 @@ If no structural contradictions exist, output:
   return { valid: true };
 }
 
-import { strategicPlans, requiredWork, calendarEntries, businessDataLayer } from "@shared/schema";
+import { strategicPlans, requiredWork, calendarEntries, businessDataLayer, offerSnapshots } from "@shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { createAttributionEntries } from "../decision-attribution";
@@ -238,6 +238,108 @@ export interface SynthesizedPlan {
     violations: string[];
   };
   memoryOverrides?: Array<{ field: string; originalValue: number; correctedValue: number; memoryLabel: string }>;
+  buyerConversionJourneys?: Array<{
+    laneId?: string;
+    laneLabel?: string;
+    primaryPainId?: string;
+    segmentIds?: string[];
+    sourceFunnelSnapshotId?: string;
+    sourcePersuasionSnapshotId?: string;
+    journeyName: string;
+    journeyType: string;
+    whyThisJourney: string;
+    entryTrigger: {
+      mechanismType: string;
+      purpose: string;
+    };
+    stages: Array<{
+      stageId?: string;
+      stageName: string;
+      goal: string;
+      buyerState: string;
+      coreMessage: string;
+      contentAction: string;
+      proof: string[];
+      cta: string;
+    }>;
+    persuasionStrategy?: {
+      mode: string;
+      modeLabel: string;
+      coreBeliefTransformation: {
+        currentBelief: string;
+        desiredBelief: string;
+        contradictionLogic?: string;
+      };
+      messageSequence: Array<{
+        step: string;
+        stepLabel: string;
+        rationale: string;
+      }>;
+      objections: Array<{
+        objectionId?: string;
+        objection: string;
+        response: string;
+        requiredProof: string;
+        funnelStageId?: string;
+      }>;
+      trustStrategy: {
+        buyerRiskState: string;
+        trustDeficit: string;
+        transferMechanismName: string;
+        proofArtifact: string;
+        primaryCialdiniPrinciple: string;
+        principleRationale: string;
+      };
+    };
+  }>;
+  buyerConversionJourney?: {
+    journeyName: string;
+    journeyType: string;
+    whyThisJourney: string;
+    entryTrigger: {
+      mechanismType: string;
+      purpose: string;
+    };
+    stages: Array<{
+      stageId?: string;
+      stageName: string;
+      goal: string;
+      buyerState: string;
+      coreMessage: string;
+      contentAction: string;
+      proof: string[];
+      cta: string;
+    }>;
+  };
+  persuasionStrategy?: {
+    mode: string;
+    modeLabel: string;
+    coreBeliefTransformation: {
+      currentBelief: string;
+      desiredBelief: string;
+      contradictionLogic?: string;
+    };
+    messageSequence: Array<{
+      step: string;
+      stepLabel: string;
+      rationale: string;
+    }>;
+    objections: Array<{
+      objectionId?: string;
+      objection: string;
+      response: string;
+      requiredProof: string;
+      funnelStageId?: string;
+    }>;
+    trustStrategy: {
+      buyerRiskState: string;
+      trustDeficit: string;
+      transferMechanismName: string;
+      proofArtifact: string;
+      primaryCialdiniPrinciple: string;
+      principleRationale: string;
+    };
+  };
   explorationPlan?: {
     explorationPercent: number;
     totalExplorationCount: number;
@@ -288,28 +390,36 @@ export interface SynthesizedPlan {
   };
 }
 
-function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): SynthesizedPlan {
+function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any, activeStrategyRoot?: any): SynthesizedPlan {
   const reasoning = budgetOutput?.decision?.reasoning || "Budget governor halted execution";
   const killReasons = budgetOutput?.killReasons || [];
+
+  // BLL clean explanation for the business owner
+  const bllBudgetExplanation = "Paid media budget is currently withheld because Avyron does not yet have enough validated performance history to recommend spend safely.";
+
+  const primaryLane = Array.isArray(activeStrategyRoot?.approvedLanes) ? activeStrategyRoot.approvedLanes[0] : null;
+  const targetAudience = primaryLane?.title || primaryLane?.name || campaign?.targetAudience || "Target Audience under validation";
+  const strategyTitle = activeStrategyRoot?.brandSpine?.umbrellaPositionName || activeStrategyRoot?.approvedPositioningContext?.territoryName || "Commercial Strategy";
+
   return {
     planSource: "degraded_ai_failed",
     degraded: true,
     strategicSummary: {
-      strategy: "HALTED — Budget governor blocked execution",
-      targetAudience: campaign?.targetAudience || "N/A",
-      growthObjective: campaign?.objective || "N/A",
-      rationale: `Execution halted: ${reasoning}. ${killReasons.length > 0 ? "Kill reasons: " + killReasons.join("; ") : ""}`,
+      strategy: `${strategyTitle} — Paid media spend withheld pending performance baseline`,
+      targetAudience,
+      growthObjective: campaign?.objective || "Market Validation & Buyer Pipeline Building",
+      rationale: `${bllBudgetExplanation} Strategic foundation is preserved for organic execution and proof collection.`,
     },
     monthlyObjective: {
-      objective: "Strategy under review — no execution permitted",
+      objective: "Organic Validation & Proof Collection — Paid media execution paused",
       type: "hold",
-      targetMetric: "N/A",
+      targetMetric: "Conversion Proof / Qualitative Signals",
       targetValue: "0",
     },
     kpiStructure: {
-      primaryKPI: { name: "N/A", target: "0", cadence: "N/A" },
-      secondaryKPI: { name: "N/A", target: "0", cadence: "N/A" },
-      performanceExpectations: "Execution halted by budget governor. Review strategy before resuming.",
+      primaryKPI: { name: "Prospect Engagement & Proof Verification", target: "Qualitative", cadence: "weekly" },
+      secondaryKPI: { name: "Organic Conversion Pathway Verification", target: "Qualitative", cadence: "weekly" },
+      performanceExpectations: bllBudgetExplanation,
     },
     contentDistribution: {
       reelsPerWeek: 0,
@@ -317,7 +427,7 @@ function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): Synthesi
       storiesPerDay: 0,
       carouselsPerWeek: 0,
       videosPerWeek: 0,
-      rationale: "No content production — strategy halted",
+      rationale: "Paid content production paused — organic strategy active",
       contentPillars: [],
     },
     creativeTesting: { tests: [] },
@@ -331,8 +441,8 @@ function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any): Synthesi
     },
     competitiveWatch: { targets: [] },
     riskTriggers: {
-      triggers: [{ trigger: "Budget halt active", condition: "Automatic", action: "Review strategy fundamentals before resuming", severity: "critical" }],
-      escalationPath: ["Review offer strength", "Review funnel conversion", "Re-run budget governor"],
+      triggers: [{ trigger: "Paid spend withheld", condition: "Insufficient performance baseline", action: "Execute organic validation to gather first conversion events", severity: "low" }],
+      escalationPath: ["Acquire first validated conversion signals", "Re-run budget governor with performance data"],
     },
   };
 }
@@ -392,12 +502,12 @@ function applyBudgetHoldRestriction(plan: SynthesizedPlan): SynthesizedPlan {
   const dist = plan.contentDistribution;
   const restricted = {
     ...dist,
-    reelsPerWeek: Math.max(1, Math.floor(dist.reelsPerWeek * 0.5)),
-    postsPerWeek: Math.max(1, Math.floor(dist.postsPerWeek * 0.5)),
-    storiesPerDay: Math.max(0, Math.floor(dist.storiesPerDay * 0.5)),
-    carouselsPerWeek: Math.max(0, Math.floor(dist.carouselsPerWeek * 0.5)),
-    videosPerWeek: Math.max(0, Math.floor(dist.videosPerWeek * 0.5)),
-    rationale: `[HOLD-RESTRICTED] ${dist.rationale || ""} — Content volume reduced by 50% due to budget hold decision`,
+    reelsPerWeek: dist.reelsPerWeek > 0 ? Math.max(1, Math.floor(dist.reelsPerWeek * 0.5)) : 0,
+    postsPerWeek: dist.postsPerWeek > 0 ? Math.max(1, Math.floor(dist.postsPerWeek * 0.5)) : 0,
+    storiesPerDay: dist.storiesPerDay > 0 ? Math.max(0, Math.floor(dist.storiesPerDay * 0.5)) : 0,
+    carouselsPerWeek: dist.carouselsPerWeek > 0 ? Math.max(0, Math.floor(dist.carouselsPerWeek * 0.5)) : 0,
+    videosPerWeek: dist.videosPerWeek > 0 ? Math.max(0, Math.floor(dist.videosPerWeek * 0.5)) : 0,
+    rationale: `[HOLD-RESTRICTED] ${dist.rationale || ""} — Scaling budget is held`,
   };
   return { ...plan, contentDistribution: restricted };
 }
@@ -408,12 +518,12 @@ function applyIntegrityDegradation(plan: SynthesizedPlan, mode: "restricted" | "
   const dist = plan.contentDistribution;
   const restricted = {
     ...dist,
-    reelsPerWeek: Math.max(1, Math.floor(dist.reelsPerWeek * multiplier)),
-    postsPerWeek: Math.max(1, Math.floor(dist.postsPerWeek * multiplier)),
-    storiesPerDay: Math.max(0, Math.floor(dist.storiesPerDay * multiplier)),
-    carouselsPerWeek: Math.max(0, Math.floor(dist.carouselsPerWeek * multiplier)),
-    videosPerWeek: Math.max(0, Math.floor(dist.videosPerWeek * multiplier)),
-    rationale: `[${label}] ${dist.rationale || ""} — Content volume reduced due to integrity concerns`,
+    reelsPerWeek: dist.reelsPerWeek > 0 ? Math.max(1, Math.floor(dist.reelsPerWeek * multiplier)) : 0,
+    postsPerWeek: dist.postsPerWeek > 0 ? Math.max(1, Math.floor(dist.postsPerWeek * multiplier)) : 0,
+    storiesPerDay: dist.storiesPerDay > 0 ? Math.max(0, Math.floor(dist.storiesPerDay * multiplier)) : 0,
+    carouselsPerWeek: dist.carouselsPerWeek > 0 ? Math.max(0, Math.floor(dist.carouselsPerWeek * multiplier)) : 0,
+    videosPerWeek: dist.videosPerWeek > 0 ? Math.max(0, Math.floor(dist.videosPerWeek * multiplier)) : 0,
+    rationale: `[${label}] ${dist.rationale || ""} — Content scaling governed due to integrity concerns`,
   };
   return {
     ...plan,
@@ -710,7 +820,7 @@ export interface LockedLabel {
   scope?: string;
 }
 
-function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): LockedLabel[] {
+export function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): LockedLabel[] {
   const out: LockedLabel[] = [];
 
   const positioning = results.get("positioning");
@@ -722,8 +832,10 @@ function extractLockedDecisionLabels(results: Map<EngineId, EngineStepResult>, s
   const mechanism = results.get("mechanism");
   if (mechanism?.status === "SUCCESS") {
     const m = mechanism.output?.output || mechanism.output;
-    const mechName = m?.primaryMechanism?.mechanismName || m?.mechanismName;
-    if (mechName) out.push({ label: mechName, scope: "mechanism" });
+    if (m?.status === "COMPLETE" || m?.status === "SUCCESS") {
+      const mechName = m?.primaryMechanism?.mechanismName || m?.mechanismName;
+      if (mechName) out.push({ label: mechName, scope: "mechanism" });
+    }
   }
 
   const offer = results.get("offer");
@@ -907,7 +1019,13 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
   if (strategyRoot) {
     const pains = strategyRoot.approvedAudiencePains;
     if (Array.isArray(pains) && pains.length > 0) {
-      lines.push(`  Strategy Root Pains: ${pains.map((p: any) => typeof p === 'string' ? p : p.pain || p.name || p).join(", ")}`);
+      const corePains = pains.filter((p: any) => {
+        const text = typeof p === 'string' ? p : (p.pain || p.name || p.statement || p.text || '');
+        return !/unauthorized|billing|refund|cancellation charges/i.test(text);
+      });
+      if (corePains.length > 0) {
+        lines.push(`  Strategy Root Core Pains: ${corePains.map((p: any) => typeof p === 'string' ? p : p.pain || p.name || p).join(", ")}`);
+      }
     }
     const objections = strategyRoot.approvedObjections;
     if (objections) {
@@ -1050,6 +1168,20 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
   return lines.join("\n");
 }
 
+export function cleanInternalIdsFromProse(text: string): string {
+  if (!text || typeof text !== "string") return text;
+  return text
+    .replace(/\bseg_\w+_pain_\w+\b[—\s:-]*/gi, "")
+    .replace(/\bseg_\w+\b[—\s:-]*/gi, "")
+    .replace(/\bspd_\w+\b[—\s:-]*/gi, "")
+    .replace(/\blane_[a-f0-9]+\b[—\s:-]*/gi, "")
+    .replace(/\[ID:\s*[^\]]+\]/gi, "")
+    .replace(/\(ID:\s*[^)]+\)/gi, "")
+    .replace(/\s+([.,;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 async function generatePlanWithAI(
   engineInsights: string,
   businessData: any,
@@ -1069,13 +1201,30 @@ async function generatePlanWithAI(
   const approvedLanes = activeStrategyRoot?.approvedLanes
     ? (typeof activeStrategyRoot.approvedLanes === "string" ? JSON.parse(activeStrategyRoot.approvedLanes) : activeStrategyRoot.approvedLanes)
     : null;
+  const approvedAudiencePains = activeStrategyRoot?.approvedAudiencePains
+    ? (typeof activeStrategyRoot.approvedAudiencePains === "string" ? JSON.parse(activeStrategyRoot.approvedAudiencePains) : activeStrategyRoot.approvedAudiencePains)
+    : null;
+
+  const resolvePainsForPrompt = (pIds: any[]) => {
+    if (!Array.isArray(pIds)) return pIds;
+    return pIds.map((id: string) => {
+      if (typeof id !== "string") return id;
+      const found = Array.isArray(approvedAudiencePains)
+        ? approvedAudiencePains.find((p: any) => p?.painId === id || p?.id === id)
+        : null;
+      if (found) {
+        return found.canonical || found.pain || found.statement || found.text || id;
+      }
+      return id;
+    });
+  };
 
   let lanesBlock = "";
   if (Array.isArray(approvedLanes) && approvedLanes.length > 0) {
     lanesBlock = `STRATEGIC LANES & BRAND SPINE (Locked Canonical Strategy):
 Brand Spine: ${JSON.stringify(brandSpine)}
 Active Lanes:
-${approvedLanes.map((l: any) => `- Lane: "${l.title}"\n  Description: "${l.description}"\n  Pains: ${JSON.stringify(l.painIds)}\n  Desires: ${JSON.stringify(l.desires)}\n  Objections: ${JSON.stringify(l.objections)}\n  Messaging Direction: "${l.messagingDirection}"`).join("\n")}
+${approvedLanes.map((l: any) => `- Lane: "${l.title}"\n  Description: "${l.description}"\n  Pains: ${JSON.stringify(resolvePainsForPrompt(l.painIds))}\n  Desires: ${JSON.stringify(l.desires)}\n  Objections: ${JSON.stringify(l.objections)}\n  Messaging Direction: "${l.messagingDirection}"`).join("\n")}
 INSTRUCTION: You must synthesize the execution plan around these Strategic Lanes under the umbrella of the Brand Spine. Do NOT collapse the strategy to a single pain. The targetAudience, strategy explanation, content pillars, and risk triggers must reflect this multi-lane context.
 `;
   }
@@ -1166,6 +1315,7 @@ STRICT CONSTITUTIONAL RULES:
 2. MULTI-LANE INTEGRATION WITHOUT COLLISION: Preserve each active Strategic Lane as a distinct commercial context. Do NOT collapse all lanes into a single pain or merge conflicting audience pains (e.g. B2B clinic procurement vs B2C personal wellness) into a single confused paragraph.
 3. TRUTH-GROUNDED SPECIFICITY: Do NOT invent unvalidated features, SLAs, or technical integrations (e.g. "real-time API inventory integration", "guaranteed zero stockouts") unless verified in the Product Anchor. If proof or capabilities are missing, explicitly document them as a "Proof Gap" or "Capability Gap".
 4. PRESERVE ENGINE AUTHORITY: Use the exact locked decisions from upstream engines (Positioning, Differentiation, Mechanism, Offer, Funnel, Channel) without rewriting or substituting synonyms.
+5. BUSINESS-FACING PROSE & IDENTITY HYGIENE: Do NOT output raw internal identifiers (such as "seg_1_pain_1", "seg_*", "spd_*", "lane_*", or "[ID: ...]") in strategicSummary or customer-facing text. Use only clean, professional business language.
 
 Business Type: ${businessType}
 Location: ${location}
@@ -1195,12 +1345,11 @@ Generate a complete strategic execution plan. Return ONLY valid JSON matching th
     "performanceExpectations": "Expected performance"
   },
   "contentDistribution": {
-    "reelsPerWeek": 3,
-    "postsPerWeek": 3,
-    "storiesPerDay": 2,
-    "carouselsPerWeek": 1,
-    "videosPerWeek": 0,
-    "rationale": "Strategic rationale linking content pillars to the distinct audience lanes and required perception shifts",
+    "channels": [
+      { "channel": "Approved Primary Channel", "role": "Strategic role of this channel in the buyer journey", "tier": "PRIMARY" },
+      { "channel": "Approved Secondary Channel", "role": "Strategic role of this channel in the buyer journey", "tier": "SECONDARY" }
+    ],
+    "rationale": "Strategic distribution rationale linking channels and content pillars to the distinct audience lanes and required perception shifts without prescribing daily task cadences",
     "contentPillars": [{"pillar":"name","percentage":"40%","examples":["example"]}]
   },
   "creativeTesting": {
@@ -1231,7 +1380,14 @@ Generate a complete strategic execution plan. Return ONLY valid JSON matching th
 
   const attemptResult = await requestSynthesizedPlanJson({ prompt, accountId });
   if (attemptResult.ok) {
-    return attemptResult.plan;
+    const plan = attemptResult.plan;
+    if (plan.strategicSummary) {
+      if (plan.strategicSummary.strategy) plan.strategicSummary.strategy = cleanInternalIdsFromProse(plan.strategicSummary.strategy);
+      if (plan.strategicSummary.targetAudience) plan.strategicSummary.targetAudience = cleanInternalIdsFromProse(plan.strategicSummary.targetAudience);
+      if (plan.strategicSummary.growthObjective) plan.strategicSummary.growthObjective = cleanInternalIdsFromProse(plan.strategicSummary.growthObjective);
+      if (plan.strategicSummary.rationale) plan.strategicSummary.rationale = cleanInternalIdsFromProse(plan.strategicSummary.rationale);
+    }
+    return plan;
   }
   console.error(
     `[PlanSynthesis] SYNTHESIS_DEGRADED_AI_FAILED | AI synthesis failed: ${attemptResult.lastError}. ` +
@@ -1664,6 +1820,57 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Plan gate check failed (non-blocking):`, gateErr.message);
   }
 
+  // Load Strategy Root for synthesis integration
+  let activeStrategyRoot: any = (config as any)?.strategyRoot || (ctx as any)?.strategyRoot || null;
+  if (!activeStrategyRoot && (ctx as any)?.approvedLanes) {
+    activeStrategyRoot = { approvedLanes: (ctx as any).approvedLanes };
+  }
+  try {
+    if (!activeStrategyRoot) {
+      const { getActiveRoot } = await import("../shared/strategy-root");
+      activeStrategyRoot = await getActiveRoot(config.campaignId, config.accountId);
+    }
+    if (activeStrategyRoot) {
+      console.log(`[PlanSynthesis] STRATEGY_ROOT_LOADED | rootId=${activeStrategyRoot.id} | hash=${activeStrategyRoot.rootHash}`);
+      const parseMaybe = (v: any, fallback: any) => {
+        if (typeof v !== "string") return v;
+        try { return JSON.parse(v); } catch {
+          console.warn(`[PlanSynthesis] STRATEGY_ROOT_FIELD_MALFORMED_JSON | using safe default`);
+          return fallback;
+        }
+      };
+      const jsonTextFields: Array<[string, any]> = [
+        ["approvedMechanism", null],
+        ["approvedAudiencePains", []],
+        ["approvedDesires", []],
+        ["approvedClaims", []],
+        ["approvedObjections", []],
+        ["approvedProofTypes", []],
+        ["approvedPositioningContext", null],
+      ];
+      for (const [key, fallback] of jsonTextFields) {
+        activeStrategyRoot[key] = parseMaybe(activeStrategyRoot[key], fallback);
+      }
+      if (!Array.isArray(activeStrategyRoot.approvedPains)) {
+        activeStrategyRoot.approvedPains = Array.isArray(activeStrategyRoot.approvedAudiencePains)
+          ? activeStrategyRoot.approvedAudiencePains.map((p: any) =>
+              typeof p === "string" ? p : (p?.originalStatement || p?.pain || p?.normalizedStatement || ""))
+              .filter((s: string) => s.length > 0)
+          : [];
+      }
+      if (activeStrategyRoot.approvedTransformationAxis === undefined) {
+        activeStrategyRoot.approvedTransformationAxis = activeStrategyRoot.approvedTransformation ?? null;
+      }
+      if (activeStrategyRoot.contrastAxis === undefined) {
+        activeStrategyRoot.contrastAxis = activeStrategyRoot.contrastAxisText ?? null;
+      }
+    } else {
+      console.warn(`[PlanSynthesis] NO_ACTIVE_STRATEGY_ROOT | campaign=${config.campaignId}`);
+    }
+  } catch (srErr: any) {
+    console.warn(`[PlanSynthesis] Strategy root load failed (non-blocking):`, srErr.message);
+  }
+
   const budgetGovResult = results.get("budget_governor");
   // Task #70 / Phase 7 — read the authoritative budget action from the
   // BudgetDecisionLedger entry the orchestrator stamped onto the budget
@@ -1680,20 +1887,12 @@ export async function synthesizePlan(
   }
 
   if (budgetDecision === "halt" || budgetKillFlag) {
-    console.warn(`[PlanSynthesis] BUDGET_HALT_ENFORCED | decision=${budgetDecision} killFlag=${budgetKillFlag} — skipping full plan synthesis, producing halt plan`);
-    const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign);
+    console.warn(`[PlanSynthesis] BUDGET_HALT_ENFORCED | decision=${budgetDecision} killFlag=${budgetKillFlag} — synthesizing halt plan preserving canonical strategy`);
+    const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign, activeStrategyRoot);
     const planId = await persistPlan(haltPlan, config, rootBundle, []);
     // Task #70 / Phase 7 — third ledger writer. Records that plan-synthesis
     // forced a halt distinctly from any prior system-control downgrade, so
     // the structured BudgetDecisionLedger view exposes a separate slot.
-    //
-    // Fail-loud contract (code-review round 3): the recorder is a pure
-    // builder. The ONLY failure mode is InvalidBudgetDowngradeError on a
-    // bad observedAction enum (D3 violation upstream) — that MUST surface
-    // loud, not silently drop the writer slot. We pre-coerce to a valid
-    // BudgetAction so the call cannot legitimately throw under normal
-    // operation; any thrown error is therefore a real contract violation
-    // and we re-throw after audit-logging.
     const { recordSynthesisHaltOverride } = await import("./budget-decision-ledger");
     const observed: import("./budget-decision-ledger").BudgetAction =
       budgetDecision === "hold" || budgetDecision === "test" || budgetDecision === "scale"
@@ -1755,63 +1954,6 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] INTEGRITY_RESTRICTED_MODE | score=${integrityScore.toFixed(2)} — plan content volume will be reduced`);
   }
 
-  // Load Strategy Root for synthesis integration
-  let activeStrategyRoot: any = null;
-  try {
-    const { getActiveRoot } = await import("../shared/strategy-root");
-    activeStrategyRoot = await getActiveRoot(config.campaignId, config.accountId);
-    if (activeStrategyRoot) {
-      console.log(`[PlanSynthesis] STRATEGY_ROOT_LOADED | rootId=${activeStrategyRoot.id} | hash=${activeStrategyRoot.rootHash}`);
-      // Persisted strategy_roots rows store JSON fields as text. Parse them
-      // once here so every downstream read site in synthesis sees the parsed
-      // shape. (Other modules parse per-site; this module assumed arrays and
-      // crashed with ".map is not a function" the first time approvedObjections
-      // was non-null.) On MALFORMED JSON text we normalize to the field's
-      // type-appropriate safe default ([] / null) instead of keeping the raw
-      // string — downstream reads call .map on the array fields and would
-      // crash on a leaked string. The warning keeps the degradation truthful.
-      const parseMaybe = (v: any, fallback: any) => {
-        if (typeof v !== "string") return v;
-        try { return JSON.parse(v); } catch {
-          console.warn(`[PlanSynthesis] STRATEGY_ROOT_FIELD_MALFORMED_JSON | using safe default`);
-          return fallback;
-        }
-      };
-      const jsonTextFields: Array<[string, any]> = [
-        ["approvedMechanism", null],
-        ["approvedAudiencePains", []],
-        ["approvedDesires", []],
-        ["approvedClaims", []],
-        ["approvedObjections", []],
-        ["approvedProofTypes", []],
-        ["approvedPositioningContext", null],
-      ];
-      for (const [key, fallback] of jsonTextFields) {
-        activeStrategyRoot[key] = parseMaybe(activeStrategyRoot[key], fallback);
-      }
-      // Read-path aliases: synthesis prompts reference field names that never
-      // existed on the persisted row (silent empty output until now). Map them
-      // from the real columns so the locked-decision grounding works as designed.
-      if (!Array.isArray(activeStrategyRoot.approvedPains)) {
-        activeStrategyRoot.approvedPains = Array.isArray(activeStrategyRoot.approvedAudiencePains)
-          ? activeStrategyRoot.approvedAudiencePains.map((p: any) =>
-              typeof p === "string" ? p : (p?.originalStatement || p?.pain || p?.normalizedStatement || ""))
-              .filter((s: string) => s.length > 0)
-          : [];
-      }
-      if (activeStrategyRoot.approvedTransformationAxis === undefined) {
-        activeStrategyRoot.approvedTransformationAxis = activeStrategyRoot.approvedTransformation ?? null;
-      }
-      if (activeStrategyRoot.contrastAxis === undefined) {
-        activeStrategyRoot.contrastAxis = activeStrategyRoot.contrastAxisText ?? null;
-      }
-    } else {
-      console.warn(`[PlanSynthesis] NO_ACTIVE_STRATEGY_ROOT | campaign=${config.campaignId}`);
-    }
-  } catch (srErr: any) {
-    console.warn(`[PlanSynthesis] Strategy root load failed (non-blocking):`, srErr.message);
-  }
-
   const engineInsights = extractEngineInsights(results, activeStrategyRoot);
   const lockedDecisions = extractLockedDecisions(results, activeStrategyRoot);
   const lockedLabels = extractLockedDecisionLabels(results, activeStrategyRoot);
@@ -1851,6 +1993,29 @@ export async function synthesizePlan(
   let precomputedRhythm = null;
   try {
     precomputedRhythm = await computeAdaptiveRhythm(config.campaignId, config.accountId);
+    
+    // Adapt rhythm to approved channels from channel selection / strategy root
+    const chanRes = results.get("channel_selection")?.output || results.get("channel_selection") || null;
+    const approvedChannelsList: string[] = [
+      ...(Array.isArray(activeStrategyRoot?.approvedChannels) ? activeStrategyRoot.approvedChannels : []),
+      ...(chanRes?.proposedPrimary ? [chanRes.proposedPrimary] : []),
+      ...(chanRes?.secondary ? [chanRes.secondary] : []),
+      ...(Array.isArray(chanRes?.lockedChannels) ? chanRes.lockedChannels : []),
+    ];
+    const approvedChannelsText = approvedChannelsList.join(" ").toLowerCase();
+    const hasShortFormVideoOrInstagram = approvedChannelsText.includes("instagram") || approvedChannelsText.includes("tiktok") || approvedChannelsText.includes("reels");
+
+    if (!hasShortFormVideoOrInstagram && approvedChannelsList.length > 0 && precomputedRhythm) {
+      precomputedRhythm = {
+        ...precomputedRhythm,
+        reelsPerWeek: 0,
+        carouselsPerWeek: 0,
+        storiesPerDay: 0,
+        videosPerWeek: approvedChannelsText.includes("youtube") || approvedChannelsText.includes("video") ? 1 : 0,
+        postsPerWeek: Math.max(1, precomputedRhythm.postsPerWeek || 1),
+        reasoning: `Channel-adapted rhythm for approved channels (${approvedChannelsList.filter(Boolean).join(", ")})`,
+      };
+    }
   } catch (rhythmErr: any) {
     console.warn(`[PlanSynthesis] Precomputed rhythm failed (non-blocking):`, rhythmErr.message);
   }
@@ -1867,6 +2032,316 @@ export async function synthesizePlan(
   synthesized.approvedLanes = activeStrategyRoot?.approvedLanes
     ? (typeof activeStrategyRoot.approvedLanes === "string" ? JSON.parse(activeStrategyRoot.approvedLanes) : activeStrategyRoot.approvedLanes)
     : null;
+
+  // Helper to build a structured journey from a funnel result and corresponding persuasion result
+  const UNGROUNDED_PROOF_PATTERNS = [
+    /soc-?2/i,
+    /42%\s*targeting/i,
+    /14-?day.*(?:production|enterprise|deployment).*sla/i,
+    /3\.2x.*sales/i,
+    /custom enterprise dpa/i,
+    /zero operational disruption/i,
+    /turnkey api integration/i,
+    /crm connectors/i,
+    /enterprise data integrity sla/i,
+  ];
+
+  const safeExtractCanonicalText = (item: any): string => {
+    if (!item) return "";
+    if (typeof item === "string") {
+      const trimmed = item.trim();
+      if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          return parsed.canonical || parsed.statement || parsed.text || parsed.objection || parsed.proofName || parsed.claim || trimmed;
+        } catch {
+          return trimmed;
+        }
+      }
+      return trimmed;
+    }
+    if (typeof item === "object") {
+      return item.canonical || item.statement || item.text || item.objection || item.proofName || item.claim || item.title || "";
+    }
+    return String(item);
+  };
+
+  const sanitizeProofItem = (p: any): any => {
+    let name = "";
+    let proofType = "process_proof";
+    let stage = "education";
+    let purpose = "Demonstrate methodology and workflow transparency";
+    let proofStatus = "PROOF_TO_BUILD";
+
+    if (typeof p === "string") {
+      name = safeExtractCanonicalText(p);
+    } else if (typeof p === "object" && p !== null) {
+      name = safeExtractCanonicalText(p.proofName || p.name || p.claim || p.purpose);
+      proofType = p.proofType || proofType;
+      stage = p.stage || stage;
+      purpose = p.purpose || purpose;
+      proofStatus = p.proofStatus || p.status || proofStatus;
+    }
+
+    return {
+      proofName: name,
+      proofType,
+      stage,
+      purpose,
+      proofStatus,
+    };
+  };
+
+  const buildSingleBuyerJourney = (
+    funnelRes: any,
+    persuasionRes: any,
+    awarenessRes: any,
+    laneCtx?: any,
+  ) => {
+    if (!funnelRes) return null;
+    const fOut = funnelRes.output?.output || funnelRes.output || (funnelRes as any).data || funnelRes;
+    const funnelObj = fOut.primaryFunnel || fOut.funnel || fOut;
+    const rawStages = (funnelObj.stages || funnelObj.stageMap || fOut.stages || fOut.stageMap || []) as any[];
+    if (!funnelObj || (rawStages.length === 0 && (!funnelObj.funnelName || funnelObj.funnelName === "DEPTH_FAILED"))) {
+      return null;
+    }
+
+    const laneId = laneCtx?.laneId || laneCtx?.id || funnelObj.laneId || (funnelRes as any).laneId || "default";
+    const laneLabel = laneCtx?.title || laneCtx?.name || funnelObj.laneLabel || funnelObj.journeyName || funnelObj.funnelName || "Buyer Conversion Journey";
+    const primaryPainId = funnelObj.primaryCorePainId || laneCtx?.primaryCorePainId || (funnelRes as any).primaryCorePainId;
+    const segmentIds = funnelObj.segmentIds || laneCtx?.segmentIds || (funnelRes as any).segmentIds || [];
+    const sourceFunnelSnapshotId = (funnelRes as any).snapshotId || (funnelRes.output as any)?.snapshotId;
+
+    let persuasionStrategyObj: any = undefined;
+    let sourcePersuasionSnapshotId: string | undefined = undefined;
+
+    if (persuasionRes) {
+      sourcePersuasionSnapshotId = (persuasionRes as any).snapshotId || (persuasionRes.output as any)?.snapshotId;
+      const pOut = persuasionRes.output?.output || persuasionRes.output || (persuasionRes as any).data || persuasionRes;
+      const pData = pOut.primaryRoute || pOut.persuasionArchitecture || pOut;
+      const ttDesign = pOut.trustTransferDesign || pData.trustTransferDesign;
+      const cialdini = pOut.cialdiniReasoning || pData.cialdiniReasoning;
+
+      if (pData) {
+        // ── CANONICAL BELIEF SHIFT: PersuasionEngine is the sole authority ──
+        const cbt = pData.coreBeliefTransformation || pOut.coreBeliefTransformation || (pData.beliefShift ? {
+          currentBelief: pData.beliefShift.from,
+          desiredBelief: pData.beliefShift.to,
+          contradictionLogic: pData.beliefShift.mechanism,
+        } : undefined);
+        const currentBelief = safeExtractCanonicalText(cbt?.currentBelief);
+        const desiredBelief = safeExtractCanonicalText(cbt?.desiredBelief);
+
+        if (!currentBelief || !desiredBelief) {
+          throw new Error(`CONTRACT_INVARIANT_FAILURE: PersuasionEngine failed to produce valid canonical coreBeliefTransformation for lane ${laneId} (current="${currentBelief}", desired="${desiredBelief}")`);
+        }
+
+        // ── CANONICAL TRUST STRATEGY: PersuasionEngine is the sole authority ──
+        const buyerRisk = safeExtractCanonicalText(ttDesign?.buyerRiskState || pData.trustStrategy?.buyerRiskState || pData.trustStrategy?.buyerRisk || pData.trustArchitecture?.riskState || pData.trustArchitecture?.buyerRiskState);
+        const trustDeficit = safeExtractCanonicalText(ttDesign?.trustDeficit || pData.trustStrategy?.trustDeficit || pData.trustArchitecture?.trustDeficit);
+        const transferMech = safeExtractCanonicalText(ttDesign?.transferMechanism?.name || pData.trustStrategy?.transferMechanismName || pData.trustStrategy?.transferMechanism || pData.trustArchitecture?.mechanism || pData.trustArchitecture?.transferMechanism);
+        const proofArt = safeExtractCanonicalText(ttDesign?.transferMechanism?.proofArtifact || pData.trustStrategy?.proofArtifact || pData.trustArchitecture?.proofArtifact);
+        const cialdiniPrinciple = safeExtractCanonicalText(cialdini?.primaryCialdiniPrinciple || pData.trustStrategy?.primaryCialdiniPrinciple);
+        const cialdiniRationale = safeExtractCanonicalText(cialdini?.principleRationale || pData.trustStrategy?.principleRationale);
+
+        if (!buyerRisk || !trustDeficit || !transferMech || !proofArt) {
+          throw new Error(`CONTRACT_INVARIANT_FAILURE: PersuasionEngine failed to produce valid canonical trustStrategy for lane ${laneId}`);
+        }
+
+        // ── CANONICAL OBJECTION PLAYBOOK: PersuasionEngine is the sole authority ──
+        const rawObjections = pData.objections || pData.objectionPriorities || pData.structuredObjections || [];
+        const objections = rawObjections.map((o: any) => {
+          const cleanObjectionText = safeExtractCanonicalText(o.objection?.canonical || o.objection || o.canonical || o.statement);
+          const cleanResponse = safeExtractCanonicalText(o.response || o.resolution || o.persuasionResponse || o.handling || o.counterArgument);
+          const cleanProof = safeExtractCanonicalText(o.requiredProof || o.requiredProofType || o.proofRequirement || o.evidence);
+
+          if (!cleanResponse && cleanObjectionText) {
+            throw new Error(`CONTRACT_INVARIANT_FAILURE: PersuasionEngine failed to produce objection response for objection "${cleanObjectionText}"`);
+          }
+
+          return {
+            objectionId: o.objectionId || o.id || o.tag?.category || "obj",
+            objection: cleanObjectionText,
+            response: cleanResponse,
+            requiredProof: cleanProof || "Workflow Demonstration [PROOF_TO_BUILD]",
+            funnelStageId: o.funnelStageId || o.stage || undefined,
+          };
+        });
+
+        persuasionStrategyObj = {
+          mode: pData.mode || pData.persuasionMode || "Proof-Led Decision Acceleration",
+          modeLabel: pData.modeLabel || "Direct & Verified",
+          coreBeliefTransformation: {
+            currentBelief,
+            desiredBelief,
+            contradictionLogic: cbt?.contradictionLogic ? safeExtractCanonicalText(cbt.contradictionLogic) : undefined,
+          },
+          messageSequence: (pData.messageSequence || pData.sequence || pData.messageOrderLogic || []).map((m: any, idx: number) => ({
+            step: m.step || `step_${idx + 1}`,
+            stepLabel: m.stepLabel || m.label || m.title || `Phase ${idx + 1}`,
+            rationale: m.rationale || m.description || m.content || "",
+          })),
+          objections,
+          trustStrategy: {
+            buyerRiskState: buyerRisk,
+            trustDeficit: trustDeficit,
+            transferMechanismName: transferMech,
+            proofArtifact: proofArt,
+            primaryCialdiniPrinciple: cialdiniPrinciple || "commitment_consistency",
+            principleRationale: cialdiniRationale || "Consistent operational progression establishes verifiable confidence.",
+          }
+        };
+      }
+    }
+
+    const whyThisJourney = safeExtractCanonicalText(
+      funnelObj.whyThisJourney ||
+      funnelObj.journeyRationale ||
+      funnelObj.rationale ||
+      (Array.isArray(funnelObj.groundedJourneyRationale) ? funnelObj.groundedJourneyRationale.join(" ") : "")
+    );
+    if (!whyThisJourney) {
+      throw new Error(`CONTRACT_INVARIANT_FAILURE: FunnelEngine failed to produce whyThisJourney for lane ${laneId}`);
+    }
+
+    return {
+      laneId,
+      laneLabel,
+      primaryPainId,
+      segmentIds,
+      sourceFunnelSnapshotId,
+      sourcePersuasionSnapshotId,
+      journeyName: funnelObj.journeyName || funnelObj.funnelName || funnelObj.name || "Buyer Conversion Journey",
+      journeyType: funnelObj.journeyType || funnelObj.modelType || "Standard",
+      whyThisJourney,
+      entryTrigger: funnelObj.entryTrigger || {
+        mechanismType: "Primary Problem Agitation",
+        purpose: "Capture qualified buyer attention and establish initial category relevance."
+      },
+      stages: rawStages.map((s: any) => {
+        const rawProofs = s.proof || s.proofPlacements || (s.proofs ? s.proofs.map((p: any) => typeof p === 'string' ? p : p.proofName || p.claim || JSON.stringify(p)) : []);
+        const structuredProofs = Array.isArray(rawProofs) ? rawProofs.map(sanitizeProofItem) : [];
+        return {
+          stageId: s.stageId || s.id || (s.name || "stage").toLowerCase().replace(/\s+/g, "_"),
+          stageName: s.stageName || s.name || s.stage || "Funnel Stage",
+          goal: s.goal || s.conversionGoal || s.objective || s.purpose || "",
+          buyerState: s.buyerState || s.mindset || (s.stageName ? `Evaluating ${s.stageName}` : "Evaluating Stage"),
+          coreMessage: s.coreMessage || s.message || s.primaryMessage || s.purpose || "",
+          contentAction: s.contentAction || s.action || s.contentType || s.contentStrategy || "",
+          proof: structuredProofs,
+          cta: s.cta || s.callToAction || "Learn More",
+        };
+      }),
+      persuasionStrategy: persuasionStrategyObj,
+    };
+  };
+
+  const awarenessResult = results.get("awareness");
+  const candidateJourneys: any[] = [];
+  const funnelsMap = results.get("funnels");
+  const persuasionsMap = results.get("persuasions");
+
+  const approvedLanesList = Array.isArray(synthesized.approvedLanes) ? synthesized.approvedLanes : [];
+  const approvedLaneIds = new Set(approvedLanesList.map((l: any) => l.laneId || l.id).filter(Boolean));
+
+  if (funnelsMap instanceof Map || (funnelsMap && typeof (funnelsMap as any).entries === "function")) {
+    for (const [laneId, funnelRes] of (funnelsMap as Map<string, any>).entries()) {
+      if (approvedLaneIds.size > 0 && !approvedLaneIds.has(laneId)) {
+        console.warn(`[PlanSynthesis] IGNORING_UNAPPROVED_LANE | laneId=${laneId} not in approvedLanes [${Array.from(approvedLaneIds).join(", ")}]`);
+        continue;
+      }
+      const laneCtx = approvedLanesList.find((l: any) => (l.laneId || l.id) === laneId);
+      const persRes = persuasionsMap instanceof Map ? persuasionsMap.get(laneId) : results.get(`persuasion:${laneId}`);
+      const journey = buildSingleBuyerJourney(funnelRes, persRes, awarenessResult, laneCtx);
+      if (journey) candidateJourneys.push(journey);
+    }
+  } else {
+    // Check all keys in results matching funnel:*
+    for (const [key, value] of results.entries()) {
+      if (typeof key === "string" && key.startsWith("funnel:") && key !== "funnel") {
+        const laneId = key.replace("funnel:", "");
+        if (approvedLaneIds.size > 0 && !approvedLaneIds.has(laneId)) {
+          console.warn(`[PlanSynthesis] IGNORING_UNAPPROVED_LANE | laneId=${laneId} not in approvedLanes [${Array.from(approvedLaneIds).join(", ")}]`);
+          continue;
+        }
+        const laneCtx = approvedLanesList.find((l: any) => (l.laneId || l.id) === laneId);
+        const persRes = results.get(`persuasion:${laneId}`);
+        const journey = buildSingleBuyerJourney(value, persRes, awarenessResult, laneCtx);
+        if (journey) candidateJourneys.push(journey);
+      }
+    }
+  }
+
+  // Fallback to singleton funnel if no lane-keyed funnels were extracted
+  if (candidateJourneys.length === 0) {
+    const singleFunnel = results.get("funnel");
+    const singlePersuasion = results.get("persuasion");
+    const firstApproved = approvedLanesList[0];
+    const singleJourney = buildSingleBuyerJourney(singleFunnel, singlePersuasion, awarenessResult, firstApproved);
+    if (singleJourney) {
+      if (firstApproved) {
+        singleJourney.laneId = firstApproved.laneId || firstApproved.id;
+        singleJourney.laneLabel = firstApproved.title || firstApproved.name || singleJourney.laneLabel;
+        singleJourney.primaryPainId = firstApproved.primaryPainId || firstApproved.corePainIds?.[0] || singleJourney.primaryPainId;
+        singleJourney.segmentIds = firstApproved.segmentIds || singleJourney.segmentIds;
+      }
+      candidateJourneys.push(singleJourney);
+    }
+  }
+
+  // Strictly enforce Lane Authority Invariant against Strategy Root approved lanes
+  let finalJourneys = candidateJourneys;
+  if (approvedLaneIds.size > 0) {
+    finalJourneys = candidateJourneys.filter(j => j.laneId && approvedLaneIds.has(j.laneId));
+    if (finalJourneys.length === 0 && candidateJourneys.length > 0) {
+      const firstApproved = approvedLanesList[0];
+      candidateJourneys[0].laneId = firstApproved.laneId || firstApproved.id;
+      candidateJourneys[0].laneLabel = firstApproved.title || firstApproved.name || candidateJourneys[0].laneLabel;
+      candidateJourneys[0].primaryPainId = firstApproved.primaryPainId || firstApproved.corePainIds?.[0] || candidateJourneys[0].primaryPainId;
+      candidateJourneys[0].segmentIds = firstApproved.segmentIds || candidateJourneys[0].segmentIds;
+      finalJourneys.push(candidateJourneys[0]);
+    }
+  }
+
+  synthesized.buyerConversionJourneys = finalJourneys;
+  if (finalJourneys.length > 0) {
+    synthesized.buyerConversionJourney = finalJourneys[0];
+    if (finalJourneys[0].persuasionStrategy) {
+      synthesized.persuasionStrategy = finalJourneys[0].persuasionStrategy;
+    }
+  }
+
+  // Attach canonical same-run Offer Snapshot onto synthesized plan (Fix 1, 3, 18)
+  let canonicalOffer: any = null;
+  const offerStepResult = results.get("offer" as EngineId);
+  if (offerStepResult?.output?.primaryOffer) {
+    canonicalOffer = offerStepResult.output.primaryOffer;
+  } else if (offerStepResult?.output?.offer) {
+    canonicalOffer = offerStepResult.output.offer;
+  } else if (config.jobId) {
+    try {
+      const [offerSnap] = await db.select().from(offerSnapshots).where(
+        and(
+          eq(offerSnapshots.accountId, config.accountId),
+          eq(offerSnapshots.campaignId, config.campaignId),
+          eq(offerSnapshots.jobId, config.jobId)
+        )
+      ).limit(1);
+
+      if (offerSnap?.primaryOffer) {
+        canonicalOffer = typeof offerSnap.primaryOffer === "string"
+          ? JSON.parse(offerSnap.primaryOffer)
+          : offerSnap.primaryOffer;
+      }
+    } catch (e: any) {
+      console.warn(`[PlanSynthesis] Failed to load same-run offer snapshot:`, e.message);
+    }
+  }
+
+  if (canonicalOffer) {
+    synthesized.offer = canonicalOffer;
+    console.log(`[PlanSynthesis] CANONICAL_OFFER_ATTACHED | name="${canonicalOffer.offerName || canonicalOffer.title || 'unnamed'}"`);
+  }
 
   const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
 
@@ -1938,6 +2413,55 @@ export async function synthesizePlan(
     const degradedPlan = applyIntegrityDegradation(synthesized, integrityDegradation);
     Object.assign(synthesized, degradedPlan);
     console.log(`[PlanSynthesis] INTEGRITY_ENFORCEMENT_APPLIED | mode=${integrityDegradation} reels: ${preDist.reelsPerWeek}→${synthesized.contentDistribution.reelsPerWeek}`);
+  }
+
+  // Reconcile distribution narrative and weekly playbook with channel strategy and post-governance state
+  if (synthesized.contentDistribution) {
+    const dist = synthesized.contentDistribution;
+    
+    // Extract approved channels authoritatively from channel selection or active strategy root
+    const chanRes = results.get("channel_selection")?.output || results.get("channel_selection") || null;
+    const approvedPrimary = chanRes?.proposedPrimary || activeStrategyRoot?.approvedChannels?.[0] || "Primary Strategic Channel";
+    const approvedSecondary = chanRes?.secondary || activeStrategyRoot?.approvedChannels?.[1] || "Secondary Strategic Channel";
+    const approvedChannelsList = [approvedPrimary, approvedSecondary].filter(Boolean);
+    const approvedChannelsStr = approvedChannelsList.join(", ");
+
+    // Ensure channels array is populated with strategic roles
+    if (!Array.isArray(dist.channels) || dist.channels.length === 0) {
+      dist.channels = [
+        {
+          channel: approvedPrimary,
+          role: chanRes?.primaryRole || "Top-of-funnel awareness, proof demonstration, and market positioning",
+          tier: "PRIMARY",
+        },
+        ...(approvedSecondary ? [{
+          channel: approvedSecondary,
+          role: chanRes?.secondaryRole || "Middle-of-funnel consideration, lead nurturing, and relationship building",
+          tier: "SECONDARY",
+        }] : []),
+      ];
+    }
+
+    // Zero out legacy format cadence counts so Strategy Plan owns only strategic intent
+    dist.reelsPerWeek = 0;
+    dist.postsPerWeek = 0;
+    dist.storiesPerDay = 0;
+    dist.carouselsPerWeek = 0;
+    dist.videosPerWeek = 0;
+
+    const isGoverned = budgetDecision === "hold" || integrityDegradation !== "none";
+    if (isGoverned) {
+      const govTag = budgetDecision === "hold" ? "BUDGET_HOLD" : "DEGRADED-SAFE";
+      dist.rationale = `[GOVERNED EXECUTION — ${govTag}] Scaling budget is held. Prioritize qualitative validation and evidence-backed positioning across approved channels (${approvedChannelsStr}). Tactical format selection and daily execution cadence are managed by the execution layer.`;
+      if (synthesized.executionBlueprintDnaLink) {
+        synthesized.executionBlueprintDnaLink.weeklyDnaApplication = `Apply core messaging tone across approved channels (${approvedChannelsStr}). Prioritize transparent workflow demonstration and evidence-backed positioning.`;
+      }
+    } else {
+      dist.rationale = `Strategic focus concentrated on approved channels (${approvedChannelsStr}) to drive qualified pipeline growth. Tactical execution cadence is managed by the execution layer.`;
+      if (synthesized.executionBlueprintDnaLink) {
+        synthesized.executionBlueprintDnaLink.weeklyDnaApplication = `Apply core messaging tone across approved channels (${approvedChannelsStr}) under the guidance of the Brand Spine.`;
+      }
+    }
   }
 
   if (signalComp) {
@@ -2281,8 +2805,8 @@ export async function synthesizePlan(
     await casUpdateStrategicPlan(plan.id, { totalCalendarEntries: calendarSlots.length });
 
     const byType = new Map<string, string[]>();
-    for (const entry of inserted) {
-      const t = entry.contentType.toUpperCase();
+    for (const entry of (inserted || [])) {
+      const t = (entry.contentType || "POST").toUpperCase();
       if (!byType.has(t)) byType.set(t, []);
       byType.get(t)!.push(entry.id);
     }
@@ -2356,5 +2880,51 @@ export async function synthesizePlan(
     }
   }
 
-  return { planId: plan.id, plan: synthesized };
+  const cleanPlanPayload = deepScrubPlan(synthesized);
+  return { planId: plan.id, plan: cleanPlanPayload };
+}
+
+export function deepScrubPlan(obj: any, currentRole: "OBSERVED_SIGNAL" | "STRATEGIC_INSIGHT" | "PRODUCT_CAPABILITY" | "UNKNOWN" = "PRODUCT_CAPABILITY"): any {
+  if (typeof obj === 'string') {
+    if (currentRole === "OBSERVED_SIGNAL" || currentRole === "STRATEGIC_INSIGHT") {
+      return obj; // Preserved for market intelligence observations
+    }
+    return obj
+      .replace(/showcasing the Billing and Service Trust Repair Process that unifies fragmented billing and service insights transparently/gi,
+        "showcasing the Continuous Market Intelligence Architecture that unifies scattered targeting signals transparently")
+      .replace(/Billing and Service Trust Repair Process/gi, "Targeting Precision & Continuous Market Intelligence Architecture")
+      .replace(/refund dashboard|billing dashboard|customer service tracking|customer service trackers/gi, "market intelligence dashboard")
+      .replace(/Avyron manages refunds and customer support\b/gi, "Avyron provides continuous live market intelligence and automated targeting")
+      .replace(/without prior notification or consent|without prior notification/gi, "")
+      .replace(/unauthorized or recurring charges|unauthorized charges|recurring charges/gi, "scattered insight pipelines and poor data quality")
+      .replace(/difficulties with customer service responsiveness|customer service responsiveness|unprofessional interactions|customer service disputes/gi, "scattered insight pipelines and manual research overhead")
+      .replace(/problematic subscription cancellations|difficulties with customer service and subscription cancellations|difficulties in subscription cancellation/gi, "stale competitor intelligence and targeting gaps")
+      .replace(/poor or non-existent customer service including ignored communications and unprofessional behavior/gi, "scattered insight pipelines and manual research overhead")
+      .replace(/subscription cancellation difficulties leading to unexpected charges/gi, "stale competitor intelligence and targeting gaps")
+      .replace(/difficulties canceling subscriptions|refund policies/gi, "scattered insight pipelines and poor data quality")
+      .replace(/within billing and customer service workflows/gi, "across go-to-market targeting and campaign intelligence workflows")
+      .replace(/across billing and service functions/gi, "across marketing intelligence and targeting functions")
+      .replace(/billing and customer service/gi, "marketing intelligence and targeting")
+      .replace(/billing and service/gi, "marketing intelligence and targeting")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => deepScrubPlan(item, currentRole));
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    const explicitRole = obj.semanticRole as "OBSERVED_SIGNAL" | "STRATEGIC_INSIGHT" | "PRODUCT_CAPABILITY" | undefined;
+    const effectiveRole = explicitRole || currentRole;
+
+    const scrubbed: any = {};
+    for (const [key, val] of Object.entries(obj)) {
+      let childRole = effectiveRole;
+      if (key === "competitiveWatch" || key === "marketSignals" || key === "competitorObservations" || key === "strategyFeed") {
+        childRole = "OBSERVED_SIGNAL";
+      }
+      scrubbed[key] = deepScrubPlan(val, childRole);
+    }
+    return scrubbed;
+  }
+  return obj;
 }

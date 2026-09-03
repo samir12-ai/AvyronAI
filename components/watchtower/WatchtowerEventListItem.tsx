@@ -44,10 +44,10 @@ export default function WatchtowerEventListItem({ event, isSelected, onSelect }:
   };
 
   const getStatusColor = (status: string) => {
-    const s = status.toLowerCase();
-    if (s.includes('confirmed')) return '#8B5CF6'; // Purple for badge
-    if (s.includes('first')) return '#3B82F6'; // Blue for badge
-    if (s.includes('archived')) return '#6B7280'; // Gray
+    const s = (status || '').toLowerCase();
+    if (s.includes('confirmed')) return '#10B981'; // Green for confirmed
+    if (s.includes('first') || s.includes('candidate') || s.includes('review')) return '#3B82F6'; // Blue for Under Review
+    if (s.includes('archived') || s.includes('dismissed') || s.includes('closed') || s.includes('superseded')) return '#6B7280'; // Gray
     return '#8B5CF6'; 
   };
 

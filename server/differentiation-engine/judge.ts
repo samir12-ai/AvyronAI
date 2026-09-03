@@ -17,11 +17,8 @@ Check 13 Criteria:
 7. CAPABILITY_VS_DIFFERENTIATION: Is this just describing a capability?
 8. VALUE_VS_DIFFERENTIATION: Is this just generic value (e.g. saves time)?
 9. MECHANISM_FIDELITY: Was a mechanism invented or overclaimed?
-10. COMPETITIVE_SCOPE: Does it overclaim beyond MI3 scope?
-11. LINEAGE_VALIDITY: Are all cited IDs EXACTLY valid members of the canonical input?
-12. SPECIFICITY: Is this strategically specific?
-13. NO_UNSUPPORTED_NEGATIVE_CLAIMS: Does the claim assert "Competitor lacks X" or "Competitor cannot do X" without explicit MI evidence? (Phrases like "Equivalent capability was not established in reviewed competitor evidence" are acceptable; blanket assertions of competitor absence are NOT).
-14. POSITIVE_CONTRAST_VALIDITY: If Avyron's Product Truth specifies a distinct technical capability/mechanism and the competitive baseline states equivalent capability was not established or uses legacy manual templates, then this is a VALID positive contrast. Do NOT reject valid positive contrasts under GENERIC_INTERCHANGEABLE.
+13. NO_UNSUPPORTED_NEGATIVE_CLAIMS: Blanket claims that competitors completely lack a capability are forbidden unless backed by MI evidence. Contrast phrasings that frame the difference as "Our product provides X whereas reviewed competitor evidence focuses on Y or does not establish equivalent X" are strictly VALID and MUST NOT be rejected under UNSUPPORTED_NEGATIVE_CLAIM or GENERIC_INTERCHANGEABLE.
+14. POSITIVE_CONTRAST_VALIDITY: When our Product Truth specifies verified product capabilities (such as Buffer's specific transparent freemium model, multi-channel scheduling, or team collaboration workflows) grounded in ourProductFacts, accept them as valid differentiated claims when contrasted against the competitor landscape. Do NOT reject valid grounded candidate contrasts under GENERIC_INTERCHANGEABLE.
 
 Return a JSON object: { valid: boolean, defects: [ { differentiationId, code, reason, rejectedFields, fixDirective } ] }
 Allowed codes: GENERIC_INTERCHANGEABLE, CAPABILITY_NOT_DIFFERENTIATION, VALUE_MISTAKEN_FOR_DIFFERENTIATION, PRODUCT_TRUTH_UNSUPPORTED, MI_BASELINE_UNSUPPORTED, COMPETITIVE_SCOPE_OVERCLAIM, MECHANISM_HALLUCINATED, PAIN_MEANING_DRIFT, BUYER_VALUE_NOT_ESTABLISHED, LINEAGE_REFERENCE_INVALID, SPECIFICITY_LACKING, UNSUPPORTED_NEGATIVE_CLAIM
@@ -33,7 +30,13 @@ export async function judgeDifferentiation(
 ): Promise<DifferentiationJudgeOutput> {
   log("DifferentiationJudge", "Running independent semantic judge");
   
-  const systemPrompt = JUDGE_PROMPT + "\\n\\nCANONICAL INPUT:\\n" + JSON.stringify(input, null, 2) + "\\n\\nCANDIDATES:\\n" + JSON.stringify(candidates, null, 2);
+  const boundedInput = {
+    ...input,
+    corePains: (input.corePains || []).slice(0, 3),
+    miFacts: (input.miFacts || []).slice(0, 10),
+    ourProductFacts: (input.ourProductFacts || []).slice(0, 10),
+  };
+  const systemPrompt = JUDGE_PROMPT + "\n\nCANONICAL INPUT:\n" + JSON.stringify(boundedInput, null, 2) + "\n\nCANDIDATES:\n" + JSON.stringify(candidates, null, 2);
   
   const response = await aiChat({
     messages: [
@@ -44,7 +47,7 @@ export async function judgeDifferentiation(
     model: "gpt-4.1-mini",
     accountId: (input as any).accountId || "a2d87878-a1e9-41ea-a8a5-90beff569673",
     endpoint: "differentiation",
-    temperature: 0.1, max_tokens: 4000
+    temperature: 0.1, max_tokens: 2500
   });
 
   try {

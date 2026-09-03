@@ -138,40 +138,31 @@ Output JSON format exactly:
 `;
 
   try {
-    const rawRes: any = await aiGemini({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { responseMimeType: "application/json", maxOutputTokens: 1024 },
-      model: "gemini-3.6-flash",
+    const chatRes = await aiChat({
+      messages: [{ role: "user", content: prompt }],
+      model: "gpt-4.1-mini",
+      max_tokens: 1024,
+      response_format: { type: "json_object" },
       accountId: "system",
+      endpoint: "target-assessment-engine",
     });
-    let text = typeof rawRes === "string" ? rawRes : rawRes?.candidates?.[0]?.content?.parts?.[0]?.text || rawRes?.text || "";
-    text = text.replace(/^```json\s*/, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(text || "{}");
+    const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
     if (["COVERED", "RELATED_BUT_UNPROVEN", "NOT_COVERED"].includes(parsed.decision)) {
       decision = parsed.decision;
       reason = parsed.reason || reason;
     }
-  } catch (e: any) {
-    console.warn(`[TargetAssessment] aiGemini error for pain ${painId}, falling back to aiChat: ${e.message}`);
-    try {
-      const chatRes = await aiChat({
-        messages: [{ role: "user", content: prompt }],
-        model: "gpt-4.1-mini",
-        max_tokens: 1024,
-        response_format: { type: "json_object" },
-        accountId: "system",
-        endpoint: "target-assessment-engine",
-      });
-      const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
-      if (["COVERED", "RELATED_BUT_UNPROVEN", "NOT_COVERED"].includes(parsed.decision)) {
-        decision = parsed.decision;
-        reason = parsed.reason || reason;
-      }
-    } catch (chatErr: any) {
-      console.warn(`[TargetAssessment] LLM fallback failed for pain ${painId}: ${chatErr.message}`);
-      decision = "RELATED_BUT_UNPROVEN";
-      reason = "Target Assessment evaluation defaulted to RELATED_BUT_UNPROVEN";
-    }
+  } catch (chatErr: any) {
+    console.error(`[TargetAssessment] Evaluation failed: ${chatErr.message}`);
+    return {
+      targetAssessmentAuthorityId,
+      painId,
+      targetUnderstandingAuthorityId,
+      decision: "NOT_COVERED",
+      status: "INCOMPLETE",
+      parentAuthorityIds: [targetUnderstandingAuthorityId, painId],
+      reason: `Target Assessment evaluation error: ${chatErr.message}`,
+      jobId,
+    };
   }
 
   const result: TargetAssessmentResult = {

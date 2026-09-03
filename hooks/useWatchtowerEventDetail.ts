@@ -34,7 +34,31 @@ export function useWatchtowerEventDetail(campaignId: string | null, eventId: str
         throw new Error('Invalid payload from detail endpoint');
       }
 
-      return payload.data as WatchtowerEventDetailResponse;
+      const eventData = payload.data as WatchtowerEventDetailResponse;
+
+      // If strategic brief is not already attached, query the dedicated brief endpoint
+      if (!eventData.strategicBrief) {
+        try {
+          const briefUrl = new URL(`/api/strategic-briefs/event/${eventId}`, getApiUrl());
+          const briefRes = await authFetch(briefUrl.toString(), { signal });
+          if (briefRes.ok) {
+            const briefPayload = await briefRes.json();
+            if (briefPayload.success && briefPayload.data) {
+              eventData.strategicBrief = briefPayload.data;
+              if (!eventData.observation.whyItMatters && briefPayload.data.brief) {
+                eventData.observation.whyItMatters = 
+                  briefPayload.data.brief.marketSignificance || 
+                  briefPayload.data.brief.impactOnOurStrategy || 
+                  null;
+              }
+            }
+          }
+        } catch {
+          // Non-blocking fallback if brief endpoint encounters network error
+        }
+      }
+
+      return eventData;
     },
     enabled: !!eventId && !!campaignId,
     staleTime: 5 * 60 * 1000, // 5 minutes cache

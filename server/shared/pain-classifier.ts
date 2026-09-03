@@ -23,7 +23,6 @@ import {
   type ProductFitType,
   allowedUsesForClass,
   prohibitedUsesForClass,
-  classifyAudiencePainDetailed,
 } from "./audience-pain-registry";
 import { getEvidenceByUids } from "../strategic-reasoning/evidence-registry";
 
@@ -628,8 +627,7 @@ export function judgeProductFitStructural(
     }
 
     // Promotion guard: post-purchase friction cannot be promoted to CORE_PURCHASE
-    const deterministic = classifyAudiencePainDetailed(source.canonical).classification;
-    if (deterministic === "POST_PURCHASE_FRICTION" && (record as any).classification === "CORE_PURCHASE") {
+    if (source.classification === "POST_PURCHASE_FRICTION" && (record as any).classification === "CORE_PURCHASE") {
       rejections.push({ painId, code: "LLM_POST_PURCHASE_PROMOTION_FORBIDDEN" });
       continue;
     }
@@ -847,20 +845,14 @@ export async function refineAudiencePainRegistry(
   let bu = opts.businessUnderstanding;
   if (!bu) {
     try {
-      const [snap] = await db
-        .select({ payload: businessUnderstandingSnapshots.businessUnderstanding })
-        .from(businessUnderstandingSnapshots)
-        .where(
-          and(
-            eq(businessUnderstandingSnapshots.campaignId, opts.campaignId),
-            eq(businessUnderstandingSnapshots.accountId, opts.accountId)
-          )
-        )
-        .orderBy(desc(businessUnderstandingSnapshots.createdAt))
-        .limit(1);
-      bu = snap?.payload;
+      const { resolveCurrentBusinessUnderstanding } = await import("../business-understanding/resolver");
+      const buResult = await resolveCurrentBusinessUnderstanding({
+        accountId: opts.accountId,
+        campaignId: opts.campaignId,
+      });
+      bu = buResult?.payload;
     } catch (e: any) {
-      console.warn(`[PainClassifier] Failed to query businessUnderstandingSnapshots: ${e.message}`);
+      console.warn(`[PainClassifier] Failed to resolve canonical Business Understanding: ${e.message}`);
     }
   }
 
@@ -880,8 +872,25 @@ export async function refineAudiencePainRegistry(
 
   console.log(`[PainClassifier] CANONICAL_PAIN_PIPELINE_START | pains=${registry.length} | jobId=${effectiveJobId} | bu=${businessUnderstandingAuthorityId} | co=${campaignOfferingId} | tu=${targetUnderstandingAuthorityId}`);
 
-  // 2. Sequential Assessment per Canonical Pain: TargetAssessment -> ProductAssessment -> StrategicPainDecision
-  for (const pain of registry) {
+  // Helper for bounded concurrency
+  async function mapConcurrent<T, R>(items: T[], concurrency: number, fn: (item: T, idx: number) => Promise<R>): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let currentIndex = 0;
+
+    async function worker() {
+      while (currentIndex < items.length) {
+        const idx = currentIndex++;
+        results[idx] = await fn(items[idx], idx);
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+    await Promise.all(workers);
+    return results;
+  }
+
+  // 2. Concurrent Assessment per Canonical Pain: TargetAssessment -> ProductAssessment -> StrategicPainDecision
+  const assessedPains = await mapConcurrent(registry, 4, async (pain) => {
     const segContext = (opts.audienceSegments || []).find(
       (s: any) => s.id === pain.segmentId || s.name === pain.segmentName || s.name === pain.segmentId
     );
@@ -926,6 +935,7 @@ export async function refineAudiencePainRegistry(
       productAssessmentJobId: pa.jobId,
       painClaim: pain.canonical,
       productFitType: pa.fitType,
+      targetCoverageDecision: ta.decision,
       materialityContext: {
         citationCount: (pain as any).citationCount ?? ((pain.evidenceUids?.length || 0) + (pain.sourceSignalIds?.length || 0)),
         uniqueEvidenceCount: (pain as any).uniqueEvidenceCount ?? (pain.evidenceUids?.length || 0),
@@ -943,37 +953,48 @@ export async function refineAudiencePainRegistry(
     });
 
     let finalClass: AudiencePainClass = "SUPPORTING";
+    let rejectionNotice: string | null = null;
     if (spd.finalClassification === "CORE_PURCHASE") {
       finalClass = "CORE_PURCHASE";
     } else if (spd.finalClassification === "SUPPORTING") {
       finalClass = "SUPPORTING";
     } else if (spd.finalClassification === "EXCLUDE" || spd.finalClassification === "DROPPED") {
       finalClass = "UNKNOWN";
-      allJudgeRejections.push(`STRATEGIC_EXCLUDED:${pain.painId} - ${spd.reason}`);
+      rejectionNotice = `STRATEGIC_EXCLUDED:${pain.painId} - ${spd.reason}`;
     }
 
     const allowedUses = allowedUsesForClass(finalClass);
     const prohibitedUses = prohibitedUsesForClass(finalClass);
 
-    working.push({
-      ...pain,
-      classification: finalClass,
-      strategicPainDecisionAuthorityId: spd.strategicPainDecisionAuthorityId,
-      targetAssessmentAuthorityId: ta.targetAssessmentAuthorityId,
-      productAssessmentAuthorityId: pa.productAssessmentAuthorityId,
-      targetUnderstandingAuthorityId,
-      businessUnderstandingAuthorityId,
-      campaignOfferingId,
-      coverageDecision: ta.decision,
-      fitType: pa.fitType,
-      allowedUses,
-      prohibitedUses,
-      productTruthFactIds,
-      productFit: (pa.fitType === "DIRECT_FIT" || pa.fitType === "STRATEGIC_FIT") ? "ELIGIBLE" : "INELIGIBLE",
-      eligible: finalClass !== "UNKNOWN" && allowedUses.length > 0 && pain.canonical.length > 0,
-      classifierVersion: LLM_CLASSIFIER_VERSION,
-      classificationReason: spd.reason,
-    });
+    return {
+      evaluated: {
+        ...pain,
+        classification: finalClass,
+        strategicPainDecisionAuthorityId: spd.strategicPainDecisionAuthorityId,
+        targetAssessmentAuthorityId: ta.targetAssessmentAuthorityId,
+        productAssessmentAuthorityId: pa.productAssessmentAuthorityId,
+        targetUnderstandingAuthorityId,
+        businessUnderstandingAuthorityId,
+        campaignOfferingId,
+        coverageDecision: ta.decision,
+        fitType: pa.fitType,
+        allowedUses,
+        prohibitedUses,
+        productTruthFactIds,
+        productFit: (pa.fitType === "DIRECT_FIT" || pa.fitType === "STRATEGIC_FIT") ? "ELIGIBLE" : "INELIGIBLE",
+        eligible: finalClass !== "UNKNOWN" && allowedUses.length > 0 && pain.canonical.length > 0,
+        classifierVersion: LLM_CLASSIFIER_VERSION,
+        classificationReason: spd.reason,
+      },
+      rejectionNotice,
+    };
+  });
+
+  for (const item of assessedPains) {
+    working.push(item.evaluated);
+    if (item.rejectionNotice) {
+      allJudgeRejections.push(item.rejectionNotice);
+    }
   }
 
   working.sort((a, b) => a.rank - b.rank);

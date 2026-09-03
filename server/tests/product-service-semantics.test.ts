@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { deriveAnchorFromProductDna, ProductAnchorSchema, computeAnchorHash } from "../shared/strategic-doctrine";
-import { classifyAudiencePainDetailed } from "../shared/audience-pain-registry";
+import { buildAudiencePainRegistry } from "../shared/audience-pain-registry";
 
 describe("Product / Service Canonical Semantics & Product Anchor", () => {
   it("1. Product fields derive with correct PRODUCT semantics and sourceFacts", () => {
@@ -159,11 +159,17 @@ describe("Product / Service Canonical Semantics & Product Anchor", () => {
     expect(parsed.success).toBe(true);
   });
 
-  it("8. Deterministic pain classification preserves post-purchase guards", () => {
-    const refundPain = classifyAudiencePainDetailed("Customer asking for refund due to defective delivery");
-    expect(refundPain.classification).toBe("POST_PURCHASE_FRICTION");
-
-    const purchasePain = classifyAudiencePainDetailed("Struggle to find reliable supplier with stock in UAE");
-    expect(purchasePain.classification).toBe("CORE_PURCHASE");
+  it("8. Initial pain registry creates neutral unassessed records and avoids deterministic promotion", () => {
+    const raw = [
+      { canonical: "Customer asking for refund due to defective delivery" },
+      { canonical: "Struggle to find reliable supplier with stock in UAE" },
+    ];
+    const registry = buildAudiencePainRegistry(raw, { accountId: "acc_test", audienceSnapshotId: "aud_test" });
+    expect(registry[0].classification).toBe("NOT_EVALUATED");
+    expect(registry[0].eligible).toBe(false);
+    expect(registry[0].allowedUses).toEqual([]);
+    expect(registry[1].classification).toBe("NOT_EVALUATED");
+    expect(registry[1].eligible).toBe(false);
+    expect(registry[1].allowedUses).toEqual([]);
   });
 });

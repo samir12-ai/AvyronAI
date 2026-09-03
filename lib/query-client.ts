@@ -37,8 +37,17 @@ export async function authFetch(input: string | URL | Request, init?: RequestIni
 export function getApiUrl(path?: string): string {
   let host = process.env.EXPO_PUBLIC_DOMAIN;
 
+  if (typeof window !== "undefined" && window.location && window.location.host) {
+    if (window.location.port === "8081" || window.location.port === "8082" || window.location.port === "19006") {
+      const hostname = window.location.hostname || "127.0.0.1";
+      host = `${hostname}:8808`;
+    } else {
+      host = window.location.host;
+    }
+  }
+
   if (!host) {
-    throw new Error("EXPO_PUBLIC_DOMAIN is not set");
+    host = "127.0.0.1:8808";
   }
 
   const protocol = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";
@@ -48,7 +57,6 @@ export function getApiUrl(path?: string): string {
     const cleanPath = path.startsWith("/") ? path : `/${path}`;
     return `${base}${cleanPath}`;
   }
-
 
   return base;
 }

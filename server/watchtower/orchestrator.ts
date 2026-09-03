@@ -480,6 +480,34 @@ export function classifyWatchtowerChanges(
     }
   }
 
+  // 4. pricing_change (pricing = pricing_anchors / plans for competitor_website entities)
+  const prevPricing = normalizeStringArray(previous.pricing || previous.pricingAnchors);
+  const currPricing = normalizeStringArray(current.pricing || current.pricingAnchors);
+  if (prevPricing.length > 0 || currPricing.length > 0) {
+    const prevPricingSet = new Set(prevPricing);
+    const currPricingSet = new Set(currPricing);
+    const addedPricing = currPricing.filter((p) => !prevPricingSet.has(p));
+    const removedPricing = prevPricing.filter((p) => !currPricingSet.has(p));
+    if (addedPricing.length > 0 || removedPricing.length > 0) {
+      const totalChanged = addedPricing.length + removedPricing.length;
+      changes.push({
+        kind: "pricing_change",
+        severity: totalChanged >= 2 ? "major" : "medium",
+        evidence: [
+          ...(addedPricing.length > 0
+            ? [`added pricing/plans: ${addedPricing.slice(0, 3).join(" | ")}`]
+            : []),
+          ...(removedPricing.length > 0
+            ? [`removed pricing/plans: ${removedPricing.slice(0, 3).join(" | ")}`]
+            : []),
+        ],
+        prevValue: prevPricing.slice(0, 5),
+        currValue: currPricing.slice(0, 5),
+        ...ids,
+      });
+    }
+  }
+
   return changes;
 }
 
@@ -779,15 +807,11 @@ async function maintainOpenCandidates(
         `${LOG_PREFIX} MARKET_EVENT_CONFIRMED eventId=${candidate.id} competitorId=${competitorId} kind=${candidate.kind} campaign=${input.campaignId} confirmedBy=${currentSnap.id} scope=${scope} scopeCount=${totalConfirmedCount} toValue=${toValueStr ?? "null"}`,
       );
 
-      // Auto-generate strategic brief if configured
-      const sev = (match.severity || "").toLowerCase();
-      const scp = (scope || "").toLowerCase();
-      if (sev === "high" || sev === "major" || scp === "market_wide") {
-        console.log(`${LOG_PREFIX} Auto-generating strategic brief for event ${candidate.id}`);
-        enqueueBrief(candidate.id, input.campaignId, input.accountId, competitorId).catch((err) => {
-          console.error(`${LOG_PREFIX} Auto-generation failed for event ${candidate.id}:`, err);
-        });
-      }
+      // Auto-generate strategic brief for all confirmed events (severity controls prioritization, not eligibility)
+      console.log(`${LOG_PREFIX} Auto-generating strategic brief for confirmed event ${candidate.id}`);
+      enqueueBrief(candidate.id, input.campaignId, input.accountId, competitorId).catch((err) => {
+        console.error(`${LOG_PREFIX} Auto-generation failed for event ${candidate.id}:`, err);
+      });
     } catch (err) {
       console.error(
         `${LOG_PREFIX} MARKET_EVENT_PERSIST_FAILED eventId=${candidate.id} reason=confirmation_update_failed detail=${(err as Error).message}`,

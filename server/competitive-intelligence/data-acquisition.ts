@@ -1,10 +1,12 @@
 import { db } from "../db";
-import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews, competitorPostClassifications } from "@shared/schema";
+import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews, competitorPostClassifications, competitorSources } from "@shared/schema";
 import { eq, and, desc, sql, inArray } from "drizzle-orm";
 import { scrapeCommentsForPosts, extractHandleFromUrl } from "./profile-scraper";
 import { scrapeInstagramForCompetitor } from "./instagram-provider";
 import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
 import { MI_THRESHOLDS } from "../market-intelligence-v3/constants";
+import { executeSourceFetch, type SourceFetchExecutionResult, type SourceFetchStatus } from "./provider-registry";
+
 
 const EXPLICIT_CTA_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /\b(dm|message|inbox)\s*(us|me|now)?\b/i, label: "DM" },
@@ -1775,3 +1777,189 @@ export async function fetchAllCompetitors(accountId: string, campaignId: string)
   }
   return results;
 }
+
+export interface MultiSourceEnrichmentResult {
+  competitorId: string;
+  sourcesAttempted: number;
+  sourcesSucceeded: number;
+  sourcesFailed: number;
+  postsCollected: number;
+  commentsCollected: number;
+  reviewsCollected: number;
+  results: SourceFetchExecutionResult[];
+}
+
+/**
+ * Executes platform-specific acquisition for non-Instagram verified competitor sources
+ * (TikTok, YouTube, Reviews, etc.) from canonical competitor_sources table.
+ * 
+ * Guarantees:
+ * - Authority model: reads canonical competitor_sources
+ * - Preserves source verification status (no mutation of isVerified / lastVerifiedAt)
+ * - Updates lastFetchedAt on success
+ * - Append-safe / on-conflict idempotent persistence
+ */
+export async function enrichCompetitorWithMultiSources(
+  competitorId: string,
+  accountId: string,
+  campaignId: string,
+  options?: {
+    platforms?: string[];
+    forceRefresh?: boolean;
+    maxSources?: number;
+  }
+): Promise<MultiSourceEnrichmentResult> {
+  const { platforms, forceRefresh = false, maxSources = 10 } = options || {};
+
+  // 1. Load active verified sources for this competitor
+  const activeSources = await db
+    .select()
+    .from(competitorSources)
+    .where(and(
+      eq(competitorSources.competitorId, competitorId),
+      eq(competitorSources.accountId, accountId),
+      eq(competitorSources.campaignId, campaignId),
+      eq(competitorSources.status, "ACTIVE")
+    ));
+
+  // Filter target platforms (default: TIKTOK, YOUTUBE, REVIEWS)
+  const targetPlatforms = platforms 
+    ? platforms.map(p => p.toUpperCase())
+    : ["TIKTOK", "YOUTUBE", "REVIEWS"];
+
+  const eligibleSources = activeSources
+    .filter(s => targetPlatforms.includes(s.platform.toUpperCase()))
+    .slice(0, maxSources);
+
+  const results: SourceFetchExecutionResult[] = [];
+  let totalPosts = 0;
+  let totalComments = 0;
+  let totalReviews = 0;
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const src of eligibleSources) {
+    // Check freshness cache (72h cooldown) unless forceRefresh is set
+    if (!forceRefresh && src.lastFetchedAt) {
+      const elapsed = Date.now() - new Date(src.lastFetchedAt).getTime();
+      if (elapsed < 72 * 60 * 60 * 1000) {
+        results.push({
+          sourceId: src.id,
+          platform: src.platform,
+          status: "SKIPPED_FRESH_CACHE",
+          itemsCount: 0,
+          commentsCount: 0,
+          durationMs: 0,
+        });
+        continue;
+      }
+    }
+
+    try {
+      const res = await executeSourceFetch({
+        sourceId: src.id,
+        competitorId,
+        accountId,
+        campaignId,
+        platform: src.platform,
+        canonicalUrl: src.canonicalUrl,
+      });
+      results.push(res);
+
+      if (res.status === "SUCCESS" || res.status === "SUCCESS_ZERO_CONTENT" || res.status === "FETCH_SUCCESS") {
+        succeeded++;
+        if (src.platform.toUpperCase() === "REVIEWS") {
+          totalReviews += res.commentsCount || res.itemsCount;
+        } else {
+          totalPosts += res.itemsCount;
+          totalComments += res.commentsCount;
+        }
+      } else {
+        failed++;
+      }
+    } catch (fetchErr: any) {
+      failed++;
+      results.push({
+        sourceId: src.id,
+        platform: src.platform,
+        status: "PROVIDER_FAILED",
+        itemsCount: 0,
+        commentsCount: 0,
+        durationMs: 0,
+        error: fetchErr.message,
+      });
+    }
+  }
+
+  return {
+    competitorId,
+    sourcesAttempted: eligibleSources.length,
+    sourcesSucceeded: succeeded,
+    sourcesFailed: failed,
+    postsCollected: totalPosts,
+    commentsCollected: totalComments,
+    reviewsCollected: totalReviews,
+    results,
+  };
+}
+
+/**
+ * Orchestrates campaign-wide multi-source acquisition across all active canonical competitors.
+ */
+export async function executeMultiSourceAcquisitionForCampaign(
+  accountId: string,
+  campaignId: string,
+  options?: {
+    platforms?: string[];
+    forceRefresh?: boolean;
+    concurrency?: number;
+  }
+): Promise<{
+  totalCompetitors: number;
+  competitorsProcessed: number;
+  totalSourcesAttempted: number;
+  totalPostsCollected: number;
+  totalCommentsCollected: number;
+  totalReviewsCollected: number;
+  competitorResults: MultiSourceEnrichmentResult[];
+}> {
+  const { platforms, forceRefresh = false } = options || {};
+
+  const competitors = await db
+    .select()
+    .from(ciCompetitors)
+    .where(and(
+      eq(ciCompetitors.accountId, accountId),
+      eq(ciCompetitors.campaignId, campaignId),
+      eq(ciCompetitors.isActive, true)
+    ));
+
+  let totalSourcesAttempted = 0;
+  let totalPostsCollected = 0;
+  let totalCommentsCollected = 0;
+  let totalReviewsCollected = 0;
+  const competitorResults: MultiSourceEnrichmentResult[] = [];
+
+  for (const comp of competitors) {
+    const res = await enrichCompetitorWithMultiSources(comp.id, accountId, campaignId, {
+      platforms,
+      forceRefresh,
+    });
+    totalSourcesAttempted += res.sourcesAttempted;
+    totalPostsCollected += res.postsCollected;
+    totalCommentsCollected += res.commentsCollected;
+    totalReviewsCollected += res.reviewsCollected;
+    competitorResults.push(res);
+  }
+
+  return {
+    totalCompetitors: competitors.length,
+    competitorsProcessed: competitorResults.length,
+    totalSourcesAttempted,
+    totalPostsCollected,
+    totalCommentsCollected,
+    totalReviewsCollected,
+    competitorResults,
+  };
+}
+

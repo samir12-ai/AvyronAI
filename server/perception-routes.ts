@@ -1050,10 +1050,10 @@ export function registerPerceptionRoutes(app: Express) {
       if (tabFilter && tabFilter !== 'All Changes') {
         if (tabFilter === 'Confirmed') {
           conditions.push(eq(pipelineChangeEvents.status, 'confirmed'));
-        } else if (tabFilter === 'First Observation') {
+        } else if (tabFilter === 'First Observation' || tabFilter === 'Under Review') {
           conditions.push(eq(pipelineChangeEvents.status, 'candidate'));
-        } else if (tabFilter === 'Archived') {
-          conditions.push(inArray(pipelineChangeEvents.status, ['archived', 'dismissed']));
+        } else if (tabFilter === 'Archived' || tabFilter === 'History') {
+          conditions.push(inArray(pipelineChangeEvents.status, ['archived', 'dismissed', 'closed', 'reverted', 'superseded']));
         } else if (tabFilter === 'High Impact') {
           conditions.push(inArray(pipelineChangeEvents.severity, ['major', 'high']));
         }
@@ -1078,7 +1078,8 @@ export function registerPerceptionRoutes(app: Express) {
             "Content format shift": "content_format_shift",
             "Posting cadence shift": "posting_frequency_shift",
             "Competitor profile change": "competitor_profile_change",
-            "Offer language change": "offer_language_change"
+            "Offer language change": "offer_language_change",
+            "Pricing strategy shift": "pricing_change"
           };
           return map[lbl] || null;
         };
@@ -1215,7 +1216,7 @@ export function registerPerceptionRoutes(app: Express) {
           medium_impact: sql`SUM(CASE WHEN ${pipelineChangeEvents.severity} = 'medium' THEN 1 ELSE 0 END)`,
           low_impact: sql`SUM(CASE WHEN ${pipelineChangeEvents.severity} IN ('mild', 'low', 'unknown') OR ${pipelineChangeEvents.severity} IS NULL THEN 1 ELSE 0 END)`,
           first_observation: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} = 'candidate' THEN 1 ELSE 0 END)`,
-          archived_changes: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} IN ('archived', 'dismissed') THEN 1 ELSE 0 END)`
+          archived_changes: sql`SUM(CASE WHEN ${pipelineChangeEvents.status} IN ('archived', 'dismissed', 'closed', 'reverted', 'superseded') THEN 1 ELSE 0 END)`
         })
         .from(pipelineChangeEvents)
         .leftJoin(ciCompetitors, eq(pipelineChangeEvents.competitorId, ciCompetitors.id))
@@ -1346,6 +1347,7 @@ export function registerPerceptionRoutes(app: Express) {
           "High Impact": Number(stats.high_impact || 0),
           "Confirmed": Number(stats.confirmed_changes || 0),
           "First Observation": Number(stats.first_observation || 0),
+          "Under Review": Number(stats.first_observation || 0),
           "Archived": Number(stats.archived_changes || 0),
         },
         availableFilters: {
@@ -1602,6 +1604,36 @@ export function registerPerceptionRoutes(app: Express) {
       // Build competitor-level observed change text
       const competitorObservedChange = whatChangedSentence || (notes.length > 0 ? notes[0] : null);
 
+      // Look up any latest Strategic Brief for this event
+      const [briefRow] = await db
+        .select()
+        .from(watchtowerStrategicBriefs)
+        .where(
+          and(
+            eq(watchtowerStrategicBriefs.eventId, eventId),
+            eq(watchtowerStrategicBriefs.isLatest, true)
+          )
+        )
+        .limit(1);
+
+      const briefContent = briefRow?.brief as Record<string, any> | undefined;
+      const whyItMatters = briefContent?.marketSignificance || briefContent?.impactOnOurStrategy || null;
+
+      const strategicBriefData = briefRow ? {
+        id: briefRow.id,
+        eventId: briefRow.eventId,
+        status: briefRow.status,
+        brief: briefRow.brief,
+        evidenceRegistry: briefRow.evidenceRegistry,
+        contextLineage: briefRow.contextLineage,
+        sourceVersions: briefRow.sourceVersions,
+        finalValidatedConfidence: briefRow.finalValidatedConfidence,
+        modelProposedConfidence: briefRow.modelProposedConfidence,
+        confidenceAdjustmentReasons: briefRow.confidenceAdjustmentReasons,
+        completedAt: briefRow.completedAt ? briefRow.completedAt.toISOString() : null,
+        isLatest: briefRow.isLatest,
+      } : null;
+
       return res.json({
         success: true,
         data: {
@@ -1647,8 +1679,13 @@ export function registerPerceptionRoutes(app: Express) {
             // BUG 2 fix: enriched sentence with metric name, units, window
             whatChanged: whatChangedSentence,
             evidenceNotes: notes,
-            whyItMatters: null,
+            whyItMatters: whyItMatters,
+            diff: (prevValue !== undefined || currValue !== undefined) ? {
+              prev: prevValue,
+              curr: currValue,
+            } : null,
           },
+          strategicBrief: strategicBriefData,
           competitors: [{
             competitorId: row.event.competitorId,
             competitorName: row.competitor ? row.competitor.name : (row.event.competitorId ? null : null),

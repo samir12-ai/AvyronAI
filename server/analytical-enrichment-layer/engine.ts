@@ -393,30 +393,358 @@ function validateAELQuality(pkg: AnalyticalPackage): { passed: boolean; issues: 
   return { passed: issues.length === 0, issues };
 }
 
-export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
+export interface FilteredAELContext {
+  filteredPkg: AnalyticalPackage;
+  primaryRootCauses: RootCause[];
+  supportingRootCauses: RootCause[];
+  primaryCausalChains: CausalChain[];
+  supportingCausalChains: CausalChain[];
+  primaryBuyingBarriers: BuyingBarrier[];
+  supportingBuyingBarriers: BuyingBarrier[];
+  primaryPainTypes: PainTypeEntry[];
+  supportingPainTypes: PainTypeEntry[];
+  excludedInsightCount: number;
+  unresolvedInsightCount: number;
+}
+
+/**
+ * Filter an AnalyticalPackage against canonical pain authority (StrategicPainDecision / painRegistry).
+ *
+ * Rules (Phase 1 Global Semantic Authority):
+ * - AEL insights MUST establish an ID-based or semantic relationship to pain authority.
+ * - Insights linked to CORE_PURCHASE pains become primary strategic authority.
+ * - Insights linked to SUPPORTING pains become supporting authority (objections, friction, secondary messaging only).
+ * - Insights linked to EXCLUDE / STRATEGIC_EXCLUDED pains are dropped (0 downstream authority).
+ * - UNRESOLVED insights (cannot be linked to an approved pain) are dropped (fail closed).
+ */
+export function filterAELForStrategicUse(
+  pkg: AnalyticalPackage | null,
+  painRegistry?: any[] | Record<string, any> | null,
+  approvedLanes?: any[] | null,
+): FilteredAELContext | null {
+  if (!pkg) return null;
+
+  // Normalize painRegistry into array
+  const registryList: any[] = Array.isArray(painRegistry)
+    ? painRegistry
+    : (painRegistry && Array.isArray((painRegistry as any).canonicalPains)
+      ? (painRegistry as any).canonicalPains
+      : (painRegistry && Array.isArray((painRegistry as any).pains)
+        ? (painRegistry as any).pains
+        : []));
+
+  const pkgRootCauses = pkg.root_causes || (pkg as any).rootCauses || [];
+  const pkgCausalChains = pkg.causal_chains || (pkg as any).causalChains || [];
+  const pkgBuyingBarriers = pkg.buying_barriers || (pkg as any).buyingBarriers || [];
+  const pkgPainTypes = pkg.pain_types || (pkg as any).painTypes || [];
+
+  // If no pain registry is provided, fail closed — unverified AEL has zero downstream strategic authority.
+  if (registryList.length === 0) {
+    console.log(`${LOG_PREFIX} AEL_FILTER_FAIL_CLOSED | No painRegistry provided — zero AEL insights authorized for downstream prompts`);
+    return {
+      filteredPkg: {
+        ...pkg,
+        root_causes: [],
+        causal_chains: [],
+        buying_barriers: [],
+        pain_types: [],
+        mechanism_gaps: [],
+        trust_gaps: [],
+        contradiction_flags: [],
+        priority_ranking: [],
+      },
+      primaryRootCauses: [],
+      supportingRootCauses: [],
+      primaryCausalChains: [],
+      supportingCausalChains: [],
+      primaryBuyingBarriers: [],
+      supportingBuyingBarriers: [],
+      primaryPainTypes: [],
+      supportingPainTypes: [],
+      excludedInsightCount: 0,
+      unresolvedInsightCount: pkgRootCauses.length + pkgCausalChains.length + pkgBuyingBarriers.length,
+    };
+  }
+
+  const corePainIds = new Set<string>();
+  const supportingPainIds = new Set<string>();
+  const excludedPainIds = new Set<string>();
+  const painByRootCauseId = new Map<string, any[]>();
+  const painByEvidenceUid = new Map<string, any[]>();
+  const canonicalPains: Array<{ painId: string; classification: string; canonical: string }> = [];
+
+  for (const pain of registryList) {
+    const pid = pain.painId || pain.id;
+    if (!pid) continue;
+    const classification = pain.classification || pain.role || "UNKNOWN";
+    if (classification === "CORE_PURCHASE" || classification === "CORE") {
+      corePainIds.add(pid);
+    } else if (classification === "SUPPORTING" || classification === "OBJECTION") {
+      supportingPainIds.add(pid);
+    } else if (classification === "EXCLUDE" || classification === "STRATEGIC_EXCLUDED") {
+      excludedPainIds.add(pid);
+    }
+
+    const rcIds = Array.isArray(pain.rootCauseIds) ? pain.rootCauseIds : [];
+    for (const rId of rcIds) {
+      if (!painByRootCauseId.has(rId)) painByRootCauseId.set(rId, []);
+      painByRootCauseId.get(rId)!.push(pain);
+    }
+
+    const evUids = Array.isArray(pain.evidenceUids) ? pain.evidenceUids : [];
+    for (const eUid of evUids) {
+      if (!painByEvidenceUid.has(eUid)) painByEvidenceUid.set(eUid, []);
+      painByEvidenceUid.get(eUid)!.push(pain);
+    }
+
+    const rawText = pain.normalizedStatement || pain.canonical || pain.text || pain.originalStatement || "";
+    canonicalPains.push({
+      painId: pid,
+      classification,
+      canonical: rawText,
+    });
+  }
+
+  // Also include explicit primaryPurchasePainId, supportingPainIds, excludedPainIds if present on registry object
+  if (painRegistry && typeof painRegistry === "object" && !Array.isArray(painRegistry)) {
+    if ((painRegistry as any).primaryPurchasePainId) corePainIds.add((painRegistry as any).primaryPurchasePainId);
+    if (Array.isArray((painRegistry as any).supportingPainIds)) {
+      for (const sp of (painRegistry as any).supportingPainIds) supportingPainIds.add(sp);
+    }
+    if (Array.isArray((painRegistry as any).excludedPainIds)) {
+      for (const ep of (painRegistry as any).excludedPainIds) excludedPainIds.add(ep);
+    }
+  }
+
+  const laneSegmentIds = new Set<string>(
+    (approvedLanes || []).map((l: any) => l.segmentId || l.id).filter(Boolean)
+  );
+
+  const resolveItemAuthority = (
+    text: string,
+    id?: string,
+    explicitPainIds?: string[],
+    evidenceUid?: string
+  ): { status: "CORE" | "SUPPORTING" | "EXCLUDED" | "UNRESOLVED"; resolvedPainIds: string[] } => {
+    // 1. Explicit relatedPainIds
+    if (Array.isArray(explicitPainIds) && explicitPainIds.length > 0) {
+      const hasCore = explicitPainIds.some((pid) => corePainIds.has(pid));
+      const hasSupporting = explicitPainIds.some((pid) => supportingPainIds.has(pid));
+      const hasExcluded = explicitPainIds.some((pid) => excludedPainIds.has(pid));
+
+      if (hasExcluded && !hasCore && !hasSupporting) {
+        return { status: "EXCLUDED", resolvedPainIds: explicitPainIds };
+      }
+      if (hasCore) {
+        return {
+          status: "CORE",
+          resolvedPainIds: explicitPainIds.filter((pid) => !excludedPainIds.has(pid)),
+        };
+      }
+      if (hasSupporting) {
+        return {
+          status: "SUPPORTING",
+          resolvedPainIds: explicitPainIds.filter((pid) => !excludedPainIds.has(pid)),
+        };
+      }
+    }
+
+    // 2. ID-based mapping from painByRootCauseId
+    if (id && painByRootCauseId.has(id)) {
+      const linkedPains = painByRootCauseId.get(id)!;
+      const hasCore = linkedPains.some((p) => corePainIds.has(p.painId || p.id));
+      const hasSupporting = linkedPains.some((p) => supportingPainIds.has(p.painId || p.id));
+      const hasExcluded = linkedPains.some((p) => excludedPainIds.has(p.painId || p.id));
+
+      if (hasExcluded && !hasCore && !hasSupporting) {
+        return { status: "EXCLUDED", resolvedPainIds: linkedPains.map((p) => p.painId || p.id) };
+      }
+      if (hasCore) {
+        return {
+          status: "CORE",
+          resolvedPainIds: linkedPains
+            .map((p) => p.painId || p.id)
+            .filter((pid) => !excludedPainIds.has(pid)),
+        };
+      }
+      if (hasSupporting) {
+        return {
+          status: "SUPPORTING",
+          resolvedPainIds: linkedPains
+            .map((p) => p.painId || p.id)
+            .filter((pid) => !excludedPainIds.has(pid)),
+        };
+      }
+    }
+
+    // 3. Evidence UID mapping
+    if (evidenceUid && painByEvidenceUid.has(evidenceUid)) {
+      const linkedPains = painByEvidenceUid.get(evidenceUid)!;
+      const hasCore = linkedPains.some((p) => corePainIds.has(p.painId || p.id));
+      const hasSupporting = linkedPains.some((p) => supportingPainIds.has(p.painId || p.id));
+      const hasExcluded = linkedPains.some((p) => excludedPainIds.has(p.painId || p.id));
+
+      if (hasExcluded && !hasCore && !hasSupporting) {
+        return { status: "EXCLUDED", resolvedPainIds: linkedPains.map((p) => p.painId || p.id) };
+      }
+      if (hasCore) {
+        return {
+          status: "CORE",
+          resolvedPainIds: linkedPains
+            .map((p) => p.painId || p.id)
+            .filter((pid) => !excludedPainIds.has(pid)),
+        };
+      }
+      if (hasSupporting) {
+        return {
+          status: "SUPPORTING",
+          resolvedPainIds: linkedPains
+            .map((p) => p.painId || p.id)
+            .filter((pid) => !excludedPainIds.has(pid)),
+        };
+      }
+    }
+
+    // 4. No explicit canonical ID authority link established -> fail closed as UNRESOLVED (0 downstream authority)
+    return { status: "UNRESOLVED", resolvedPainIds: [] };
+  };
+
+  const primaryRootCauses: RootCause[] = [];
+  const supportingRootCauses: RootCause[] = [];
+  const primaryCausalChains: CausalChain[] = [];
+  const supportingCausalChains: CausalChain[] = [];
+  const primaryBuyingBarriers: BuyingBarrier[] = [];
+  const supportingBuyingBarriers: BuyingBarrier[] = [];
+  const primaryPainTypes: PainTypeEntry[] = [];
+  const supportingPainTypes: PainTypeEntry[] = [];
+
+  let excludedInsightCount = 0;
+  let unresolvedInsightCount = 0;
+
+  for (let i = 0; i < pkgRootCauses.length; i++) {
+    const rc = pkgRootCauses[i];
+    const rcId = `RC${i + 1}`;
+    const text = `${rc.surfaceSignal || rc.cause || ""} ${rc.deepCause || ""} ${rc.causalReasoning || ""}`;
+    const auth = resolveItemAuthority(text, rcId, (rc as any).relatedPainIds, rc.sourceData);
+    if (auth.status === "CORE") primaryRootCauses.push({ ...rc, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "SUPPORTING") supportingRootCauses.push({ ...rc, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "EXCLUDED") excludedInsightCount++;
+    else unresolvedInsightCount++;
+  }
+
+  for (let i = 0; i < pkgCausalChains.length; i++) {
+    const cc = pkgCausalChains[i];
+    const ccId = `CC${i + 1}`;
+    const text = `${cc.pain || ""} ${cc.cause || ""} ${cc.impact || ""} ${cc.behavior || ""} ${cc.conversionEffect || ""} ${cc.chain || ""}`;
+    const auth = resolveItemAuthority(text, ccId, (cc as any).relatedPainIds);
+    if (auth.status === "CORE") primaryCausalChains.push({ ...cc, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "SUPPORTING") supportingCausalChains.push({ ...cc, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "EXCLUDED") excludedInsightCount++;
+    else unresolvedInsightCount++;
+  }
+
+  for (let i = 0; i < pkgBuyingBarriers.length; i++) {
+    const bb = pkgBuyingBarriers[i];
+    const bbId = `BB${i + 1}`;
+    const text = `${bb.barrier || ""} ${bb.rootCause || ""} ${bb.userThinking || ""} ${bb.requiredResolution || ""}`;
+    const auth = resolveItemAuthority(text, bbId, (bb as any).relatedPainIds);
+    if (auth.status === "CORE") primaryBuyingBarriers.push({ ...bb, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "SUPPORTING") supportingBuyingBarriers.push({ ...bb, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "EXCLUDED") excludedInsightCount++;
+    else unresolvedInsightCount++;
+  }
+
+  for (const pt of pkgPainTypes) {
+    const text = `${pt.painPoint || ""} ${pt.underlyingCause || ""} ${pt.evidence || ""}`;
+    const auth = resolveItemAuthority(text, undefined, (pt as any).relatedPainIds, pt.evidence);
+    if (auth.status === "CORE") primaryPainTypes.push({ ...pt, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "SUPPORTING") supportingPainTypes.push({ ...pt, relatedPainIds: auth.resolvedPainIds } as any);
+    else if (auth.status === "EXCLUDED") excludedInsightCount++;
+    else unresolvedInsightCount++;
+  }
+
+  const allApprovedRootCauses = [...primaryRootCauses, ...supportingRootCauses];
+  const allApprovedCausalChains = [...primaryCausalChains, ...supportingCausalChains];
+  const allApprovedBuyingBarriers = [...primaryBuyingBarriers, ...supportingBuyingBarriers];
+  const allApprovedPainTypes = [...primaryPainTypes, ...supportingPainTypes];
+
+  console.log(
+    `${LOG_PREFIX} AEL_AUTHORITY_FILTERED | primaryRC=${primaryRootCauses.length} supportingRC=${supportingRootCauses.length} | primaryCC=${primaryCausalChains.length} supportingCC=${supportingCausalChains.length} | primaryBB=${primaryBuyingBarriers.length} supportingBB=${supportingBuyingBarriers.length} | excluded=${excludedInsightCount} unresolved=${unresolvedInsightCount}`
+  );
+
+  const filteredPkg: AnalyticalPackage = {
+    ...pkg,
+    root_causes: allApprovedRootCauses,
+    causal_chains: allApprovedCausalChains,
+    buying_barriers: allApprovedBuyingBarriers,
+    pain_types: allApprovedPainTypes,
+  };
+
+  return {
+    filteredPkg,
+    primaryRootCauses,
+    supportingRootCauses,
+    primaryCausalChains,
+    supportingCausalChains,
+    primaryBuyingBarriers,
+    supportingBuyingBarriers,
+    primaryPainTypes,
+    supportingPainTypes,
+    excludedInsightCount,
+    unresolvedInsightCount,
+  };
+}
+
+export function formatAELForPrompt(
+  pkg: AnalyticalPackage | null,
+  painRegistry?: any[] | null,
+  approvedLanes?: any[] | null,
+): string {
   if (!pkg) return "";
+
+  // If painRegistry is provided, filter AEL against authoritative pain decisions
+  let activePkg = pkg;
+  let primaryRootCauses = pkg.root_causes || [];
+  let supportingRootCauses: RootCause[] = [];
+  let primaryCausalChains = pkg.causal_chains || [];
+  let supportingCausalChains: CausalChain[] = [];
+  let primaryBuyingBarriers = pkg.buying_barriers || [];
+  let supportingBuyingBarriers: BuyingBarrier[] = [];
+
+  if (painRegistry) {
+    const filteredCtx = filterAELForStrategicUse(pkg, painRegistry, approvedLanes);
+    if (!filteredCtx) return "";
+    activePkg = filteredCtx.filteredPkg;
+    primaryRootCauses = filteredCtx.primaryRootCauses;
+    supportingRootCauses = filteredCtx.supportingRootCauses;
+    primaryCausalChains = filteredCtx.primaryCausalChains;
+    supportingCausalChains = filteredCtx.supportingCausalChains;
+    primaryBuyingBarriers = filteredCtx.primaryBuyingBarriers;
+    supportingBuyingBarriers = filteredCtx.supportingBuyingBarriers;
+  }
+
   const totalInsights =
-    (pkg.root_causes?.length || 0) +
-    (pkg.pain_types?.length || 0) +
-    (pkg.causal_chains?.length || 0) +
-    (pkg.buying_barriers?.length || 0) +
-    (pkg.mechanism_gaps?.length || 0) +
-    (pkg.trust_gaps?.length || 0);
+    (activePkg.root_causes?.length || 0) +
+    (activePkg.pain_types?.length || 0) +
+    (activePkg.causal_chains?.length || 0) +
+    (activePkg.buying_barriers?.length || 0) +
+    (activePkg.mechanism_gaps?.length || 0) +
+    (activePkg.trust_gaps?.length || 0);
 
   if (totalInsights === 0) return "";
 
   const sections: string[] = [];
-  if (pkg.isPartial === true) {
-    sections.push("\n⚠ AEL_PARTIAL_NOTICE: Analytical enrichment is DEGRADED (partialReason=" + (pkg.partialReason || "unknown") + ").");
+  if (activePkg.isPartial === true) {
+    sections.push("\n⚠ AEL_PARTIAL_NOTICE: Analytical enrichment is DEGRADED (partialReason=" + (activePkg.partialReason || "unknown") + ").");
     sections.push("Treat all derived inferences as PROVISIONAL. Do not rely on root-cause depth as load-bearing evidence.\n");
   }
   sections.push("\n═══ DEEP ANALYTICAL CONTEXT (AEL v2 — Causal Interpretation) ═══");
-  sections.push("These are INTERPRETED insights — root causes beneath surface signals.");
+  sections.push("These are INTERPRETED insights — root causes beneath surface signals authorized by Strategic Pain Decisions.");
   sections.push("Use them to DEEPEN your analysis. Your engine logic remains the sole decision-maker.\n");
 
-  if (pkg.root_causes?.length > 0) {
-    sections.push("── ROOT CAUSES (WHY, not WHAT) ──");
-    for (const rc of pkg.root_causes) {
+  if (primaryRootCauses.length > 0) {
+    sections.push("── PRIMARY ROOT CAUSES (CORE PURCHASE PAIN AUTHORITY) ──");
+    for (const rc of primaryRootCauses) {
       sections.push(`  • Surface: "${rc.surfaceSignal}"`);
       sections.push(`    Deep cause: ${rc.deepCause} [${rc.confidenceLevel}]`);
       sections.push(`    Reasoning: ${rc.causalReasoning}`);
@@ -424,17 +752,33 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
     }
   }
 
-  if (pkg.causal_chains?.length > 0) {
+  if (supportingRootCauses.length > 0) {
+    sections.push("\n── SUPPORTING ROOT CAUSES (SECONDARY / FRICTION ONLY — CANNOT REPLACE CORE PAIN) ──");
+    for (const rc of supportingRootCauses) {
+      sections.push(`  • [SUPPORTING] Surface: "${rc.surfaceSignal}"`);
+      sections.push(`    Deep cause: ${rc.deepCause} [${rc.confidenceLevel}]`);
+      sections.push(`    Reasoning: ${rc.causalReasoning}`);
+    }
+  }
+
+  if (primaryCausalChains.length > 0) {
     sections.push("\n── CAUSAL CHAINS (pain → cause → impact → behavior) ──");
-    for (const cc of pkg.causal_chains) {
+    for (const cc of primaryCausalChains) {
       sections.push(`  • ${cc.pain} → ${cc.cause} → ${cc.impact} → ${cc.behavior}`);
       sections.push(`    Conversion effect: ${cc.conversionEffect}`);
     }
   }
 
-  if (pkg.buying_barriers?.length > 0) {
+  if (supportingCausalChains.length > 0) {
+    sections.push("\n── SUPPORTING CAUSAL CHAINS (SECONDARY FRICTION) ──");
+    for (const cc of supportingCausalChains) {
+      sections.push(`  • [SUPPORTING] ${cc.pain} → ${cc.cause} → ${cc.impact} → ${cc.behavior}`);
+    }
+  }
+
+  if (primaryBuyingBarriers.length > 0) {
     sections.push("\n── BUYING BARRIERS (why users DON'T convert) ──");
-    for (const bb of pkg.buying_barriers) {
+    for (const bb of primaryBuyingBarriers) {
       sections.push(`  • [${bb.severity}] ${bb.barrier}`);
       sections.push(`    Root cause: ${bb.rootCause}`);
       sections.push(`    Buyer thinking: "${bb.userThinking}"`);
@@ -442,18 +786,25 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
     }
   }
 
-  if (pkg.pain_types?.length > 0) {
+  if (supportingBuyingBarriers.length > 0) {
+    sections.push("\n── SUPPORTING BUYING BARRIERS (SECONDARY RESISTANCE) ──");
+    for (const bb of supportingBuyingBarriers) {
+      sections.push(`  • [SUPPORTING] [${bb.severity}] ${bb.barrier} — resolution: ${bb.requiredResolution}`);
+    }
+  }
+
+  if (activePkg.pain_types?.length > 0) {
     sections.push("\n── PAIN TYPES (classified with causal depth) ──");
-    for (const p of pkg.pain_types) {
+    for (const p of activePkg.pain_types) {
       sections.push(`  • [${p.severity}/${p.painType}] ${p.painPoint}`);
       sections.push(`    Underlying cause: ${p.underlyingCause}`);
       sections.push(`    Evidence: ${p.evidence}`);
     }
   }
 
-  if (pkg.mechanism_gaps?.length > 0) {
+  if (activePkg.mechanism_gaps?.length > 0) {
     sections.push("\n── MECHANISM COMPREHENSION GAPS ──");
-    for (const mg of pkg.mechanism_gaps) {
+    for (const mg of activePkg.mechanism_gaps) {
       sections.push(`  • [${mg.gapSeverity}] ${mg.area}`);
       sections.push(`    User doesn't understand: ${mg.whatUserDoesNotUnderstand}`);
       sections.push(`    Why it matters: ${mg.whyItMatters}`);
@@ -461,18 +812,18 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
     }
   }
 
-  if (pkg.trust_gaps?.length > 0) {
+  if (activePkg.trust_gaps?.length > 0) {
     sections.push("\n── TRUST GAPS ──");
-    for (const tg of pkg.trust_gaps) {
+    for (const tg of activePkg.trust_gaps) {
       sections.push(`  • ${tg.gap} — barrier: ${tg.barrier}`);
       sections.push(`    Trust: ${tg.currentTrustLevel} → needed: ${tg.requiredTrustLevel}`);
       sections.push(`    Proof required: ${tg.proofRequired}`);
     }
   }
 
-  if (pkg.contradiction_flags?.length > 0) {
+  if (activePkg.contradiction_flags?.length > 0) {
     sections.push("\n── CONTRADICTIONS & MISLEADING SIGNALS ──");
-    for (const cf of pkg.contradiction_flags) {
+    for (const cf of activePkg.contradiction_flags) {
       sections.push(`  • [${cf.severity}] Surface says: "${cf.surfaceSignal}"`);
       sections.push(`    Actually: ${cf.actualReality}`);
       sections.push(`    Why misleading: ${cf.whyMisleading}`);
@@ -480,16 +831,16 @@ export function formatAELForPrompt(pkg: AnalyticalPackage | null): string {
     }
   }
 
-  if (pkg.priority_ranking?.length > 0) {
+  if (activePkg.priority_ranking?.length > 0) {
     sections.push("\n── STRATEGIC PRIORITY (ranked by conversion impact) ──");
-    for (const pr of pkg.priority_ranking.slice(0, 5)) {
+    for (const pr of activePkg.priority_ranking.slice(0, 5)) {
       sections.push(`  ${pr.rank}. [${pr.impactOnConversion}] ${pr.insight} (${pr.dimension}, ${pr.frequency}, ${pr.actionability})`);
     }
   }
 
-  if (pkg.confidence_notes?.length > 0) {
+  if (activePkg.confidence_notes?.length > 0) {
     sections.push("\n── DATA CONFIDENCE ──");
-    for (const cn of pkg.confidence_notes) {
+    for (const cn of activePkg.confidence_notes) {
       sections.push(`  • [${cn.dataQuality}] ${cn.area}: ${cn.note}`);
     }
   }

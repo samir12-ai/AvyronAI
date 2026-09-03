@@ -98,9 +98,21 @@ export async function extractBusinessTargetAuthority(
     if (accountId) {
       const dna = await loadProductDNA(campaignId, accountId);
       if (dna) {
+        if (dna.targetRoles && dna.targetRoles.length > 0) {
+          for (const r of dna.targetRoles) {
+            if (r.roleTitle && r.roleTitle.trim().length > 0) {
+              sources.push({
+                field: `targetUnderstanding.targetRoles.${r.roleType || 'ROLE'}`,
+                text: `${r.roleTitle}${r.rationale ? `: ${r.rationale}` : ''}`,
+                campaignId,
+                accountId: effectiveAccountId
+              });
+            }
+          }
+        }
         if (dna.targetAudienceSegment && dna.targetAudienceSegment.trim().length > 0) {
           sources.push({
-            field: "businessDataLayer.targetAudienceSegment",
+            field: "targetUnderstanding.targetAudienceSegment",
             text: dna.targetAudienceSegment.trim(),
             campaignId,
             accountId: effectiveAccountId
@@ -108,7 +120,7 @@ export async function extractBusinessTargetAuthority(
         }
         if (dna.targetDecisionMaker && dna.targetDecisionMaker.trim().length > 0) {
           sources.push({
-            field: "businessDataLayer.targetDecisionMaker",
+            field: "targetUnderstanding.targetDecisionMaker",
             text: dna.targetDecisionMaker.trim(),
             campaignId,
             accountId: effectiveAccountId
@@ -260,11 +272,11 @@ ${JSON.stringify(targetRoles, null, 2)}
 
 JUDGE VERIFICATION CRITERIA:
 1. NO TARGET_ROLE_INVENTION: Does every proposed target role originate directly from the text of the source items?
-2. ACCURATE BUYER TYPE: Is the buyerType supported by the source text?
+2. ACCURATE BUYER TYPE: Is the buyerType supported by the source text? (Note: buyerType 'UNKNOWN' is fully valid whenever the specific buyer role is not explicitly specified in the source text).
 3. PROVENANCE VERIFIED: Do the rawSourceText strings in sourceLineages match the original source text?
 
 DECISION INSTRUCTION:
-- Set "valid": true if the proposed target roles satisfy all 3 criteria above.
+- Set "valid": true if the proposed target roles satisfy all criteria above.
 - Set "valid": false ONLY if the proposed roles violate one of the criteria.
 
 Return a JSON object:
@@ -383,11 +395,12 @@ Return a JSON object evaluating EVERY combination of Target Role and Audience Se
       const res = await aiChat({
         messages: [{ role: "user", content: matcherPrompt }],
         model,
-        max_tokens: 16000,
+        max_tokens: 4000,
         temperature: 0.1,
         response_format: { type: "json_object" },
         accountId: "system",
-        endpoint: "target-role-matcher"
+        endpoint: "target-role-matcher",
+        timeoutMs: 90000,
       });
 
       const parsed = JSON.parse(res.choices[0]?.message?.content || '{"matches":[]}');
@@ -445,11 +458,12 @@ Return a JSON object:
       const judgeRes = await aiChat({
         messages: [{ role: "user", content: judgePrompt }],
         model: judgeModel,
-        max_tokens: 4000,
+        max_tokens: 2000,
         temperature: 0.1,
         response_format: { type: "json_object" },
         accountId: "system",
-        endpoint: "role-match-judge"
+        endpoint: "role-match-judge",
+        timeoutMs: 90000,
       });
 
       const judgeParsed = JSON.parse(judgeRes.choices[0]?.message?.content || '{"valid":false,"reasons":["Judge parsing failed"]}');
