@@ -15,8 +15,8 @@ import { useCampaign } from '@/context/CampaignContext';
 import { GlobalHeader } from '@/components/GlobalHeader';
 
 export default function ReportsScreen() {
-  const { selectedCampaign } = useCampaign();
-  const campaignId = selectedCampaign?.id || 'camp_buffer_e2e_1787909177715';
+  const { selectedCampaign, selectedCampaignId } = useCampaign();
+  const campaignId = selectedCampaign?.selectedCampaignId || selectedCampaignId || (selectedCampaign as any)?.id || '';
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -25,6 +25,13 @@ export default function ReportsScreen() {
   const [activeReport, setActiveReport] = useState<any>(null);
 
   const fetchReports = useCallback(async () => {
+    if (!campaignId) {
+      setLoading(false);
+      setRefreshing(false);
+      setReportsList([]);
+      setActiveReport(null);
+      return;
+    }
     try {
       setLoading(true);
       const res = await authFetch(`${getApiUrl()}/api/reports/monthly?campaignId=${campaignId}`);
@@ -34,6 +41,8 @@ export default function ReportsScreen() {
           setReportsList(data.reports);
           if (data.reports.length > 0) {
             setActiveReport(data.reports[selectedReportIndex] || data.reports[0]);
+          } else {
+            setActiveReport(null);
           }
         }
       }
@@ -47,6 +56,17 @@ export default function ReportsScreen() {
 
   useEffect(() => {
     fetchReports();
+    const handleDemoChange = () => {
+      fetchReports();
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('avyron-demo-state-changed', handleDemoChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('avyron-demo-state-changed', handleDemoChange);
+      }
+    };
   }, [fetchReports]);
 
   const onRefresh = () => {
@@ -69,6 +89,13 @@ export default function ReportsScreen() {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.dark.tint} />
           <Text style={styles.loadingText}>Loading Monthly Business Memory...</Text>
+        </View>
+      ) : !campaignId ? (
+        <View style={[styles.loadingContainer, { padding: 24 }]}>
+          <Feather name="folder" size={32} color="#64748B" />
+          <Text style={[styles.loadingText, { marginTop: 12, textAlign: 'center' }]}>
+            No active campaign selected. Please select a campaign to view monthly reports.
+          </Text>
         </View>
       ) : (
         <ScrollView
@@ -106,6 +133,32 @@ export default function ReportsScreen() {
           {/* ── Report Title Banner ───────────────────────────────── */}
           {p ? (
             <>
+              {p.simulatedDisclosure && (
+                <View
+                  style={{
+                    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(139, 92, 246, 0.45)',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 14,
+                    flexDirection: 'row',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                  }}
+                >
+                  <Feather name="info" size={16} color="#C4B5FD" style={{ marginTop: 2 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#E9D5FF', letterSpacing: 0.6 }}>
+                      {p.simulatedDisclosure.badge || 'SIMULATED DEMO TELEMETRY'}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: '#CBD5E1', lineHeight: 18, marginTop: 2 }}>
+                      {p.simulatedDisclosure.attributionNote}
+                    </Text>
+                  </View>
+                </View>
+              )}
+
               <View style={styles.heroCard}>
                 <View style={styles.heroTopRow}>
                   <View>
@@ -195,7 +248,7 @@ export default function ReportsScreen() {
                             {kpi.planTarget !== null && (
                               <View>
                                 <Text style={styles.kpiValueLabel}>Plan Target</Text>
-                                <Text style={styles.kpiValuePlan}>`${kpi.planTarget} ${kpi.unit}`</Text>
+                                <Text style={styles.kpiValuePlan}>{kpi.planTarget} {kpi.unit}</Text>
                               </View>
                             )}
                           </View>

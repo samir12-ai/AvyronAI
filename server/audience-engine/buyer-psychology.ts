@@ -292,10 +292,33 @@ export async function profileBuyerPsychology(args: DesignerInput): Promise<Buyer
       const retryRaw = retryResp.choices?.[0]?.message?.content?.trim() || "";
       const v2 = safeJSON<any>(retryRaw);
       if (v2) {
-        final = v2;
-        console.log(`[BuyerPsychology] STEP_4_RETRY | accepted_v2`);
-        judgeVerdict = "ACCEPTED";
-        judgeReason = `auto-corrected after retry; original issue: ${judgeReason}`;
+        try {
+          const rejudgeResp = await aiChat({
+            messages: [{ role: "user", content: buildJudgePrompt(retryRaw) }],
+            model: "gpt-4.1-mini",
+            temperature: 0.1,
+            max_tokens: 400,
+            accountId: args.accountId,
+          });
+          const rejudgeRaw = rejudgeResp.choices?.[0]?.message?.content?.trim() || "";
+          const rejudged = safeJSON<{ verdict: string; reason: string; fix?: string }>(rejudgeRaw);
+          if (rejudged?.verdict === "ACCEPTED") {
+            final = v2;
+            judgeVerdict = "ACCEPTED";
+            judgeReason = rejudged.reason || `accepted after retry; original issue: ${judgeReason}`;
+            console.log(`[BuyerPsychology] STEP_4_RETRY | accepted_v2`);
+          } else {
+            final = v2;
+            judgeVerdict = "REJECTED";
+            judgeReason = rejudged?.reason ? `RETRY_REJECTED: ${rejudged.reason}` : `RETRY_REJECTED: unparseable re-judge output`;
+            console.warn(`[BuyerPsychology] STEP_4_RETRY | rejected_v2 | reason="${judgeReason}"`);
+          }
+        } catch (rejudgeErr: any) {
+          final = v2;
+          judgeVerdict = "REJECTED";
+          judgeReason = `RETRY_JUDGE_FAILED: ${rejudgeErr.message}`;
+          console.warn(`[BuyerPsychology] STEP_4_RETRY | rejudge_failed | ${rejudgeErr.message}`);
+        }
       }
     } catch (err: any) {
       console.warn(`[BuyerPsychology] RETRY_FAILED | ${err.message} — keeping v1`);

@@ -31,7 +31,7 @@ export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
   "strategy decisions": /\b(strategy decision|strategic repositioning|strategic pivot|strategic overhaul)\b/i,
   "strategic repositioning": /\b(reposition brand|rebrand strategy|market repositioning)\b/i,
   "offer redesign": /\b(offer redesign|redesign the offer|rebuild the offer|restructure offer)\b/i,
-  "pricing logic": /\b(pricing model|pricing strategy|price point|pricing calculation|discount structure)\b/i,
+  "pricing logic": /\b(pricing model|pricing strategy|pricing calculation|discount structure|new pricing|calculate price|discount formula)\b/i,
   "budget recommendations": /\b(budget recommendation|budget allocation|spending plan|budget optimization)\b/i,
   "channel selection": /\b(channel selection|channel strategy|platform strategy|channel mix)\b/i,
   "media buying": /\b(media buy|ad spend|ad budget|media planning|ad campaign|media mix)\b/i,
@@ -124,7 +124,7 @@ export const ENTRY_ROUTE_TO_FUNNEL_FAMILIES: Record<string, { allowed: string[];
     blocked: ["challenge", "tripwire"],
   },
   proof_led_entry: {
-    allowed: ["webinar", "vsl", "consultation", "application", "hybrid"],
+    allowed: ["direct", "product-launch", "vsl", "webinar", "consultation", "application", "hybrid"],
     blocked: ["challenge", "tripwire"],
   },
   diagnostic_entry: {

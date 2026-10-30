@@ -55,8 +55,7 @@ export function registerAdminMarketRoutes(app: Express) {
       const competitors = await db.select({
         id: ciCompetitors.id,
         name: ciCompetitors.name,
-        platform: ciCompetitors.platform,
-        profileLink: ciCompetitors.profileLink,
+        websiteUrl: ciCompetitors.websiteUrl,
         isActive: ciCompetitors.isActive,
         accountId: ciCompetitors.accountId,
         campaignId: ciCompetitors.campaignId,

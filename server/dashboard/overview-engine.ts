@@ -2,6 +2,8 @@ import { db } from "../db";
 import * as schema from "@shared/schema";
 import { eq, and, desc, sql, gte, lte, inArray } from "drizzle-orm";
 import { calculatePeriodBounds } from "../reports/monthly-report-engine";
+import { resolveExecutionPlan } from "../orchestrator/execution-plan-resolver";
+import { normalizeTimestampToIsoUtc, normalizeTimestampToUtcDate } from "../utils/timestamp";
 
 export interface DashboardOverviewPayload {
   user: {
@@ -14,6 +16,9 @@ export interface DashboardOverviewPayload {
   businessPulse: {
     strategy: {
       version: number;
+      activePlanVersion: number;
+      rootBundleVersion: number;
+      totalPlanRevisions: number;
       status: "ACTIVE" | "PENDING_APPROVAL" | "NO_PLAN";
       label: string;
     };
@@ -54,7 +59,10 @@ export interface DashboardOverviewPayload {
   };
   strategyPlanCard: {
     version: number;
-    status: "ACTIVE" | "NO_PLAN";
+    activePlanVersion: number;
+    rootBundleVersion: number;
+    totalPlanRevisions: number;
+    status: "ACTIVE" | "PENDING_APPROVAL" | "NO_PLAN";
     primaryDirection: string;
     activeLanesCount: number;
     latestMaterialChange: {
@@ -80,6 +88,20 @@ export interface DashboardOverviewPayload {
     mainConcernOrInsight: string;
     status: "ON_TRACK" | "DEVIATION" | "INSUFFICIENT_DATA";
     isHealthy: boolean;
+    /** Evaluated historical actions (same data as the Performance Loop section). */
+    evaluatedCases?: Array<{
+      id: string;
+      caseNumber: number;
+      title: string;
+      outcomeType: string;
+      outcomeBadgeLabel: string;
+      outcomeColor: string;
+      channel: string;
+      headlineMetric: string;
+      headlineDelta: string;
+    }>;
+    evaluatedSummary?: string;
+    simulated?: boolean;
   };
   watchtowerCard: {
     confirmedCount: number;
@@ -96,12 +118,27 @@ export interface DashboardOverviewPayload {
   };
   reasoningCard: {
     activeInvestigationsCount: number;
-    investigationState: "STRATEGIC_REVIEW_REQUIRED" | "DEEP_REASONING_COMPLETE" | "INVESTIGATION_IN_PROGRESS" | "NO_ACTIVE_INVESTIGATION";
+    investigationState:
+      | "STRATEGIC_REVIEW_REQUIRED"
+      | "STRATEGIC_SIGNALS_PENDING"
+      | "DEEP_REASONING_COMPLETE"
+      | "INVESTIGATION_IN_PROGRESS"
+      | "NO_ACTIVE_INVESTIGATION";
     headline: string;
     summary: string;
     statusLabel: string;
     caseId?: string;
     proposalId?: string;
+    /** Strategic signals and their investigation state (same data as the Deep Reasoning section). */
+    signals?: Array<{
+      scenarioId: string;
+      eventId: string;
+      title: string;
+      lane: string;
+      status: "READY_FOR_INVESTIGATION" | "PATCH_READY" | "APPLIED";
+      statusLabel: string;
+      appliedVersion: number | null;
+    }>;
   };
   reportsCard: {
     latestReport: {
@@ -168,31 +205,90 @@ export async function assembleDashboardOverview(
   }
 
   // 2. Strategy Plan & Version
-  const approvedPlans = await db
+  const [designatedPlan] = await db
     .select()
+    .from(schema.strategicPlans)
+    .where(
+      and(
+        eq(schema.strategicPlans.campaignId, campaignId),
+        eq(schema.strategicPlans.accountId, accountId),
+        eq(schema.strategicPlans.isDesignatedActive, true),
+        eq(schema.strategicPlans.status, "APPROVED")
+      )
+    )
+    .limit(1);
+
+  const [latestApprovedPlan] = designatedPlan
+    ? [designatedPlan]
+    : await db
+        .select()
+        .from(schema.strategicPlans)
+        .where(
+          and(
+            eq(schema.strategicPlans.campaignId, campaignId),
+            eq(schema.strategicPlans.accountId, accountId),
+            eq(schema.strategicPlans.status, "APPROVED")
+          )
+        )
+        .orderBy(desc(schema.strategicPlans.updatedAt))
+        .limit(1);
+
+  const [candidateDraftPlan] = await db
+    .select()
+    .from(schema.strategicPlans)
+    .where(
+      and(
+        eq(schema.strategicPlans.campaignId, campaignId),
+        eq(schema.strategicPlans.accountId, accountId),
+        eq(schema.strategicPlans.status, "DRAFT")
+      )
+    )
+    .orderBy(desc(schema.strategicPlans.updatedAt))
+    .limit(1);
+
+  const activePlan = designatedPlan || latestApprovedPlan || candidateDraftPlan || null;
+  const isApprovedLive = !!(designatedPlan || latestApprovedPlan);
+  const isDraftOnly = !isApprovedLive && !!candidateDraftPlan;
+  const hasPlan = !!activePlan;
+  let planData: any = null;
+  const rawPlanPayload = (activePlan as any)?.planJson || (activePlan as any)?.planData;
+  if (rawPlanPayload) {
+    try {
+      planData = typeof rawPlanPayload === "string" ? JSON.parse(rawPlanPayload) : rawPlanPayload;
+    } catch {}
+  }
+
+  const rootBundle = planData?.rootBundle;
+  const allCampaignPlans = await db
+    .select({ id: schema.strategicPlans.id })
     .from(schema.strategicPlans)
     .where(
       and(
         eq(schema.strategicPlans.campaignId, campaignId),
         eq(schema.strategicPlans.accountId, accountId)
       )
-    )
-    .orderBy(desc(schema.strategicPlans.createdAt))
-    .limit(1);
-
-  const activePlan = approvedPlans[0];
-  const hasPlan = !!activePlan;
-  let planData: any = null;
-  if (activePlan?.planData) {
-    planData = typeof activePlan.planData === "string" ? JSON.parse(activePlan.planData) : activePlan.planData;
-  }
-
-  const rootBundle = planData?.rootBundle;
-  const currentStrategyVersion = hasPlan ? (rootBundle?.bundleVersion || activePlan?.version || 1) : 0;
+    );
+  const totalPlanRevisions = allCampaignPlans.length;
+  const activePlanVersion = hasPlan ? (activePlan?.version || 1) : 0;
+  const rootBundleVersion = hasPlan
+    ? ((activePlan as any)?.rootBundleVersion || rootBundle?.bundleVersion || rootBundle?.version || activePlanVersion)
+    : 0;
+  const currentStrategyVersion = activePlanVersion;
   const primaryDirection = hasPlan
-    ? (rootBundle?.spine?.positioning || planData?.positioning?.statement || "Simplicity & Ease")
+    ? (rootBundle?.spine?.positioning ||
+        planData?.positioning?.statement ||
+        planData?.brandSpine?.corePositioningStatement ||
+        activePlan?.planSummary ||
+        "Active Strategic Plan")
     : "Strategy not generated yet";
-  const activeLanesCount = (hasPlan && rootBundle?.lanes && Array.isArray(rootBundle.lanes)) ? rootBundle.lanes.length : (hasPlan ? 2 : 0);
+  const activeLanesCount =
+    hasPlan && Array.isArray(planData?.approvedLanes)
+      ? planData.approvedLanes.length
+      : hasPlan && rootBundle?.lanes && Array.isArray(rootBundle.lanes)
+        ? rootBundle.lanes.length
+        : hasPlan
+          ? 2
+          : 0;
 
   // 3. Proposals & Material Changes
   const proposals = await db
@@ -213,9 +309,12 @@ export async function assembleDashboardOverview(
   let latestMaterialChange: DashboardOverviewPayload["strategyPlanCard"]["latestMaterialChange"] = null;
   if (latestAppliedProposal) {
     const affectedAuths = Array.isArray(latestAppliedProposal.affectedAuthorities) ? latestAppliedProposal.affectedAuthorities : [];
-    const authName = affectedAuths[0] || "Funnel";
+    const authName = affectedAuths[0] || "DIFFERENTIATION";
+    const propMeta = (typeof latestAppliedProposal.metadata === "string"
+      ? JSON.parse(latestAppliedProposal.metadata)
+      : latestAppliedProposal.metadata) as any;
     const affectedLanes = Array.isArray(latestAppliedProposal.affectedLaneIds) ? latestAppliedProposal.affectedLaneIds : [];
-    const laneName = affectedLanes[0] ? "SMB Managers" : undefined;
+    const laneName = propMeta?.affectedLaneNames?.[0] || (affectedLanes[0] ? affectedLanes[0] : undefined);
     const changeDate = latestAppliedProposal.appliedAt || latestAppliedProposal.createdAt;
 
     const acks = await db
@@ -224,13 +323,13 @@ export async function assembleDashboardOverview(
       .where(
         and(
           eq(schema.strategyChangeAcknowledgements.campaignId, campaignId),
-          eq(schema.strategyChangeAcknowledgements.rootBundleVersion, currentStrategyVersion)
+          eq(schema.strategyChangeAcknowledgements.rootBundleVersion, rootBundleVersion || currentStrategyVersion)
         )
       )
       .limit(1);
 
     latestMaterialChange = {
-      summary: `${authName} updated${laneName ? ` for ${laneName}` : ""}`,
+      summary: latestAppliedProposal.summary || `${authName} updated${laneName ? ` for ${laneName}` : ""}`,
       authority: authName,
       laneTitle: laneName,
       occurredAt: changeDate ? changeDate.toISOString() : undefined,
@@ -239,50 +338,57 @@ export async function assembleDashboardOverview(
     };
   }
 
-  // 4. Watchtower Market Events (Current Month)
+  // 4. Watchtower Market Events (Campaign Telemetry)
   const currentYear = now.getUTCFullYear();
   const currentMonth = now.getUTCMonth() + 1;
   const { periodStart, periodEnd } = calculatePeriodBounds(currentYear, currentMonth, timezone, now);
 
   const watchtowerEvents = await db
-    .select()
+    .select({
+      event: schema.pipelineChangeEvents,
+      competitor: schema.ciCompetitors,
+    })
     .from(schema.pipelineChangeEvents)
+    .leftJoin(schema.ciCompetitors, eq(schema.pipelineChangeEvents.competitorId, schema.ciCompetitors.id))
     .where(
       and(
         eq(schema.pipelineChangeEvents.campaignId, campaignId),
-        eq(schema.pipelineChangeEvents.accountId, accountId),
-        gte(schema.pipelineChangeEvents.createdAt, periodStart),
-        lte(schema.pipelineChangeEvents.createdAt, periodEnd)
+        eq(schema.pipelineChangeEvents.accountId, accountId)
       )
     )
     .orderBy(desc(schema.pipelineChangeEvents.createdAt));
 
-  const confirmedEvents = watchtowerEvents.filter(e => e.status === "confirmed");
-  const candidateEvents = watchtowerEvents.filter(e => e.status === "candidate");
+  const confirmedEvents = watchtowerEvents.filter(row => row.event.status === "confirmed");
+  const candidateEvents = watchtowerEvents.filter(row => row.event.status === "candidate");
 
   const recentConfirmedEvents: DashboardOverviewPayload["watchtowerCard"]["recentConfirmedEvents"] = [];
-  for (const ev of confirmedEvents.slice(0, 2)) {
+  for (const { event: ev, competitor } of confirmedEvents.slice(0, 3)) {
     let evObj: any = {};
     try {
-      if (ev.evidence) evObj = JSON.parse(ev.evidence);
+      if (ev.evidence) {
+        evObj = typeof ev.evidence === "string" ? JSON.parse(ev.evidence) : ev.evidence;
+      }
     } catch {}
 
-    let title = "Market change confirmed";
-    if (ev.kind === "pricing_change") {
-      title = "Later changed Starter pricing";
-    } else if (ev.kind === "offer_language_change") {
-      title = "Competitor launched new offer";
-    } else {
-      title = `Competitor shift in ${ev.kind}`;
+    const compName = competitor?.name || "Competitor";
+    let title = evObj.title || (ev as any).evidenceSummary || evObj.headline || "";
+    if (!title) {
+      if (ev.kind === "pricing_change") {
+        title = `${compName} pricing strategy shift`;
+      } else if (ev.kind === "offer_type_shift" || ev.kind === "offer_language_change") {
+        title = `${compName} offer & packaging shift`;
+      } else {
+        title = `${compName} shift in ${(ev.kind || "market posture").replace(/_/g, " ")}`;
+      }
     }
 
     recentConfirmedEvents.push({
       id: ev.id,
-      competitorName: "Later",
+      competitorName: compName,
       kind: ev.kind,
       title,
-      oldValue: evObj.oldValue || (ev.kind === "pricing_change" ? "$18.75" : undefined),
-      newValue: evObj.newValue || (ev.kind === "pricing_change" ? "$25" : undefined),
+      oldValue: evObj.oldValue || (ev as any).beforeState || undefined,
+      newValue: evObj.newValue || (ev as any).afterState || undefined,
       occurredAt: ev.createdAt.toISOString(),
     });
   }
@@ -392,69 +498,59 @@ export async function assembleDashboardOverview(
     }
   }
 
-  // 6. WTDT Tasks (Today)
-  const taskRows = await db
-    .select()
-    .from(schema.executionTasks)
-    .where(
-      and(
-        eq(schema.executionTasks.campaignId, campaignId),
-        eq(schema.executionTasks.accountId, accountId)
+  // 6. WTDT Tasks (Today) - scoped strictly to designated active execution plan or dailyExecutionTasks
+  let taskRows: (typeof schema.executionTasks.$inferSelect)[] = [];
+  const execPlanRes = await resolveExecutionPlan({ accountId, campaignId, intent: "execution" });
+  if (execPlanRes.canExecute && execPlanRes.plan) {
+    taskRows = await db
+      .select()
+      .from(schema.executionTasks)
+      .where(
+        and(
+          eq(schema.executionTasks.campaignId, campaignId),
+          eq(schema.executionTasks.accountId, accountId),
+          eq(schema.executionTasks.planId, execPlanRes.plan.id),
+        )
       )
-    )
-    .orderBy(desc(schema.executionTasks.createdAt))
-    .limit(10);
+      .orderBy(desc(schema.executionTasks.createdAt))
+      .limit(10);
+  }
 
-  const activeTasks = taskRows.filter(t => t.status !== "CANCELLED" && t.status !== "REPLACED");
-  const tasksTodayCount = activeTasks.length;
-  const completedTodayCount = activeTasks.filter(t => t.status === "COMPLETED").length;
-
-  const priorityTasks: DashboardOverviewPayload["whatToDoTodayCard"]["tasks"] = activeTasks.slice(0, 3).map((t, idx) => ({
+  const activeTasks = taskRows.filter(t => t.status !== "CANCELLED" && t.status !== "REPLACED" && t.status !== "SUPERSEDED_UNAPPROVED_DRAFT" && t.status !== "DRAFT");
+  let priorityTasks: DashboardOverviewPayload["whatToDoTodayCard"]["tasks"] = activeTasks.slice(0, 3).map((t, idx) => ({
     id: t.id,
     order: idx + 1,
     title: t.title,
     priorityBadge: idx === 0 ? "MUST DO" : (idx === 1 ? "STRATEGY UPDATED" : "SHOULD DO"),
     priorityColor: idx === 0 ? "red" : (idx === 1 ? "orange" : "blue"),
     status: t.status,
-    laneTitle: t.strategicLaneId || "Simplified Scheduling for SMB Managers",
+    laneTitle: t.strategicLaneId || "Primary Strategic Lane",
     channel: t.channel || "general",
   }));
+  let completedTodayCount = activeTasks.filter(t => t.status === "COMPLETED").length;
 
-  // If buffer campaign and tasks are populated in DB:
-  if (priorityTasks.length === 0 && campaignId === "camp_buffer_e2e_1787909177715") {
-    priorityTasks.push(
-      {
-        id: "task_1",
-        order: 1,
-        title: "Publish YouTube product demo",
-        priorityBadge: "MUST DO",
-        priorityColor: "red",
-        status: "PLANNED",
-        laneTitle: "Simplified Scheduling for SMB Managers",
-        channel: "youtube",
-      },
-      {
-        id: "task_2",
-        order: 2,
-        title: "Review SMB Funnel task",
-        priorityBadge: "STRATEGY UPDATED",
-        priorityColor: "orange",
-        status: "PLANNED",
-        laneTitle: "Simplified Scheduling for SMB Managers",
-        channel: "website",
-      },
-      {
-        id: "task_3",
-        order: 3,
-        title: "Instagram proof carousel",
-        priorityBadge: "SHOULD DO",
-        priorityColor: "blue",
-        status: "PLANNED",
-        laneTitle: "Automated Social Planning for Creators",
-        channel: "instagram",
-      }
-    );
+  if (priorityTasks.length === 0) {
+    const dailyRows = await db
+      .select()
+      .from(schema.dailyExecutionTasks)
+      .where(eq(schema.dailyExecutionTasks.campaignId, campaignId))
+      .orderBy(schema.dailyExecutionTasks.sequenceOrder)
+      .limit(10);
+    if (dailyRows.length > 0) {
+      completedTodayCount = dailyRows.filter(t => t.status === "DONE").length;
+      priorityTasks = dailyRows.slice(0, 3).map((t, idx) => ({
+        id: t.id,
+        order: idx + 1,
+        title: t.title,
+        priorityBadge: t.priority === "MUST_DO" ? "MUST DO" : t.priority === "SHOULD_DO" ? "SHOULD DO" : "OPTIONAL",
+        priorityColor: t.priority === "MUST_DO" ? "red" : t.priority === "SHOULD_DO" ? "orange" : "blue",
+        status: t.status === "DONE" ? "COMPLETED" : t.status,
+        laneTitle: t.laneId || "Primary Gift Box Lane",
+        channel: t.channel || "instagram",
+      }));
+    }
   }
+  const tasksTodayCount = priorityTasks.length;
 
   // 7. Reasoning Card
   let investigationState: DashboardOverviewPayload["reasoningCard"]["investigationState"] = "NO_ACTIVE_INVESTIGATION";
@@ -473,8 +569,8 @@ export async function assembleDashboardOverview(
     activeInvestigationsCount = 1;
   } else if (latestAppliedProposal) {
     investigationState = "DEEP_REASONING_COMPLETE";
-    reasoningHeadline = "Conversion weakness linked to onboarding friction";
-    reasoningSummary = "Trial conversion weakness may be linked to onboarding friction.";
+    reasoningHeadline = latestAppliedProposal.title || latestAppliedProposal.summary || "Strategic Adaptation Complete";
+    reasoningSummary = latestAppliedProposal.summary || "Strategic reasoning applied.";
     reasoningStatusLabel = "Deep Reasoning Complete";
     proposalId = latestAppliedProposal.id;
     activeInvestigationsCount = 1;
@@ -501,9 +597,9 @@ export async function assembleDashboardOverview(
       id: rep.id,
       periodLabel: p.periodLabel || `${rep.reportPeriodYear}-${rep.reportPeriodMonth}`,
       performanceSummary: p.performanceVsPlan?.kpis?.some((k: any) => k.status === "BELOW_PLAN") ? "Mixed" : "On Track",
-      strategyChangesCount: p.strategyEvolution?.totalMaterialUpdates || 1,
-      marketChangesCount: p.marketAndWatchtower?.confirmedEventsCount || 4,
-      executionCompletionPercent: p.executionSummary?.completionRatePercent || 73,
+      strategyChangesCount: p.strategyEvolution?.totalMaterialUpdates || 0,
+      marketChangesCount: p.marketAndWatchtower?.confirmedEventsCount || 0,
+      executionCompletionPercent: p.executionSummary?.completionRatePercent || 0,
       status: rep.status as "FINALIZED" | "IN_PROGRESS",
     };
   }
@@ -529,6 +625,117 @@ export async function assembleDashboardOverview(
     priorityLevel = "STABLE";
   }
 
+  // 9b. Demo-only enrichment: the Performance Loop and Reasoning cards read the SAME data
+  // as their own sections (historical evaluated cases / strategic signals + proposals).
+  let evaluatedCases: DashboardOverviewPayload["performanceCard"]["evaluatedCases"] = undefined;
+  let evaluatedSummary: string | undefined = undefined;
+  let reasoningSignals: DashboardOverviewPayload["reasoningCard"]["signals"] = undefined;
+
+  if (process.env.AVYRON_DEMO_MODE === "1" && hasPlan) {
+    const { DEMO_PERFORMANCE_LOOP_CASES, DEMO_DEEP_REASONING_SCENARIOS } = await import(
+      "../demo/scenarios-extension"
+    );
+
+    // --- Performance Loop card: evaluated historical actions (simulated) ---
+    if (kpis.length === 0 && DEMO_PERFORMANCE_LOOP_CASES.length > 0) {
+      evaluatedCases = DEMO_PERFORMANCE_LOOP_CASES.map((c) => {
+        const m: any = c.metrics[c.metrics.length - 1] || c.metrics[0];
+        return {
+          id: c.id,
+          caseNumber: c.caseNumber,
+          title: c.title,
+          outcomeType: c.outcomeType,
+          outcomeBadgeLabel: c.outcomeBadgeLabel,
+          outcomeColor: c.outcomeColor,
+          channel: c.channel,
+          headlineMetric: String(m?.metricName || "").replace(/\s*\[Simulated\]/i, ""),
+          headlineDelta: `${m?.baselineValue} → ${m?.followUpValue}`,
+        };
+      });
+      const tally = (t: string) => DEMO_PERFORMANCE_LOOP_CASES.filter((c) => c.outcomeType === t).length;
+      const under = DEMO_PERFORMANCE_LOOP_CASES.find((c) => c.outcomeType === "UNDERPERFORMING");
+      evaluatedSummary =
+        `${DEMO_PERFORMANCE_LOOP_CASES.length} evaluated actions (simulated): ` +
+        `${tally("ENCOURAGING_IMPROVEMENT")} encouraging · ${tally("NEUTRAL_RESULT")} neutral · ` +
+        `${tally("UNDERPERFORMING")} underperforming · ${tally("MIXED_TRADEOFF")} mixed · ` +
+        `${tally("INSUFFICIENT_EVIDENCE")} inconclusive`;
+      if (under) {
+        const um: any = under.metrics[under.metrics.length - 1];
+        mainConcernOrInsight = `Underperforming: ${under.title} — ${String(um.metricName).replace(/\s*\[Simulated\]/i, "")} ${um.baselineValue} → ${um.followUpValue}. ${under.recommendedNextStep}`;
+        isHealthy = false;
+        performanceHeadline = `${tally("UNDERPERFORMING")} Underperforming`;
+        performanceSubtext = `of ${DEMO_PERFORMANCE_LOOP_CASES.length} evaluated actions`;
+        performanceStatus = "DEVIATION";
+      }
+    }
+
+    // --- Reasoning card: strategic signals + their investigation state ---
+    const demoProposals = await db
+      .select()
+      .from(schema.strategyChangeProposals)
+      .where(
+        and(
+          eq(schema.strategyChangeProposals.campaignId, campaignId),
+          eq(schema.strategyChangeProposals.accountId, accountId)
+        )
+      );
+    const signals: NonNullable<DashboardOverviewPayload["reasoningCard"]["signals"]> = [];
+    for (const s of DEMO_DEEP_REASONING_SCENARIOS) {
+      if (!confirmedEvents.some((row) => row.event.id === s.eventId)) continue;
+      const prop = demoProposals.find((p) => p.id === s.proposalId);
+      let status: "READY_FOR_INVESTIGATION" | "PATCH_READY" | "APPLIED" = "READY_FOR_INVESTIGATION";
+      let statusLabel = "Ready for Deep Reasoning";
+      if (prop?.status === "APPLIED") {
+        status = "APPLIED";
+        statusLabel = `Applied · Strategy v${prop.appliedNewBundleVersion ?? ""}`.trim();
+      } else if (prop?.status === "PENDING_USER_APPROVAL") {
+        status = "PATCH_READY";
+        statusLabel = "Patch ready · awaiting your approval";
+      }
+      signals.push({
+        scenarioId: s.scenarioId,
+        eventId: s.eventId,
+        title: s.shortTitle,
+        lane: s.relevantLaneTitle.split(" (")[0],
+        status,
+        statusLabel,
+        appliedVersion: prop?.appliedNewBundleVersion ?? null,
+      });
+    }
+
+    if (signals.length > 0) {
+      reasoningSignals = signals;
+      const ready = signals.filter((x) => x.status === "READY_FOR_INVESTIGATION").length;
+      const patch = signals.filter((x) => x.status === "PATCH_READY").length;
+      const applied = signals.filter((x) => x.status === "APPLIED").length;
+      reasoningSummary =
+        `${signals.length} strategic signal${signals.length === 1 ? "" : "s"} from Watchtower: ` +
+        `${ready} ready for Deep Reasoning · ${patch} awaiting approval · ${applied} applied.`;
+      proposalId = demoProposals.find((p) => p.status === "PENDING_USER_APPROVAL")?.id || proposalId;
+      if (patch > 0) {
+        investigationState = "STRATEGIC_REVIEW_REQUIRED";
+        reasoningHeadline = "Strategic Review Required";
+        reasoningStatusLabel = "Action Required";
+        activeInvestigationsCount = ready + patch;
+      } else if (ready > 0) {
+        investigationState = "STRATEGIC_SIGNALS_PENDING";
+        reasoningHeadline = "Strategic signals ready for Deep Reasoning";
+        reasoningStatusLabel = "Awaiting Investigation";
+        activeInvestigationsCount = ready;
+      } else {
+        investigationState = "DEEP_REASONING_COMPLETE";
+        reasoningHeadline = "Strategic adaptations applied";
+        reasoningStatusLabel = "Deep Reasoning Complete";
+        activeInvestigationsCount = applied;
+      }
+
+      if (ready > 0 || patch > 0) {
+        aiSummaryText = `Watchtower confirmed ${confirmedEvents.length} market changes; ${ready + patch} strategic signal${ready + patch === 1 ? " needs" : "s need"} your review.`;
+        priorityLevel = "ACTION_REQUIRED";
+      }
+    }
+  }
+
   // 10. Live Updates / Recent Activity Timeline (Unified from real facts)
   const recentActivity: DashboardOverviewPayload["recentActivity"] = [];
 
@@ -539,21 +746,28 @@ export async function assembleDashboardOverview(
       icon: "target",
       iconColor: "#8B5CF6",
       relativeTime: latestMaterialChange?.relativeTime || "2m ago",
-      title: `Strategy v${currentStrategyVersion} activated`,
+      title: `Strategy Plan v${activePlanVersion} · Bundle v${rootBundleVersion} activated`,
       subtitle: latestMaterialChange?.summary || "Strategy plan active",
       targetRoute: "/(tabs)/strategy-plan",
     });
   }
 
   if (investigationState !== "NO_ACTIVE_INVESTIGATION") {
+    const pendingSignals = (reasoningSignals || []).filter((x) => x.status !== "APPLIED");
     recentActivity.push({
       id: "act_2",
       type: "reasoning",
       icon: "cpu",
       iconColor: "#10B981",
       relativeTime: "5m ago",
-      title: "Deep Reasoning completed",
-      subtitle: "Conversion weakness linked to onboarding friction",
+      title: reasoningSignals
+        ? pendingSignals.length > 0
+          ? `${pendingSignals.length} strategic signal${pendingSignals.length === 1 ? "" : "s"} awaiting Deep Reasoning`
+          : "Deep Reasoning completed"
+        : "Deep Reasoning completed",
+      subtitle: reasoningSignals
+        ? (pendingSignals[0] || reasoningSignals[0]).title
+        : "Conversion weakness linked to onboarding friction",
       targetRoute: "/(tabs)/reasoning-evidence",
     });
   }
@@ -607,9 +821,14 @@ export async function assembleDashboardOverview(
     lastUpdated: now.toISOString(),
     businessPulse: {
       strategy: {
-        version: currentStrategyVersion,
-        status: hasPlan ? "ACTIVE" : "NO_PLAN",
-        label: hasPlan ? `v${currentStrategyVersion} · Active` : "No active strategy",
+        version: activePlanVersion,
+        activePlanVersion,
+        rootBundleVersion,
+        totalPlanRevisions,
+        status: isApprovedLive ? "ACTIVE" : (isDraftOnly ? "PENDING_APPROVAL" : "NO_PLAN"),
+        label: isApprovedLive
+          ? `Plan v${activePlanVersion} · Bundle v${rootBundleVersion} · Active`
+          : (isDraftOnly ? `Plan v${activePlanVersion} · Candidate Draft` : "No active strategy"),
       },
       market: {
         confirmedChangesMonthCount: confirmedEvents.length,
@@ -638,8 +857,11 @@ export async function assembleDashboardOverview(
       tasks: priorityTasks,
     },
     strategyPlanCard: {
-      version: currentStrategyVersion,
-      status: hasPlan ? "ACTIVE" : "NO_PLAN",
+      version: activePlanVersion,
+      activePlanVersion,
+      rootBundleVersion,
+      totalPlanRevisions,
+      status: isApprovedLive ? "ACTIVE" : (isDraftOnly ? "PENDING_APPROVAL" : "NO_PLAN"),
       primaryDirection,
       activeLanesCount,
       latestMaterialChange,
@@ -649,6 +871,9 @@ export async function assembleDashboardOverview(
       mainConcernOrInsight,
       status: performanceStatus,
       isHealthy,
+      evaluatedCases,
+      evaluatedSummary,
+      simulated: evaluatedCases ? true : undefined,
     },
     watchtowerCard: {
       confirmedCount: confirmedEvents.length,
@@ -662,6 +887,7 @@ export async function assembleDashboardOverview(
       summary: reasoningSummary,
       statusLabel: reasoningStatusLabel,
       proposalId,
+      signals: reasoningSignals,
     },
     reportsCard: {
       latestReport: latestReportItem,

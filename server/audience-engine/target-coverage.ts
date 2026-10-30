@@ -180,11 +180,13 @@ export async function extractBusinessTargetAuthority(
 export async function resolveTargetRolesWithJudge(
   sources: BusinessTargetSourceItem[],
   model: string = RESOLVER_MODEL,
-  judgeModel: string = JUDGE_MODEL
+  judgeModel: string = JUDGE_MODEL,
+  accountId?: string
 ): Promise<{ valid: boolean; targetRoles: NormalizedTargetRole[]; rejectionReasons?: string[] }> {
   if (sources.length === 0) {
     return { valid: false, targetRoles: [], rejectionReasons: ["No source items provided"] };
   }
+  const effectiveAccountId = accountId || sources[0]?.accountId || "system";
 
   const MAX_RETRIES = 3;
   let repairFeedback: string | undefined;
@@ -239,7 +241,7 @@ Return a JSON object:
         max_tokens: 16000,
         temperature: 0.1,
         response_format: { type: "json_object" },
-        accountId: "system",
+        accountId: effectiveAccountId,
         endpoint: "target-authority-resolver"
       });
 
@@ -292,7 +294,7 @@ Return a JSON object:
         max_tokens: 4000,
         temperature: 0.1,
         response_format: { type: "json_object" },
-        accountId: "system",
+        accountId: effectiveAccountId,
         endpoint: "target-authority-judge"
       });
 
@@ -317,11 +319,13 @@ export async function matchAudienceToTargetsWithJudge(
   targetRoles: NormalizedTargetRole[],
   audienceSegments: AudienceSegment[],
   model: string = RESOLVER_MODEL,
-  judgeModel: string = JUDGE_MODEL
+  judgeModel: string = JUDGE_MODEL,
+  accountId?: string
 ): Promise<{ valid: boolean; matches: TargetRoleMatch[]; rejectionReasons?: string[] }> {
   if (targetRoles.length === 0 || audienceSegments.length === 0) {
     return { valid: false, matches: [], rejectionReasons: ["Missing targets or audience segments"] };
   }
+  const effectiveAccountId = accountId || "system";
 
   const MAX_RETRIES = 2;
   let repairFeedback: string | undefined;
@@ -398,7 +402,7 @@ Return a JSON object evaluating EVERY combination of Target Role and Audience Se
         max_tokens: 4000,
         temperature: 0.1,
         response_format: { type: "json_object" },
-        accountId: "system",
+        accountId: effectiveAccountId,
         endpoint: "target-role-matcher",
         timeoutMs: 90000,
       });
@@ -461,7 +465,7 @@ Return a JSON object:
         max_tokens: 2000,
         temperature: 0.1,
         response_format: { type: "json_object" },
-        accountId: "system",
+        accountId: effectiveAccountId,
         endpoint: "role-match-judge",
         timeoutMs: 90000,
       });
@@ -659,7 +663,7 @@ export async function evaluateTargetCoverage(
   }
 
   // C. Resolve Target Roles via LLM + Target Authority Judge
-  const targetResolution = await resolveTargetRolesWithJudge(sourceItems);
+  const targetResolution = await resolveTargetRolesWithJudge(sourceItems, RESOLVER_MODEL, JUDGE_MODEL, effectiveAccountId);
   if (!targetResolution.valid || targetResolution.targetRoles.length === 0) {
     console.log(`[TargetCoverage] TARGET_AUTHORITY_INVALID — Judge rejected target roles: ${targetResolution.rejectionReasons?.join("; ")}`);
     return {
@@ -675,7 +679,7 @@ export async function evaluateTargetCoverage(
   const { targetRoles } = targetResolution;
 
   // D. Match Audience Segments to Target Roles via LLM + Role-Match Judge
-  const matchResult = await matchAudienceToTargetsWithJudge(targetRoles, audienceSegments);
+  const matchResult = await matchAudienceToTargetsWithJudge(targetRoles, audienceSegments, RESOLVER_MODEL, JUDGE_MODEL, effectiveAccountId);
   if (!matchResult.valid || matchResult.matches.length === 0) {
     console.log(`[TargetCoverage] ROLE_MATCH_UNRESOLVED — Judge rejected matches: ${matchResult.rejectionReasons?.join("; ")}`);
     return {
@@ -692,21 +696,27 @@ export async function evaluateTargetCoverage(
   const { matches } = matchResult;
 
   // E. Deterministic Aggregation
-  const supportedTargetRoles = matches.filter(m => m.coverageDecision === "COVERED").map(m => m.roleName);
-  const unsupportedTargetRoles = matches.filter(m => m.coverageDecision === "NOT_COVERED" || m.coverageDecision === "RELATED_BUT_UNPROVEN").map(m => m.roleName);
+  const supportedTargetRoles = Array.from(new Set(matches.filter(m => m.coverageDecision === "COVERED").map(m => m.roleName)));
+  const unsupportedTargetRoles = Array.from(
+    new Set(
+      targetRoles
+        .map(t => t.roleName)
+        .filter(roleName => !supportedTargetRoles.includes(roleName))
+    )
+  );
 
   let status: "FULL" | "PARTIAL" | "GAP" = "GAP";
   let evidenceGap = false;
   let reason = "";
 
-  if (supportedTargetRoles.length === targetRoles.length) {
+  if (supportedTargetRoles.length === targetRoles.length && unsupportedTargetRoles.length === 0) {
     status = "FULL";
     evidenceGap = false;
     reason = `All ${targetRoles.length} explicit business target roles are supported by market evidence.`;
   } else if (supportedTargetRoles.length > 0) {
     status = "PARTIAL";
-    evidenceGap = false;
-    reason = `Partial coverage: ${supportedTargetRoles.length}/${targetRoles.length} target roles supported. Unsupported: ${unsupportedTargetRoles.join(", ")}`;
+    evidenceGap = unsupportedTargetRoles.length > 0;
+    reason = `Partial coverage: ${supportedTargetRoles.length}/${targetRoles.length} target roles supported. Evidence gap for unsupported role(s): ${unsupportedTargetRoles.join(", ")} (no B2C substitution allowed).`;
   } else {
     status = "GAP";
     evidenceGap = true;

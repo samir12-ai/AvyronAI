@@ -44,9 +44,21 @@ export class LLMReliabilityError extends Error {
 function isRetryable(err: any): boolean {
   if (!err) return false;
   const msg = (err.message || "").toLowerCase();
-  
-  // Explicitly non-retryable configuration errors
+  const code = String(err.code || "").toUpperCase();
+  const cat = String(err.errorCategory || "").toUpperCase();
+
+  // Explicitly non-retryable billing/quota exhaustion and configuration errors
   if (
+    code === "BILLING_EXHAUSTED" ||
+    code === "AI_BUDGET_EXCEEDED" ||
+    code === "DEMO_MODE_AI_BLOCKED" ||
+    cat === "BILLING_EXHAUSTED" ||
+    cat === "DEMO_MODE_AI_BLOCKED" ||
+    msg.includes("no credits remaining") ||
+    msg.includes("insufficient_quota") ||
+    msg.includes("billing_hard_limit_reached") ||
+    msg.includes("credit balance is too low") ||
+    msg.includes("ai budget exceeded") ||
     msg.includes("invalid credentials") ||
     msg.includes("missing credentials") ||
     msg.includes("invalid model") ||
@@ -87,6 +99,7 @@ export async function generateWithRepair<TInput, TOutput>(
     engine: args.engineName,
     touchpoint: args.touchpointName,
     attempts: 0,
+    maxAttempts,
     technicalRetries: 0,
     finalVerdict: "HONEST_FAIL",
     repairLog: []
@@ -132,12 +145,17 @@ export async function generateWithRepair<TInput, TOutput>(
     
     // 2. Validation
     try {
-      const attemptString = `\n========== ATTEMPT ${currentAttempt} ==========\n${typeof candidate === 'string' ? candidate : JSON.stringify(candidate, null, 2)}\n===================================\n`;
-      const fs = require('fs');
-      fs.appendFileSync('C:\\Users\\mahmo\\.gemini\\antigravity\\brain\\b8fb5dac-575e-4c9c-8460-77f7f7b3318d\\scratch\\audience_semantic_trace.txt', attemptString);
+      try {
+        const attemptString = `\n========== ATTEMPT ${currentAttempt} ==========\n${typeof candidate === 'string' ? candidate : JSON.stringify(candidate, null, 2)}\n===================================\n`;
+        const fs = require('fs');
+        fs.appendFileSync('C:\\Users\\mahmo\\.gemini\\antigravity\\brain\\b8fb5dac-575e-4c9c-8460-77f7f7b3318d\\scratch\\audience_semantic_trace.txt', attemptString);
+      } catch {}
 
       judgeResult = await runWithTechnicalRetry(async () => await args.judge(args.authoritativeInput, candidate));
     } catch (err: any) {
+      if (err instanceof LLMReliabilityError) {
+        throw err;
+      }
       telemetry.finalVerdict = "TECHNICAL_FAIL";
       logger.error(`[${args.engineName}::${args.touchpointName}] Technical failure during judging (attempt ${currentAttempt}):`, err);
       throw new LLMReliabilityError(`Judge technical failure: ${err.message}`, "TECHNICAL_FAILURE", undefined, telemetry);
@@ -189,7 +207,8 @@ export async function generateWithRepair<TInput, TOutput>(
       }
 
       if (args.config?.failClosed) {
-        throw new LLMReliabilityError(`Exhausted ${maxAttempts} attempts without a valid result`, "GENERATION_QUALITY_FAILURE", rejections, telemetry);
+        const terminalClass: LlmFailureClass = failureClass === "CONTRACT_FAILURE" ? "CONTRACT_FAILURE" : "GENERATION_QUALITY_FAILURE";
+        throw new LLMReliabilityError(`Exhausted ${maxAttempts} attempts without a valid result`, terminalClass, rejections, telemetry);
       }
 
       const flag = {

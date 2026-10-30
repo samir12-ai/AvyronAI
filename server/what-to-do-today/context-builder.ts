@@ -10,67 +10,106 @@ import { db } from "../db";
 import * as schema from "@shared/schema";
 import { eq, desc, and } from "drizzle-orm";
 import { ExecutionPlanningContext, ChannelName, StrategicLaneContext } from "./contracts";
+import { resolveExecutionPlan } from "../orchestrator/execution-plan-resolver";
 
 export async function buildExecutionPlanningContext(
   campaignId: string,
-  businessDate: string = new Date().toISOString().split("T")[0]
+  businessDate: string = new Date().toISOString().split("T")[0],
+  accountIdParam?: string
 ): Promise<ExecutionPlanningContext> {
-  // 1. Resolve Active Strategy Root (bf6d003d)
-  const [activeRoot] = await db
-    .select()
-    .from(schema.strategyRoots)
-    .where(eq(schema.strategyRoots.campaignId, campaignId))
-    .orderBy(desc(schema.strategyRoots.createdAt))
-    .limit(1);
-
-  if (!activeRoot) {
-    throw new Error(`NO_ACTIVE_STRATEGY_ROOT: Campaign ${campaignId} has no active strategy root.`);
+  // 1. Resolve Account ID
+  let accountId = accountIdParam;
+  if (!accountId) {
+    const [sel] = await db
+      .select({ accountId: schema.campaignSelections.accountId })
+      .from(schema.campaignSelections)
+      .where(eq(schema.campaignSelections.selectedCampaignId, campaignId))
+      .limit(1);
+    accountId = sel?.accountId || "default";
   }
 
-  // 2. Resolve Canonical Root Bundle (v56, cc451488)
-  const [rootBundle] = await db
-    .select()
-    .from(schema.rootBundles)
-    .where(eq(schema.rootBundles.campaignId, campaignId))
-    .orderBy(desc(schema.rootBundles.createdAt))
-    .limit(1);
+  // 2. Resolve Designated Active Execution Plan (Fail-Closed)
+  const planResolution = await resolveExecutionPlan({
+    accountId,
+    campaignId,
+    intent: "execution",
+  });
 
-  if (!rootBundle) {
-    throw new Error(`NO_ROOT_BUNDLE: Campaign ${campaignId} has no root bundle.`);
+  if (!planResolution.canExecute || !planResolution.plan) {
+    throw new Error(
+      `EXECUTION_GATED: ${planResolution.reason || "No designated active execution plan"} for campaign ${campaignId}.`
+    );
   }
 
-  // 3. Resolve Strategic Plan bound to this Root Bundle (1772a457)
-  let [strategicPlan] = await db
-    .select()
-    .from(schema.strategicPlans)
-    .where(
-      and(
-        eq(schema.strategicPlans.campaignId, campaignId),
-        eq(schema.strategicPlans.rootBundleId, rootBundle.id)
-      )
-    )
-    .limit(1);
+  const strategicPlan = planResolution.plan;
 
-  if (!strategicPlan) {
-    [strategicPlan] = await db
+  // 3. Resolve Canonical Root Bundle pinned to this designated plan
+  let rootBundle: typeof schema.rootBundles.$inferSelect | undefined;
+  if (strategicPlan.rootBundleId) {
+    const [rb] = await db
       .select()
-      .from(schema.strategicPlans)
+      .from(schema.rootBundles)
       .where(
         and(
-          eq(schema.strategicPlans.campaignId, campaignId),
-          eq(schema.strategicPlans.rootBundleVersion, rootBundle.version)
+          eq(schema.rootBundles.id, strategicPlan.rootBundleId),
+          eq(schema.rootBundles.campaignId, campaignId)
         )
       )
       .limit(1);
+    rootBundle = rb;
   }
 
-  if (!strategicPlan) {
-    [strategicPlan] = await db
+  if (!rootBundle && strategicPlan.rootBundleVersion) {
+    const [rb] = await db
       .select()
-      .from(schema.strategicPlans)
-      .where(eq(schema.strategicPlans.campaignId, campaignId))
-      .orderBy(desc(schema.strategicPlans.createdAt))
+      .from(schema.rootBundles)
+      .where(
+        and(
+          eq(schema.rootBundles.campaignId, campaignId),
+          eq(schema.rootBundles.version, strategicPlan.rootBundleVersion)
+        )
+      )
       .limit(1);
+    rootBundle = rb;
+  }
+
+  if (!rootBundle) {
+    throw new Error(`PINNED_ROOT_BUNDLE_NOT_FOUND: Designated plan ${strategicPlan.id} root bundle (${strategicPlan.rootBundleId || `ver_${strategicPlan.rootBundleVersion}` || "none"}) is missing.`);
+  }
+
+  // 4. Resolve Active Strategy Root pinned to the designated plan's run / campaign
+  let activeRoot: typeof schema.strategyRoots.$inferSelect | undefined;
+  if (strategicPlan.jobId) {
+    const [sr] = await db
+      .select()
+      .from(schema.strategyRoots)
+      .where(
+        and(
+          eq(schema.strategyRoots.campaignId, campaignId),
+          eq(schema.strategyRoots.runId, strategicPlan.jobId)
+        )
+      )
+      .limit(1);
+    activeRoot = sr;
+  }
+
+  if (!activeRoot) {
+    const [sr] = await db
+      .select()
+      .from(schema.strategyRoots)
+      .where(
+        and(
+          eq(schema.strategyRoots.campaignId, campaignId),
+          eq(schema.strategyRoots.status, "ACTIVE")
+        )
+      )
+      .orderBy(desc(schema.strategyRoots.createdAt))
+      .limit(1);
+    activeRoot = sr;
+  }
+
+  if (!activeRoot) {
+    throw new Error(`NO_ACTIVE_STRATEGY_ROOT: Campaign ${campaignId} has no active strategy root.`);
   }
 
   // 4. Parse Plan JSON
@@ -153,8 +192,8 @@ export async function buildExecutionPlanningContext(
     strategicPlanVersion: strategicPlan.version || 1,
     strategyName,
     primaryAxis: activeRoot.primaryAxis || "",
-    contrastAxis: activeRoot.contrastAxisText || activeRoot.contrastAxis || "",
-    approvedPromise: activeRoot.approvedPromise || activeRoot.positioningStatement || "",
+    contrastAxis: activeRoot.contrastAxisText || "",
+    approvedPromise: activeRoot.approvedPromise || activeRoot.approvedPositioningContext || "",
     approvedTransformation: activeRoot.approvedTransformation || "",
     approvedMechanism: {
       mechanismName: mech.mechanismName || activeRoot.primaryAxis || "",
@@ -162,7 +201,7 @@ export async function buildExecutionPlanningContext(
       proofArtifact: mech.proofArtifact || undefined,
     },
     approvedLanes,
-    positioningSummary: strategicPlan.planSummary || activeRoot.positioningStatement || "",
+    positioningSummary: strategicPlan.planSummary || activeRoot.approvedPositioningContext || "",
     differentiationPillars: diffPillars,
     offerSummary: planJson.offerSummary || planJson.commercialOffer?.name || undefined,
     awarenessStrategy: planJson.awarenessStrategy ? {

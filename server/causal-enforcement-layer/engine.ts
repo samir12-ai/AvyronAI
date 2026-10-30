@@ -100,7 +100,7 @@ const CAUSAL_CONSTRAINT_RULES: CausalConstraintRule[] = [
   {
     id: "TRUST_OPACITY_RULE",
     rootCausePattern: /trust|opaci|transparen|hidden|unclear|confus|deceiv|mislead|skeptic|credibil|believab/i,
-    requiredAxisPatterns: [/transparen/i, /trust/i, /clarit/i, /predict/i, /proof/i, /honest/i, /verif/i, /accountab/i, /credib/i, /open/i, /evidence/i],
+    requiredAxisPatterns: [/transparen/i, /trust/i, /clarit/i, /predict/i, /proof/i, /honest/i, /verif/i, /accountab/i, /credib/i, /open/i, /evidence/i, /preview/i, /sample/i, /upfront/i, /visib/i, /demonstrat/i, /authentic/i, /trial/i, /audit/i],
     blockedAxisPatterns: [/^simplicity$/i, /^ease$/i, /^simplicity.and.ease$/i, /^convenience$/i],
     description: "When root cause involves trust/opacity/confusion, positioning must reflect transparency/trust/clarity — NOT generic simplicity",
   },
@@ -285,7 +285,7 @@ export function enforcePositioningCompliance(
   result.appliedRules = activeRules.map(r => r.id);
 
   for (const territory of territories) {
-    const outputText = `${territory.name} ${territory.contrastAxis} ${territory.narrativeDirection} ${territory.enemyDefinition}`.toLowerCase();
+    const outputText = `${territory.name} ${territory.contrastAxis} ${territory.narrativeDirection} ${territory.enemyDefinition} ${(territory as any).proofRequirement || ""} ${(territory as any).domainFailure || ""} ${(territory as any).operationalProblem || ""} ${((territory as any).evidenceSignals || []).join(" ")}`.toLowerCase();
 
     for (const rule of activeRules) {
       const hasRequiredAlignment = rule.requiredAxisPatterns.some(p => p.test(outputText));
@@ -969,7 +969,10 @@ export function enforceEngineDepthCompliance(
   // passes the gate. This aligns passed/blocked decisions across the two layers
   // that previously disagreed (isDepthBlocking used depthScore, result.passed
   // used blocking-count).
-  if (result.causalDepthScore >= DEPTH_GATE_THRESHOLD) {
+  if (
+    result.causalDepthScore >= DEPTH_GATE_THRESHOLD &&
+    (engineId !== "offer" || result.depthDiagnostics.hasRootCauseGrounding || result.depthDiagnostics.hasCausalChainUsage)
+  ) {
     for (const v of result.violations) {
       if (
         v.severity === "blocking" &&

@@ -83,6 +83,15 @@ export interface PositioningViewModel {
   umbrellaPosition: string;
   positioningStatement: string;
   contrastAxis: string;
+  positioningStatus?: string;
+  positioningStatusMessage?: string | null;
+  epistemicStatus?: "VERIFIED_FACT" | "EVIDENCE_INFERENCE" | "STRATEGIC_HYPOTHESIS" | "PROPOSED_RECOMMENDATION" | "UNAVAILABLE_OR_FAILED";
+  productTruthStatus?: "SUPPORTED_CAPABILITY" | "STRATEGIC_SYNTHESIS" | "PROPOSED_CAPABILITY" | null;
+  epistemicLabel?: string;
+  rationale?: string;
+  assumptions?: string[];
+  validationNeeds?: string[];
+  supportingEvidenceIds?: string[];
   reasoningJourney: {
     step1: ReasoningStep;
     step2: ReasoningStep;
@@ -94,12 +103,64 @@ export interface PositioningViewModel {
   decisionHistory: DecisionHistoryItemViewModel[];
 }
 
+export interface CommercialAudienceSynthesisViewModel {
+  selectedOfferingId?: string;
+  selectedOfferingName?: string;
+  selectedVariantName?: string;
+  selectedVariantScope?: string;
+  selectedVariantPricing?: { amount?: number; currency?: string } | null;
+  comparableCompetitors?: Array<{
+    competitorId?: string;
+    competitorName: string;
+    productOrServiceName?: string;
+    pricingSummary?: string;
+    evidenceUids?: string[];
+  }>;
+  reviewBackedStrengths?: Array<{
+    competitorName: string;
+    strength: string;
+    sampleReviewSnippet?: string;
+    reviewRating?: number;
+    platform?: string;
+  }>;
+  purchaseSituations?: Array<{
+    situation: string;
+    urgencyLevel?: "LOW" | "MEDIUM" | "HIGH";
+    frequencyContext?: string;
+  }>;
+  offeringFitBreakdown?: Array<{
+    need: string;
+    fitType: "DIRECT_FIT" | "STRATEGIC_FIT" | "POOR_FIT";
+    provenClauses: string[];
+    unresolvedRequirements: string[];
+    prerequisites?: string[];
+  }>;
+  packageOrScopeSuitability?: {
+    suitabilityVerdict: "SUITABLE" | "BORDERLINE" | "INSUFFICIENT_EVIDENCE";
+    notes: string;
+  };
+  priceValueLimitations?: Array<{
+    dimension: string;
+    limitation: string;
+    unknownFactor?: string;
+  }>;
+  proposedCapabilities?: Array<{
+    capability: string;
+    status: "PROPOSED" | "DEVELOPING" | "VALIDATED";
+    prerequisites: string[];
+  }>;
+}
+
 export interface AudiencePositioningViewModel {
   campaignId: string;
   hasPlan: boolean;
+  hasAudience?: boolean;
+  hasPositioning?: boolean;
   targetAudience: TargetAudienceViewModel;
   coreBuyingPain: CoreBuyingPainViewModel;
   supportingSignals: SupportingSignalsViewModel;
   excludedPains: ExcludedPainViewModel[];
   positioning: PositioningViewModel;
+  commercialAudienceSynthesis?: CommercialAudienceSynthesisViewModel | null;
 }
+

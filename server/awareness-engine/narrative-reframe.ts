@@ -30,6 +30,11 @@
  *   - Safe fallback (returns null → engine continues with legacy + myth-breaker)
  */
 import { aiChat } from "../ai-client";
+import {
+  type AuthoritativeCompetitorEvidenceContext,
+  evaluateAwarenessComparativeClaims,
+  repairContradictedNarrativeReframe,
+} from "./competitor-evidence-guard";
 
 export interface NarrativeReframe {
   currentModel: {
@@ -60,9 +65,10 @@ export interface NarrativeReframe {
   judgeVerdict: "ACCEPTED" | "REJECTED" | "JUDGE_ERROR" | "NOT_RUN";
   judgeReason: string;
   retryCount: number;
+  evidenceVersionHash?: string;
 }
 
-interface DesignerInput {
+export interface DesignerInput {
   // Awareness-engine context
   awarenessStage: string;
   primaryEntryRoute: string;
@@ -85,6 +91,7 @@ interface DesignerInput {
   // designer prompt and the judge prompt (anchor in first prompt AND judge).
   doctrineBlock?: string | null;
   anchorSource?: "doctrine" | "dna" | "none";
+  competitorEvidenceContext?: AuthoritativeCompetitorEvidenceContext | null;
 }
 
 const FEW_SHOT = `
@@ -163,9 +170,10 @@ async function callDesigner(input: DesignerInput, judgeFeedback?: string, attemp
   ].filter(Boolean).join("\n");
 
   const anchorPresent = input.doctrineBlock && input.doctrineBlock.length > 0;
-  console.log(`[NarrativeReframe] ANCHOR_EVIDENCE | engine=awareness_narrative_reframe | site=first_prompt | attempt=${attempt} | present=${anchorPresent ? "yes" : "no"} | source=${anchorSourceOf(input)}`);
+  const evidenceCtx = input.competitorEvidenceContext || null;
+  console.log(`[NarrativeReframe] ANCHOR_EVIDENCE | engine=awareness_narrative_reframe | site=first_prompt | attempt=${attempt} | present=${anchorPresent ? "yes" : "no"} | source=${anchorSourceOf(input)} | evidenceVersion=${evidenceCtx?.evidenceVersionHash || "none"}`);
 
-  const sys = `${anchorPresent ? `${input.doctrineBlock}\n\n` : ""}You are a senior brand & narrative strategist who has rebuilt the messaging of three Fortune-100 categories from scratch.
+  const sys = `${anchorPresent ? `${input.doctrineBlock}\n\n` : ""}${evidenceCtx ? `${evidenceCtx.promptBlock}\n\n` : ""}You are a senior brand & narrative strategist who has rebuilt the messaging of three Fortune-100 categories from scratch.
 
 You do NOT write hooks, slogans, or "attention-grabbing copy". You re-engineer the buyer's MENTAL MODEL.
 
@@ -187,12 +195,32 @@ Hard rules:
 - Do NOT mention forbidden domains (medical, legal, political, financial regulated advice).
 - CAPABILITY & PRODUCT TRUTH BOUNDARY:
   - "newModel", "whatBecomesObvious", and "bridgeMechanism" MUST strictly align with the Product Truth facts and capabilities of THIS product.
-  - You MUST NOT invent or claim product capabilities (such as automated billing/refund dashboards, payment dispute reconciliation, or customer support management) unless explicitly stated in the Product Anchor above.
-  - If buyer pains mention competitor billing/refund complaints, do NOT frame our product as a refund/billing automation tool. Frame the reframe around our ACTUAL capabilities (e.g. modular autonomous digital agents, workflow automation, and verified continuous intelligence).
+  - You MUST NOT invent or claim product capabilities (such as automated billing/refund dashboards, payment dispute reconciliation, customer support management, multi-version preview selection, iterative editing controls, or permanent/lifetime cloud hosting) unless explicitly stated in the Product Anchor above.
+  - Do NOT claim guaranteed emotional outcomes ("never generic", "ensuring emotional authenticity"). Frame how the verified workflow helps buyers evaluate fit before committing.
+  - PAYMENT-TRIGGER & COMPETITOR ATTRIBUTION FIDELITY: Never rewrite conditional payment triggers (such as creating a trial song for free and paying when gifting) into satisfaction-contingent payment claims ("pay only when satisfied") or unqualified "risk-free" claims, and never convert customer complaints into factual claims about competitors' internal production workflows ("mass-produced automated prompt workflows", "template-bound services").
+  - Do NOT turn an existing business model (such as upfront package-tier pricing or one-time purchase) into an invented strategic sacrifice, and do NOT portray ordinary subscription models or upsells as deceptive traps without scoped evidence.
+  - Do NOT generalize attributed customer complaints about specific services into universal statements like "Every alternative in the market..." or "All competitors...". Preserve scoped attribution.
+  - Distinguish recommendations about future messaging/framing from factual descriptions of the business.
+  - If buyer pains mention competitor billing/refund complaints, do NOT frame our product as a refund/billing automation tool. Frame the reframe around our ACTUAL capabilities.
 
 ${FEW_SHOT}
 
 ${judgeFeedback ? `\nPRIOR ATTEMPT WAS REJECTED. Fix per judge feedback:\n${judgeFeedback}\n` : ""}`;
+
+function formatNarrativeItem(item: any): string {
+    if (!item) return "";
+    if (typeof item === "string") return item.trim();
+    if (typeof item === "object") {
+      const val = item.statement || item.canonical || item.belief || item.pain || item.objection || item.text || item.description || (Array.isArray(item.evidence) && item.evidence[0]) || "";
+      if (typeof val === "string" && val.trim()) return val.trim();
+      try {
+        return JSON.stringify(item);
+      } catch {
+        return "";
+      }
+    }
+    return String(item).trim();
+  }
 
   const usr = `AWARENESS CONTEXT:
 - Awareness stage: ${input.awarenessStage}
@@ -201,8 +229,8 @@ ${judgeFeedback ? `\nPRIOR ATTEMPT WAS REJECTED. Fix per judge feedback:\n${judg
 - Positioning: ${input.positioningStatement || "(n/a)"}
 - Core offer: ${input.coreOffer || "(n/a)"}
 
-BUYER PAINS (top): ${input.audiencePains.slice(0, 5).map(p => `\n  - ${p}`).join("")}
-BUYER OBJECTIONS (top): ${input.audienceObjections.slice(0, 4).map(o => `\n  - ${o}`).join("")}
+BUYER PAINS (top): ${input.audiencePains.map(formatNarrativeItem).filter(Boolean).slice(0, 5).map(p => `\n  - ${p}`).join("") || "\n  - (none)"}
+BUYER OBJECTIONS (top): ${input.audienceObjections.map(formatNarrativeItem).filter(Boolean).slice(0, 4).map(o => `\n  - ${o}`).join("") || "\n  - (none)"}
 
 UPSTREAM COMMERCIAL SIGNALS (use these to make the reframe specific to THIS buyer):
 ${upstreamBlock || "(no upstream signals available — reason from pains/objections only)"}
@@ -226,9 +254,21 @@ Return ONLY valid JSON in the schema above. No prose, no markdown, no commentary
 
 async function callJudge(candidate: any, input: DesignerInput, attempt: number = 1): Promise<{ status: "ACCEPTED" | "REJECTED" | "JUDGE_ERROR"; reason: string }> {
   const judgeAnchorPresent = input.doctrineBlock && input.doctrineBlock.length > 0;
-  console.log(`[NarrativeReframe] ANCHOR_EVIDENCE | engine=awareness_narrative_reframe | site=judge | attempt=${attempt} | present=${judgeAnchorPresent ? "yes" : "no"} | source=${anchorSourceOf(input)}`);
+  const evidenceCtx = input.competitorEvidenceContext || null;
+  console.log(`[NarrativeReframe] ANCHOR_EVIDENCE | engine=awareness_narrative_reframe | site=judge | attempt=${attempt} | present=${judgeAnchorPresent ? "yes" : "no"} | source=${anchorSourceOf(input)} | evidenceVersion=${evidenceCtx?.evidenceVersionHash || "none"}`);
 
-  const sys = `${judgeAnchorPresent ? `${input.doctrineBlock}\n\n` : ""}You are a hostile narrative-strategy critic. You reject any reframe that is a slogan or vibe rather than a real mental-model shift.
+  if (evidenceCtx) {
+    const detEval = evaluateAwarenessComparativeClaims(candidate, evidenceCtx);
+    if (!detEval.passed) {
+      console.log(`[NarrativeReframe] JUDGE_EVIDENCE_GUARD_REJECT | attempt=${attempt} | version=${evidenceCtx.evidenceVersionHash} | violations=${detEval.violations.map(v => v.code).join(",")}`);
+      return {
+        status: "REJECTED",
+        reason: detEval.judgeFeedbackBlock,
+      };
+    }
+  }
+
+  const sys = `${judgeAnchorPresent ? `${input.doctrineBlock}\n\n` : ""}${evidenceCtx ? `${evidenceCtx.promptBlock}\n\n` : ""}You are a hostile narrative-strategy critic. You reject any reframe that is a slogan or vibe rather than a real mental-model shift.
 
 Reject if ANY of:
 1. "namedPrinciple" is a vibe ("be authentic", "be data-driven", "modern marketing", "trust matters").
@@ -237,7 +277,8 @@ Reject if ANY of:
 4. "discomfortCost.privateAdmission" doesn't actually hurt — if it could be said in a sales deck without embarrassment, it's not a real cost.
 5. "newModel" merely re-words "currentModel" without changing the classification of the problem.
 6. The reframe could apply to ANY product in ANY category — it must be specific to this buyer's situation.
-7. CAPABILITY INVENTIONS: Claims capabilities (e.g. automated refund processing, billing tools, dispute management, or customer service portals) outside the Product Anchor / Product Truth.
+7. CAPABILITY INVENTIONS: Claims capabilities (e.g. automated refund processing, billing tools, dispute management, customer service portals, multi-version selection, iterative editing controls, or lifetime cloud hosting) or guaranteed emotional outcomes ("never generic", "ensuring emotional authenticity") outside the Product Anchor / Product Truth.
+8. UNSCOPED COMPETITOR GENERALIZATION OR BUSINESS-MODEL FICTION: Generalizes customer complaints to "every alternative in the market" or "all competitors", contradicts observed competitor preview/trial/deliverable counterexamples in the Authoritative Competitor Evidence Contract, conflates preview vs free generation vs payment timing, portrays ordinary subscription models as deceptive traps without scoped evidence, or turns an existing pricing model into an invented strategic sacrifice.
 
 Return JSON: {"verdict":"ACCEPTED"|"REJECTED","reason":"<one sentence>"}`;
 
@@ -286,7 +327,7 @@ function validateShape(c: any): boolean {
 
 export async function engineerNarrativeReframe(input: DesignerInput): Promise<NarrativeReframe | null> {
   const t0 = Date.now();
-  console.log(`[NarrativeReframe] STEP_1 | engineering | stage=${input.awarenessStage} | entry=${input.primaryEntryRoute} | hasBeliefModel=${!!input.buyerBeliefModel} | rejections=${input.buyerRejectionHistory?.length || 0}`);
+  console.log(`[NarrativeReframe] STEP_1 | engineering | stage=${input.awarenessStage} | entry=${input.primaryEntryRoute} | hasBeliefModel=${!!input.buyerBeliefModel} | rejections=${input.buyerRejectionHistory?.length || 0} | evidenceVersion=${input.competitorEvidenceContext?.evidenceVersionHash || "none"}`);
 
   let candidate = await callDesigner(input, undefined, 1);
   if (!validateShape(candidate)) {
@@ -312,6 +353,19 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
       reason = second.reason;
     }
   }
+
+  if (input.competitorEvidenceContext) {
+    const postEval = evaluateAwarenessComparativeClaims(candidate, input.competitorEvidenceContext);
+    if (!postEval.passed) {
+      console.log(`[NarrativeReframe] BOUNDED_EVIDENCE_REPAIR | version=${input.competitorEvidenceContext.evidenceVersionHash} | violations=${postEval.violations.map(v => v.code).join(",")}`);
+      candidate = repairContradictedNarrativeReframe(candidate, input.competitorEvidenceContext, postEval);
+      const afterRepairEval = evaluateAwarenessComparativeClaims(candidate, input.competitorEvidenceContext);
+      if (afterRepairEval.passed && status === "REJECTED") {
+        status = "ACCEPTED";
+        reason = `Repaired contradicted comparative claim using authoritative competitor evidence (${input.competitorEvidenceContext.evidenceVersionHash})`;
+      }
+    }
+  }
   console.log(`[NarrativeReframe] STEP_3 | judge=${status} | reason="${reason.slice(0, 100)}"`);
 
   const profile: NarrativeReframe = {
@@ -324,6 +378,7 @@ export async function engineerNarrativeReframe(input: DesignerInput): Promise<Na
     judgeVerdict: status,
     judgeReason: reason,
     retryCount,
+    ...(input.competitorEvidenceContext ? { evidenceVersionHash: input.competitorEvidenceContext.evidenceVersionHash } : {}),
   };
 
   console.log(`[NarrativeReframe] DONE in ${Date.now() - t0}ms | finalStatus=${status} | retries=${retryCount} | movement=${profile.bridgeMechanism.movement}`);

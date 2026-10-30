@@ -9,6 +9,8 @@ import {
 } from "@shared/schema";
 import { eq, and, desc } from "drizzle-orm";
 import { fetchGoogleSearchEvidence } from "../acquisition/multi-source-providers";
+import { mapClassificationToStrategicRole } from "../discovery/competitor-quality-pipeline";
+import type { CompetitorStrategicRole } from "@shared/schema";
 
 export type CompetitorClassification =
   | "DIRECT_COMPETITOR"
@@ -20,8 +22,8 @@ export interface CandidateCompetitor {
   name: string;
   websiteUrl: string;
   platform?: string;
-  profileLink?: string;
   classification: CompetitorClassification;
+  strategicRole?: CompetitorStrategicRole;
   reason: string;
   tier?: "A" | "B";
   judgeVerdict?: "APPROVED_FOR_REVIEW" | "REJECTED" | "INSUFFICIENT_DATA";
@@ -117,55 +119,24 @@ export async function discoverCampaignCompetitors(
     campaignId,
     campaignOfferingId: offering?.id,
   });
-  const buSnap = buResult ? buResult.snapshotRow : (await db
-    .select()
-    .from(businessUnderstandingSnapshots)
-    .where(and(
-      eq(businessUnderstandingSnapshots.accountId, accountId),
-      eq(businessUnderstandingSnapshots.campaignId, campaignId)
-    ))
-    .orderBy(desc(businessUnderstandingSnapshots.createdAt))
-    .limit(1))[0];
-
-  const [website] = await db
-    .select()
-    .from(websiteSnapshots)
-    .where(and(
-      eq(websiteSnapshots.accountId, accountId),
-      eq(websiteSnapshots.campaignId, campaignId)
-    ))
-    .orderBy(desc(websiteSnapshots.createdAt))
-    .limit(1);
-
-  const bu: any = buSnap?.businessUnderstanding || {};
+  const buSnap = buResult?.snapshotRow || null;
+  const bu: any = buResult?.payload || {};
   const offeringName = offering?.offeringName || bu.campaignOffering?.offeringName || "";
-  
-  // Field-level robustness: derive verified category and model if legacy snapshot was INCOMPLETE
-  let category = bu.campaignOffering?.category || bu.generalIndustry || "";
-  let businessModel = bu.businessModel || "";
-  let targetRoles = Array.isArray(bu.targetUnderstanding?.targetRoles) 
+  const category = bu.campaignOffering?.category || bu.generalIndustry || "";
+  const businessModel = bu.businessModel || "";
+  const targetRoles = Array.isArray(bu.targetUnderstanding?.targetRoles) 
     ? bu.targetUnderstanding.targetRoles.map((r: any) => r.roleTitle).join(", ")
     : "";
 
-  if ((!category || !businessModel) && Array.isArray(website?.pagesCrawled)) {
-    const pageText = (website.pagesCrawled as any[]).map(p => p.cleanedText || "").join(" ").toLowerCase();
-    if (!category) {
-      if (pageText.includes("fashion") || pageText.includes("hijab") || pageText.includes("dress") || pageText.includes("abaya") || pageText.includes("clothing") || pageText.includes("apparel")) {
-        category = "Modest Fashion & Apparel";
-      } else if (pageText.includes("restaurant") || pageText.includes("food") || pageText.includes("cafe")) {
-        category = "Food & Beverage / Restaurant";
-      } else if (pageText.includes("software") || pageText.includes("saas")) {
-        category = "Software & Technology";
-      }
-    }
-    if (!businessModel) {
-      if (pageText.includes("cart") || pageText.includes("checkout") || pageText.includes("shop") || pageText.includes("product")) {
-        businessModel = "E-Commerce / Direct-to-Consumer";
-      }
-    }
-    if (!targetRoles && category === "Modest Fashion & Apparel") {
-      targetRoles = "Women seeking modest fashion and apparel";
-    }
+  if (!offeringName || !category || !buResult) {
+    return createDiscoveryResult(
+      [],
+      "INSUFFICIENT_CONTEXT",
+      [],
+      "none",
+      0,
+      "No complete Business Understanding context has been established for this offering."
+    );
   }
 
   if (!offeringName || offeringName.trim().length === 0) {
@@ -179,21 +150,19 @@ export async function discoverCampaignCompetitors(
     );
   }
 
-  // 4. Build Semantically Grounded Discovery Queries centered on Hero Product + Target Market
+  // 4. Build Semantically Grounded Discovery Queries centered on Hero Offering + Category + Target Market
   const searchQueries = [
-    `modest fashion ${offeringName} ${targetMarket}`,
-    `${offeringName} online shop ${targetMarket}`,
-    `modest clothing brand ${targetMarket}`,
-    `hijabi dresses abaya boutique ${targetMarket}`,
-    `modest fashion brands ${targetMarket} Middle East`,
-    `modest dresses online ${targetMarket}`,
-    `hijabi boutique store ${targetMarket}`
+    `${offeringName} ${category} ${targetMarket}`.trim(),
+    `${offeringName} ${targetMarket}`.trim(),
+    `best ${offeringName} platforms services ${targetMarket}`.trim(),
+    `${category} providers ${targetMarket}`.trim(),
+    `best ${offeringName} ${category} alternatives`.trim(),
   ];
 
   // 5. Try calling aiChat for candidate expansion or test mock integration
   let aiCandidates: any[] = [];
   try {
-    const prompt = `Identify at least 15 real competitors for Hero Product: "${offeringName}" in Target Market: "${targetMarket}". Supporting notes: "${offeringNotes}". Industry: "${category}". Return valid JSON: { "candidates": [ { "name": "...", "websiteUrl": "...", "classification": "DIRECT_COMPETITOR"|"ADJACENT_COMPETITOR", "reason": "..." } ] }`;
+    const prompt = `Identify real commercial competitors for Hero Offering: "${offeringName}" in Target Market: "${targetMarket}". Supporting notes: "${offeringNotes}". Industry/Category: "${category}". Business Model: "${businessModel}". Target Buyer Roles: "${targetRoles}". Return valid JSON: { "candidates": [ { "name": "...", "websiteUrl": "...", "classification": "DIRECT_COMPETITOR"|"ADJACENT_COMPETITOR", "reason": "..." } ] }`;
     const aiRes = await aiChat({
       messages: [
         { role: "system", content: "You are the Avyron Competitive Intelligence Discovery Engine. Always return valid JSON." },
@@ -241,7 +210,8 @@ export async function discoverCampaignCompetitors(
   }
 
   // 7. Execute Multi-Round Real External Search Provider (Apify Google Search)
-  let providerStatus: "SUCCESS" | "FAILED" = "SUCCESS";
+  let providerStatus: string = "SUCCESS";
+  const ownWebsiteUrl = bu?.websiteUrl || bu?.rootUrl || "";
 
   // Run external searches concurrently in batches to build a rich candidate pool
   const queriesToRun = searchQueries.slice(0, 5);
@@ -291,7 +261,7 @@ export async function discoverCampaignCompetitors(
           continue;
         }
 
-        if (website?.rootUrl && cleanDomain(website.rootUrl) === domain) continue;
+        if (ownWebsiteUrl && cleanDomain(ownWebsiteUrl) === domain) continue;
 
         if (!candidateMap.has(candidateKey)) {
           const title = (item.text || "").split("-")[0]?.trim() || "";
@@ -318,6 +288,7 @@ export async function discoverCampaignCompetitors(
         }
       }
     } else {
+      providerStatus = "FAILED";
       console.warn(`[CompetitorDiscovery] Search query "${currentQuery}" warning:`, res.reason);
     }
   }
@@ -361,8 +332,8 @@ export async function discoverCampaignCompetitors(
         name: raw.name,
         websiteUrl: raw.url,
         platform: "website",
-        profileLink: raw.url,
         classification: raw.forcedClassification,
+        strategicRole: mapClassificationToStrategicRole(raw.forcedClassification),
         reason: raw.forcedReason || `Competitor for ${offeringName} in ${targetMarket}.`,
         tier: raw.forcedClassification === "DIRECT_COMPETITOR" ? "A" : "B",
         judgeVerdict,
@@ -378,60 +349,26 @@ export async function discoverCampaignCompetitors(
     }
 
     const textCorpus = `${raw.name} ${raw.rawTitle} ${raw.rawSnippet} ${raw.domain}`.toLowerCase();
-    
-    // Check if domain is a media / news / guide directory
-    const isMediaDirectory = textCorpus.includes("guide") || textCorpus.includes("radar") || textCorpus.includes("brands to keep") || textCorpus.includes("magazine") || textCorpus.includes("article");
-    if (isMediaDirectory && !textCorpus.includes("cart") && !textCorpus.includes("shop") && !textCorpus.includes("price")) {
-      continue; // Filter out media guide lists
-    }
-
-    // Extract candidate-specific evidence facts
-    const detectedProducts: string[] = [];
-    if (textCorpus.includes("dress") || textCorpus.includes("dresses")) detectedProducts.push("dresses");
-    if (textCorpus.includes("hijab") || textCorpus.includes("hijabs")) detectedProducts.push("hijabs");
-    if (textCorpus.includes("abaya") || textCorpus.includes("abayas")) detectedProducts.push("abayas");
-    if (textCorpus.includes("maxi")) detectedProducts.push("maxi dresses");
-    if (textCorpus.includes("kaftan") || textCorpus.includes("kaftans")) detectedProducts.push("kaftans");
-    if (textCorpus.includes("modest wear") || textCorpus.includes("modest clothing")) detectedProducts.push("modest wear");
-
-    const hasSummerFocus = textCorpus.includes("summer") || textCorpus.includes("breathable") || textCorpus.includes("chiffon") || textCorpus.includes("lightweight");
-    const hasLebanonLocation = textCorpus.includes("lebanon") || textCorpus.includes("beirut") || textCorpus.includes("lbp") || textCorpus.includes("whatsapp");
-    const hasUSFocus = textCorpus.includes("u.s.") || textCorpus.includes("us orders");
-
-    let isDirect = false;
-    let isAdjacent = false;
-    let classificationReason = "";
 
     const lowerOffering = offeringName.toLowerCase();
-    const offeringWords = lowerOffering.split(" ").filter(w => w.length > 2);
-    const hasOfferingWord = offeringWords.some(w => textCorpus.includes(w));
-    const hasFashionKeyword = detectedProducts.length > 0 || textCorpus.includes("fashion") || textCorpus.includes("boutique") || textCorpus.includes("modest");
+    const offeringWords = lowerOffering.split(/\s+/).filter((w: string) => w.length > 2);
+    const categoryWords = (category || "").toLowerCase().split(/[\s/&,]+/).filter((w: string) => w.length > 2);
+    const hasOfferingWord = offeringWords.some((w: string) => textCorpus.includes(w));
+    const hasCategoryWord = categoryWords.some((w: string) => textCorpus.includes(w));
 
-    if (hasOfferingWord && hasFashionKeyword) {
-      isDirect = true;
-      const productList = detectedProducts.length > 0 ? detectedProducts.join(", ") : "modest fashion apparel";
-      if (hasLebanonLocation) {
-        classificationReason = `Direct competitor physically active in Lebanon (Beirut) offering ${productList}${hasSummerFocus ? ' for summer' : ''}.`;
-      } else {
-        classificationReason = `Direct D2C e-commerce competitor offering ${productList}${hasSummerFocus ? ' with summer seasonal collections' : ''}.`;
-      }
-    } else if (hasFashionKeyword || (category && textCorpus.includes(category.toLowerCase()))) {
-      isAdjacent = true;
-      const productList = detectedProducts.length > 0 ? detectedProducts.join(", ") : category || "modest apparel";
-      if (hasUSFocus) {
-        classificationReason = `Adjacent modest fashion label focusing on ${productList} with primary North American distribution.`;
-      } else {
-        classificationReason = `Adjacent competitor in ${category || 'modest fashion'} offering ${productList}.`;
-      }
+    let classification: CompetitorClassification = "ADJACENT_COMPETITOR";
+    let classificationReason = "";
+
+    if (hasOfferingWord && hasCategoryWord) {
+      classification = "DIRECT_COMPETITOR";
+      classificationReason = `Direct competitor matching ${offeringName} in ${category} for ${targetMarket}.`;
+    } else if (hasOfferingWord || hasCategoryWord) {
+      classification = "ADJACENT_COMPETITOR";
+      classificationReason = `Relevant competitor in ${category || offeringName} discovered for ${targetMarket}.`;
     } else {
-      classificationReason = `Commercial entity with general relevance in ${targetMarket}.`;
+      classification = "ADJACENT_COMPETITOR";
+      classificationReason = `Candidate discovered for ${offeringName} in ${targetMarket}.`;
     }
-
-    const classification: CompetitorClassification = isDirect 
-      ? "DIRECT_COMPETITOR" 
-      : (isAdjacent ? "ADJACENT_COMPETITOR" : "NOT_COMPETITOR");
-
-    if (classification === "NOT_COMPETITOR") continue;
 
     const judgeVerdict = "APPROVED_FOR_REVIEW";
 
@@ -439,8 +376,8 @@ export async function discoverCampaignCompetitors(
       name: raw.name,
       websiteUrl: raw.url,
       platform: "website",
-      profileLink: raw.url,
       classification,
+      strategicRole: mapClassificationToStrategicRole(classification),
       reason: classificationReason,
       tier: classification === "DIRECT_COMPETITOR" ? "A" : "B",
       judgeVerdict,
@@ -457,12 +394,9 @@ export async function discoverCampaignCompetitors(
   let finalStatus: "DISCOVERY_COMPLETE" | "NO_VERIFIED_COMPETITORS" = "NO_VERIFIED_COMPETITORS";
   let message = "";
 
-  if (verifiedCandidates.length >= 10) {
+  if (verifiedCandidates.length > 0) {
     finalStatus = "DISCOVERY_COMPLETE";
-    message = `Discovered ${verifiedCandidates.length} real commercial competitors (minimum 10 requirement met).`;
-  } else if (verifiedCandidates.length > 0) {
-    finalStatus = "DISCOVERY_COMPLETE";
-    message = `${verifiedCandidates.length} of 10 competitors verified. Avyron requires at least 10 approved competitors before strategy build.`;
+    message = `Discovered ${verifiedCandidates.length} relevant commercial competitor(s) for ${offeringName} in ${targetMarket}.`;
   } else {
     finalStatus = "NO_VERIFIED_COMPETITORS";
     message = "Real search executed, but no direct or adjacent commercial competitors met approval criteria.";

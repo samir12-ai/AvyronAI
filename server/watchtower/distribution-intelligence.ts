@@ -272,7 +272,10 @@ export async function computeMarketDistributionSnapshot(
   const comps = await db
     .select({ id: ciCompetitors.id })
     .from(ciCompetitors)
-    .where(eq(ciCompetitors.campaignId, campaignId));
+    .where(and(
+      eq(ciCompetitors.campaignId, campaignId),
+      eq(ciCompetitors.isActive, true)
+    ));
   const compIds = comps.map((c) => c.id);
   if (compIds.length === 0) {
     // Legitimately-empty campaign (zero competitors) — honest empty snapshot.

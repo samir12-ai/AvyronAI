@@ -27,6 +27,7 @@ import { assertSnapshotReadOnly, assertNoComputeFromExternal } from "../market-i
 import { runOrchestrator } from "../orchestrator/index";
 
 import { resolveAccountId } from "../auth";
+import { resolveApprovalProvenance } from "../auth-helpers";
 function enforceBuildAPlanSnapshotOnly(operation: string): void {
   assertSnapshotReadOnly("BUILD_A_PLAN_ORCHESTRATOR", operation);
 }
@@ -1130,12 +1131,14 @@ export function registerOrchestratorRoutes(app: Express) {
         throw casErr;
       }
 
+      const decidedBy = resolveApprovalProvenance(req);
+
       await db.insert(planApprovals).values({
         planId: plan.id,
         accountId,
         decision: "APPROVED",
         reason: "Approved via Build The Plan Phase 5",
-        decidedBy: "client",
+        decidedBy,
       });
 
       await logAuditEvent({
@@ -1144,11 +1147,11 @@ export function registerOrchestratorRoutes(app: Express) {
         blueprintId: id,
         blueprintVersion: blueprint.blueprintVersion,
         event: "PLAN_APPROVED",
-        details: { requestId, planId: plan.id, blueprintId: id, campaignId },
+        details: { requestId, planId: plan.id, blueprintId: id, campaignId, decidedBy },
       });
 
       await logAudit(accountId, "PLAN_APPROVED", {
-        details: { planId: plan.id, blueprintId: id, decidedBy: "client" },
+        details: { planId: plan.id, blueprintId: id, decidedBy },
       });
 
       activateExecution(plan.id).then((result) => {

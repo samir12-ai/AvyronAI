@@ -6,7 +6,7 @@ export const BUILD_PLAN_TIMEOUT_MS = 180_000;
  * Last-resort safety ceiling for a whole pipeline run. It caps the remaining
  * budget of an individual attempt but never replaces per-engine budgets.
  */
-export const PIPELINE_TOTAL_TIMEOUT_MS = 45 * 60_000;
+export const PIPELINE_TOTAL_TIMEOUT_MS = 120 * 60_000;
 
 /**
  * Canonical wall-clock budgets for a single engine attempt.
@@ -16,21 +16,22 @@ export const PIPELINE_TOTAL_TIMEOUT_MS = 45 * 60_000;
  * inheriting an arbitrary one-size-fits-all ceiling.
  */
 export const ENGINE_TIMEOUT_BUDGET_MS = {
-  market_intelligence: 300_000,
+  market_intelligence: 600_000,
+  market_voice: 600_000,
   audience: 900_000,
-  positioning: 900_000,
-  differentiation: 600_000,
-  mechanism: 600_000,
-  offer: 600_000,
-  awareness: 600_000,
-  funnel: 300_000,
-  persuasion: 600_000,
-  integrity: 180_000,
-  statistical_validation: 300_000,
-  budget_governor: 180_000,
-  channel_selection: 600_000,
-  iteration: 300_000,
-  retention: 300_000,
+  positioning: 1_200_000,
+  differentiation: 900_000,
+  mechanism: 900_000,
+  offer: 900_000,
+  awareness: 900_000,
+  funnel: 600_000,
+  persuasion: 900_000,
+  integrity: 300_000,
+  statistical_validation: 600_000,
+  budget_governor: 300_000,
+  channel_selection: 900_000,
+  iteration: 600_000,
+  retention: 600_000,
 } as const satisfies Record<EngineId, number>;
 
 export type TimeoutPolicyTarget = EngineId | "build_plan_layer";
@@ -41,7 +42,7 @@ function readGlobalTimeoutOverride(env: TimeoutPolicyEnvironment = process.env):
   const raw = env.ENGINE_TIMEOUT_MS_OVERRIDE;
   if (!raw) return null;
   const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 60_000 && parsed <= 1_800_000
+  return Number.isFinite(parsed) && parsed >= 60_000 && parsed <= 7_200_000
     ? parsed
     : null;
 }

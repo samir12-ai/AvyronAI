@@ -76,6 +76,15 @@ const ENGINE_CONFIDENCE_MAP: Record<string, EngineFieldMap> = {
       { path: "confidence.factors.dataCompleteness", provenance: "direct_evidence" },
     ],
   },
+  market_voice: {
+    engineFields: [
+      { path: "confidenceScore", provenance: "direct_evidence" },
+      { path: "confidence", provenance: "direct_evidence" },
+    ],
+    dataFields: [
+      { path: "dataReliability.overallReliability", provenance: "direct_evidence" },
+    ],
+  },
   audience: {
     engineFields: [
       { path: "confidenceScore", provenance: "direct_evidence" },

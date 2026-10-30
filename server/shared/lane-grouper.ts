@@ -51,24 +51,29 @@ export async function runLaneGrouper(
     productCapabilities?: string | null;
   }
 ): Promise<StrategicLane[]> {
-  // Filter for authorized pains only: CORE_PURCHASE and SUPPORTING.
-  // Strictly exclude STRATEGIC_EXCLUDED, EXCLUDED, and INCOMPLETE.
   const authorizedPains = (painRegistry || []).filter(p => {
-    const c = p.classification;
+    const c = p.classification as string;
     return (c === "CORE_PURCHASE" || c === "CORE" || c === "SUPPORTING") &&
-           c !== "STRATEGIC_EXCLUDED" &&
-           c !== "EXCLUDED" &&
-           c !== "INCOMPLETE" &&
-           c !== "NOT_EVALUATED" &&
-           c !== "UNKNOWN" &&
            p.eligible === true;
   });
 
-  const corePains = authorizedPains.filter(p => p.classification === "CORE_PURCHASE" || p.classification === "CORE");
-  const supportingPains = authorizedPains.filter(p => p.classification === "SUPPORTING");
+  let corePains = authorizedPains.filter(p => (p.classification as string) === "CORE_PURCHASE" || (p.classification as string) === "CORE");
+  let supportingPains = authorizedPains.filter(p => p.classification === "SUPPORTING");
 
-  if (corePains.length === 0) {
-    console.warn("[LaneGrouper] No authorized CORE_PURCHASE pains available. Cannot form strategic lanes.");
+  if (corePains.length === 0 && supportingPains.length > 0) {
+    console.warn(`[LaneGrouper] No explicit CORE_PURCHASE pains found among ${supportingPains.length} authorized pains. Promoting top supporting pains with product fit as lane anchors.`);
+    const sortedCandidates = [...supportingPains].sort((a, b) => {
+      const aElig = a.productFit === "ELIGIBLE" ? 1 : 0;
+      const bElig = b.productFit === "ELIGIBLE" ? 1 : 0;
+      if (bElig !== aElig) return bElig - aElig;
+      return (b.evidenceCount || 0) - (a.evidenceCount || 0);
+    });
+    const anchorCount = Math.min(3, sortedCandidates.length);
+    corePains = sortedCandidates.slice(0, anchorCount);
+    const coreIdSet = new Set(corePains.map(p => p.painId));
+    supportingPains = supportingPains.filter(p => !coreIdSet.has(p.painId));
+  } else if (corePains.length === 0) {
+    console.warn("[LaneGrouper] No authorized CORE_PURCHASE or SUPPORTING pains available. Cannot form strategic lanes.");
     return [];
   }
 
@@ -162,8 +167,8 @@ Respond ONLY with JSON:
       const rawPainIds = Array.isArray(lane.painIds) ? lane.painIds : [...rawCoreIds, ...rawSuppIds];
 
       // Filter to only authorized CORE and SUPPORTING pains
-      const filteredCore = [...new Set([...rawCoreIds, ...rawPainIds.filter(pid => corePainIdSet.has(pid))])].filter(pid => corePainIdSet.has(pid));
-      const filteredSupp = [...new Set([...rawSuppIds, ...rawPainIds.filter(pid => supportingPainIdSet.has(pid))])].filter(pid => supportingPainIdSet.has(pid));
+      const filteredCore = [...new Set([...rawCoreIds, ...rawPainIds.filter((pid: string) => corePainIdSet.has(pid))])].filter((pid: string) => corePainIdSet.has(pid));
+      const filteredSupp = [...new Set([...rawSuppIds, ...rawPainIds.filter((pid: string) => supportingPainIdSet.has(pid))])].filter((pid: string) => supportingPainIdSet.has(pid));
 
       let primaryPainId = lane.primaryPainId;
       if (!primaryPainId || !corePainIdSet.has(primaryPainId)) {
@@ -214,8 +219,8 @@ Respond ONLY with JSON:
 
     return resolvedLanes;
   } catch (err: any) {
-    console.warn(`[LaneGrouper] Failed to run lane grouper: ${err.message} -- building deterministic authority fallback lanes`);
-    return defaultFallbackLanes(eligibleSegments, authorizedPains, opts);
+    console.warn(`[LaneGrouper] Failed to run lane grouper: ${err.message} -- failing closed (no synthetic fallback)`);
+    return [];
   }
 }
 
@@ -227,14 +232,12 @@ export function judgeLanes(
   const issues: LaneJudgeIssue[] = [];
   const knownSegIds = new Set(segments.map(s => s.id));
   
-  const corePains = (painRegistry || []).filter(p => p.classification === "CORE_PURCHASE" || p.classification === "CORE");
+  const corePains = (painRegistry || []).filter(p => (p.classification as string) === "CORE_PURCHASE" || (p.classification as string) === "CORE");
   const supportingPains = (painRegistry || []).filter(p => p.classification === "SUPPORTING");
-  const excludedPains = (painRegistry || []).filter(p => 
-    p.classification === "STRATEGIC_EXCLUDED" || 
-    p.classification === "EXCLUDED" || 
-    p.classification === "INCOMPLETE" || 
-    p.classification === "UNKNOWN"
-  );
+  const excludedPains = (painRegistry || []).filter(p => {
+    const c = p.classification as string;
+    return c === "STRATEGIC_EXCLUDED" || c === "EXCLUDED" || c === "INCOMPLETE" || c === "UNKNOWN";
+  });
 
   const corePainIds = new Set(corePains.map(p => p.painId));
   const supportingPainIds = new Set(supportingPains.map(p => p.painId));
@@ -326,7 +329,7 @@ export function repairLanes(
   segments: any[],
   painRegistry: AuthoritativeAudiencePain[]
 ): StrategicLane[] {
-  const corePains = (painRegistry || []).filter(p => p.classification === "CORE_PURCHASE" || p.classification === "CORE");
+  const corePains = (painRegistry || []).filter(p => (p.classification as string) === "CORE_PURCHASE" || (p.classification as string) === "CORE");
   const supportingPains = (painRegistry || []).filter(p => p.classification === "SUPPORTING");
   const corePainIds = new Set(corePains.map(p => p.painId));
   const supportingPainIds = new Set(supportingPains.map(p => p.painId));
@@ -403,49 +406,3 @@ export function repairLanes(
   return repaired;
 }
 
-export function defaultFallbackLanes(
-  segments: any[],
-  authorizedPains: AuthoritativeAudiencePain[],
-  opts?: { jobId?: string; campaignId?: string; campaignOfferingId?: string }
-): StrategicLane[] {
-  const corePains = (authorizedPains || []).filter(p => p.classification === "CORE_PURCHASE" || p.classification === "CORE");
-  const supportingPains = (authorizedPains || []).filter(p => p.classification === "SUPPORTING");
-  
-  if (corePains.length === 0) {
-    return [];
-  }
-
-  // Create one lane per core pain (or one combined lane)
-  return corePains.map((cp, idx) => {
-    const laneId = `lane_fallback_${idx + 1}_${Date.now()}`;
-    const matchingSupp = supportingPains.filter(sp => (sp.segmentIds || []).some(sid => (cp.segmentIds || []).includes(sid)));
-    const coreIds = [cp.painId];
-    const suppIds = matchingSupp.map(sp => sp.painId);
-    const allIds = [...coreIds, ...suppIds];
-
-    const segIds = cp.segmentIds || segments.map(s => s.id).filter(Boolean);
-    return {
-      laneId,
-      id: laneId,
-      title: `Strategic Lane: ${cp.canonical.slice(0, 50)}`,
-      description: `Core campaign strategic lane addressing ${cp.canonical}`,
-      primaryPainId: cp.painId,
-      corePainIds: coreIds,
-      supportingPainIds: suppIds,
-      painIds: allIds,
-      painDecisionIds: [cp.strategicPainDecisionAuthorityId || cp.coreDecisionId].filter(Boolean) as string[],
-      productTruthFactIds: cp.productTruthFactIds || [],
-      jobId: opts?.jobId,
-      campaignId: opts?.campaignId,
-      campaignOfferingId: opts?.campaignOfferingId,
-      segmentIds: segIds,
-      segmentId: segIds[0],
-      desires: segments.flatMap(s => s.desireProfile || []).slice(0, 3),
-      objections: segments.flatMap(s => s.objectionProfile || []).slice(0, 3),
-      valueContext: "Standard campaign market segment context",
-      proofNeeds: ["Client testimonials", "Case studies", "Performance benchmarks"],
-      messagingDirection: "Address core buyer/user pain and deliver core product truth",
-      commercialRelevance: "Capture the main commercial opportunities identified in market evidence",
-    };
-  });
-}

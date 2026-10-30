@@ -14,7 +14,7 @@
  * Pure: read-only over strategic_plans + published_posts. No DB writes.
  */
 import { db } from "../../../db";
-import { publishedPosts } from "@shared/schema";
+import { publishedPosts, ownedPosts } from "@shared/schema";
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import { RhythmConfigSchema, type RhythmConfig } from "@shared/contracts";
 import { recordRejection } from "../../rejection-log";
@@ -206,7 +206,7 @@ export async function evaluateRhythmCompliance(
   }
 
   // Actual published posts in the window for this campaign.
-  const rows = await db
+  let rows = await db
     .select({ mediaType: publishedPosts.mediaType })
     .from(publishedPosts)
     .where(
@@ -217,6 +217,28 @@ export async function evaluateRhythmCompliance(
         lt(publishedPosts.publishedAt, input.windowEnd),
       ),
     );
+
+  // If published_posts has no entries for the window, also check scraped owned_posts
+  // published within [windowStart, windowEnd) so verified owned-channel posts are reflected.
+  if (rows.length === 0) {
+    try {
+      const ownedRows = await db
+        .select({ mediaType: ownedPosts.mediaType })
+        .from(ownedPosts)
+        .where(
+          and(
+            eq(ownedPosts.campaignId, input.campaignId),
+            gte(ownedPosts.postedAt, input.windowStart),
+            lt(ownedPosts.postedAt, input.windowEnd),
+          ),
+        );
+      if (ownedRows.length > 0) {
+        rows = ownedRows;
+      }
+    } catch {
+      // non-fatal fallback if owned_posts is unavailable in isolated unit tests
+    }
+  }
 
   const actual = bucketActual(rows);
   const actualTotal = actual.posts + actual.reels + actual.carousels + actual.videos + actual.stories;

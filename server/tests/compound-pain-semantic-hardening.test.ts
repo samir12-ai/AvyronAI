@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock aiChat before imports
 vi.mock("../ai-client", () => ({
@@ -39,10 +39,269 @@ vi.mock("../ai-client", () => ({
       };
     }
 
-    // 2. Product Assessment Mock
+    // 2. Final Pain Atomicity Judge & Repair Mock
+    if (endpoint === "final-pain-atomicity-judge" || endpoint === "final-pain-atomicity-repair") {
+      // Test A: Inconsistent COMPOUND_PAIN + KEEP -> repair to SPLIT
+      if (prompt.includes("INCONSISTENT_COMPOUND_KEEP")) {
+        if (endpoint === "final-pain-atomicity-repair") {
+          return {
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  verdict: "COMPOUND_PAIN",
+                  action: "SPLIT",
+                  critique: "Repaired: split into two distinct capability claims.",
+                  splitClaims: [
+                    { claim: "First distinct problem", evidenceIds: ["EV_1"] },
+                    { claim: "Second distinct problem", evidenceIds: ["EV_2"] }
+                  ]
+                })
+              }
+            }]
+          };
+        }
+        // Initial invalid proposal: COMPOUND_PAIN + KEEP
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "KEEP",
+                critique: "Invalid compound with keep"
+              })
+            }
+          }]
+        };
+      }
+
+      // Test B: Inconsistent ATOMIC + SPLIT -> repair to KEEP
+      if (prompt.includes("INCONSISTENT_ATOMIC_SPLIT")) {
+        if (endpoint === "final-pain-atomicity-repair") {
+          return {
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  verdict: "ATOMIC",
+                  action: "KEEP",
+                  critique: "Repaired: single coherent problem."
+                })
+              }
+            }]
+          };
+        }
+        // Initial invalid proposal: ATOMIC + SPLIT
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "ATOMIC",
+                action: "SPLIT",
+                critique: "Invalid atomic with split",
+                splitClaims: [{ claim: "Sub", evidenceIds: ["EV_1"] }]
+              })
+            }
+          }]
+        };
+      }
+
+      // Test C1: Valid REPLACE with atomic replacement
+      if (prompt.includes("VALID_REPLACE_TARGET")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "REPLACE",
+                critique: "Refined to single atomic core issue",
+                repairedClaim: "Focused single atomic customer problem"
+              })
+            }
+          }]
+        };
+      }
+
+      // Test C2: Invalid REPLACE with still-compound replacement
+      if (prompt.includes("STILL_COMPOUND_REPLACE_TARGET")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "REPLACE",
+                critique: "Tried to replace but gave another compound statement",
+                repairedClaim: "Still compound: bad quality and unresponsive support"
+              })
+            }
+          }]
+        };
+      }
+
+      // Exhaustion mock
+      if (prompt.includes("EXHAUST_REPAIR_FAIL")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "KEEP",
+                critique: "Repeatedly invalid"
+              })
+            }
+          }]
+        };
+      }
+
+      // Multi-attribute product pain -> SPLIT
+      if (prompt.includes("budget-friendly") && prompt.includes("natural fabrics") && prompt.includes("hot weather")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "SPLIT",
+                critique: "Combines general budget/affordability constraints with specific natural fabric material requirements and hot-weather climate comfort.",
+                splitClaims: [
+                  {
+                    claim: "Scarcity of budget-friendly modest apparel options",
+                    evidenceIds: ["EV_BUDGET_1"]
+                  },
+                  {
+                    claim: "Difficulty finding modest clothing in breathable natural fabrics like linen or cotton",
+                    evidenceIds: ["EV_FABRIC_1", "EV_FABRIC_2"]
+                  }
+                ]
+              })
+            }
+          }]
+        };
+      }
+
+      // Cross-lifecycle pain -> SPLIT
+      if (prompt.includes("cheaply made") && prompt.includes("customer service") && prompt.includes("refund")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "SPLIT",
+                critique: "Conjoins product quality defects with post-purchase customer service and refund friction.",
+                splitClaims: [
+                  {
+                    claim: "Received garments that are cheaply made or see-through",
+                    evidenceIds: ["EV_QUALITY_1"]
+                  },
+                  {
+                    claim: "Unresponsive customer service when resolving order disputes and refund requests",
+                    evidenceIds: ["EV_REFUND_1"]
+                  }
+                ]
+              })
+            }
+          }]
+        };
+      }
+
+      // Coherent domain-neutral multi-attribute pain -> KEEP
+      if (prompt.includes("database lock contention") || prompt.includes("Slow database queries without automated indexing")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "ATOMIC",
+                action: "KEEP",
+                critique: "Single coherent causal problem regarding slow queries lacking indexing recommendations."
+              })
+            }
+          }]
+        };
+      }
+
+      // Default ATOMIC + KEEP
+      return {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              verdict: "ATOMIC",
+              action: "KEEP",
+              critique: "Coherent atomic customer problem."
+            })
+          }
+        }]
+      };
+    }
+
+    // 2b. Final Pain Atomicity Revalidation Mock
+    if (endpoint === "final-pain-atomicity-revalidation") {
+      if (prompt.includes("Still compound: bad quality and unresponsive support")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                verdict: "COMPOUND_PAIN",
+                action: "SPLIT",
+                critique: "Revalidation rejected: candidate replacement is still compound"
+              })
+            }
+          }]
+        };
+      }
+      return {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              verdict: "ATOMIC",
+              action: "KEEP",
+              critique: "Revalidation accepted: candidate replacement is atomic"
+            })
+          }
+        }]
+      };
+    }
+
+    // 3. Merged Claim Revalidation Mock
+    if (endpoint.includes("audience-engine-v3-merged-claim-revalidation") || prompt.includes("Audience Merged-Claim Evidence Revalidation")) {
+      if (prompt.includes("cheaply made") && prompt.includes("refund")) {
+        return {
+          choices: [{
+            message: {
+              content: JSON.stringify({
+                status: "INVALID",
+                canMerge: false,
+                critique: "Rejected: Conjoins product quality defect with post-purchase refund customer service."
+              })
+            }
+          }]
+        };
+      }
+      return {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              status: "VALID",
+              canMerge: true
+            })
+          }
+        }]
+      };
+    }
+
+    // 4. Pain Fidelity Judge Mock
+    if (endpoint.includes("pain-fidelity-judge") || prompt.includes("Hostile Audience Pain Fidelity Judge")) {
+      return {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              verdict: "FAITHFUL",
+              critique: "Claim is directly supported by cited evidence."
+            })
+          }
+        }]
+      };
+    }
+
+    // 5. Product Assessment Mock
     if (endpoint.includes("product-assessment") || prompt.includes("Product Assessment Engine")) {
       if (prompt.includes("multi-cloud failover") || prompt.includes("complex manual zero-downtime")) {
-        // Multi-clause pain where only 1 of 3 is supported -> STRATEGIC_FIT
         return {
           choices: [{
             message: {
@@ -54,14 +313,13 @@ vi.mock("../ai-client", () => ({
           }]
         };
       }
-      if (prompt.includes("slow database queries without automated indexing")) {
-        // Full direct fit
+      if (prompt.includes("slow database queries") || prompt.includes("breathable natural fabrics") || prompt.includes("cheaply made or see-through") || prompt.includes("Focused single atomic")) {
         return {
           choices: [{
             message: {
               content: JSON.stringify({
                 fitType: "DIRECT_FIT",
-                reason: "Offering directly provides automated slow query indexing recommendations."
+                reason: "Offering directly provides validated capabilities addressing this atomic problem."
               })
             }
           }]
@@ -79,40 +337,28 @@ vi.mock("../ai-client", () => ({
       };
     }
 
-    // 3. Strategic Pain Decision Judge Mock
-    if (endpoint.includes("strategic-pain-judge") || prompt.includes("Strategic Pain Decision Judge")) {
-      if (prompt.includes("prefer Slack over email")) {
-        // Secondary friction with DIRECT_FIT -> SUPPORTING
-        return {
-          choices: [{
-            message: {
-              content: JSON.stringify({
-                finalClassification: "SUPPORTING",
-                reason: "Direct fit on notification integration, but alert delivery channel preference is a secondary friction rather than a primary purchase-driving constraint."
-              })
-            }
-          }]
-        };
-      }
-      if (prompt.includes("Production database outages")) {
-        // Severe primary bottleneck -> CORE_PURCHASE
-        return {
-          choices: [{
-            message: {
-              content: JSON.stringify({
-                finalClassification: "CORE_PURCHASE",
-                reason: "Production outages causing direct revenue loss represent a decisive primary commercial bottleneck directly addressable by the offering."
-              })
-            }
-          }]
-        };
-      }
+    // 6. Target Assessment Mock
+    if (endpoint.includes("target-assessment") || prompt.includes("Target Assessment")) {
       return {
         choices: [{
           message: {
             content: JSON.stringify({
-              finalClassification: "SUPPORTING",
-              reason: "Supporting messaging."
+              decision: "COVERED",
+              reason: "Discovered audience role legitimately matches verified target roles."
+            })
+          }
+        }]
+      };
+    }
+
+    // 7. Strategic Pain Decision Judge Mock
+    if (endpoint.includes("strategic-pain-judge") || prompt.includes("Strategic Pain Decision Judge")) {
+      return {
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              finalClassification: "CORE_PURCHASE",
+              reason: "Primary commercial bottleneck directly addressable by offering."
             })
           }
         }]
@@ -125,142 +371,248 @@ vi.mock("../ai-client", () => ({
 
 import { runProductAssessmentForPain } from "../strategic-reasoning/product-assessment";
 import { judgeStrategicPainDecision } from "../strategic-pain-decision-judge";
+import {
+  validateAndApplySplitClaim,
+  judgeAndRepairFinalPainAtomicityWithLLM,
+  refineFinalPainAtomicityRegistry,
+  extractPairedEvidence,
+  buildAtomicityPrompt
+} from "../shared/pain-atomicity";
+import { consolidateSegmentPainsSemantic } from "../audience-engine/engine";
+import { refineAudiencePainRegistry } from "../shared/pain-classifier";
+import { aiChat } from "../ai-client";
 
-describe("Compound Pain Semantic Hardening & Contract Invariants", () => {
-  const saasProductTruthFacts = [
-    {
-      productTruthFactId: "fact_saas_1",
-      factType: "CAPABILITY",
-      statement: "Automated real-time PostgreSQL database performance monitoring and slow query indexing recommendations",
-      sourceEvidenceId: "ev_saas_1",
-      authorityClass: "CANONICAL_PRODUCT_TRUTH"
-    },
-    {
-      productTruthFactId: "fact_saas_2",
-      factType: "CAPABILITY",
-      statement: "Automated alerts sent via Slack and PagerDuty when query execution exceeds latency thresholds",
-      sourceEvidenceId: "ev_saas_2",
-      authorityClass: "CANONICAL_PRODUCT_TRUTH"
-    }
-  ];
+describe("Authoritative Pain Atomicity Restoration & Hardening", () => {
 
-  // Test C: Product Assessment Partial Match
-  it("Test C: Compound pain with 1-of-3 supported capabilities must NOT receive DIRECT_FIT", async () => {
-    const result = await runProductAssessmentForPain({
-      painId: "test_c_compound_pain",
-      canonicalPain: "Slow database queries degrading app performance, complex manual zero-downtime database schema migrations, and lack of automated multi-cloud failover",
-      campaignOfferingId: "off_test_saas",
-      businessUnderstandingAuthorityId: "bu_test_saas",
-      productTruthFacts: saasProductTruthFacts,
+  // Test A: COMPOUND_PAIN + KEEP is rejected and repaired
+  it("Test A — STRICT CONSISTENCY: Inconsistent COMPOUND_PAIN + KEEP is rejected and repaired to valid SPLIT", async () => {
+    const result = await judgeAndRepairFinalPainAtomicityWithLLM({
+      painClaim: "INCONSISTENT_COMPOUND_KEEP: conjoining multiple capabilities without action",
+      painId: "pain_inconsistent_1",
+      evidenceUids: ["EV_1", "EV_2"],
+      evidenceTexts: ["Quote 1", "Quote 2"],
+      accountId: "acc_test",
+    });
+
+    expect(result.verdict).toBe("COMPOUND_PAIN");
+    expect(result.action).toBe("SPLIT");
+    expect(result.splitClaims).toHaveLength(2);
+  });
+
+  // Test B: ATOMIC + SPLIT is rejected and repaired
+  it("Test B — STRICT CONSISTENCY: Inconsistent ATOMIC + SPLIT is rejected and repaired to valid KEEP", async () => {
+    const result = await judgeAndRepairFinalPainAtomicityWithLLM({
+      painClaim: "INCONSISTENT_ATOMIC_SPLIT: single coherent issue misclassified with split action",
+      painId: "pain_inconsistent_2",
+      evidenceUids: ["EV_1"],
+      evidenceTexts: ["Quote 1"],
+      accountId: "acc_test",
+    });
+
+    expect(result.verdict).toBe("ATOMIC");
+    expect(result.action).toBe("KEEP");
+  });
+
+  // Test C: REPLACE result is revalidated before downstream authority
+  it("Test C1 — REPLACE REVALIDATION: Valid atomic replacement is accepted after revalidation", async () => {
+    const result = await judgeAndRepairFinalPainAtomicityWithLLM({
+      painClaim: "VALID_REPLACE_TARGET: multi-issue claim refined to single core problem",
+      painId: "pain_replace_valid",
+      evidenceUids: ["EV_1"],
+      evidenceTexts: ["Quote 1"],
+      accountId: "acc_test",
+    });
+
+    expect(result.verdict).toBe("COMPOUND_PAIN");
+    expect(result.action).toBe("REPLACE");
+    expect(result.repairedClaim).toBe("Focused single atomic customer problem");
+  });
+
+  it("Test C2 — REPLACE REVALIDATION: Still-compound replacement fails revalidation and exhausts to ATOMICITY_INCOMPLETE", async () => {
+    const result = await judgeAndRepairFinalPainAtomicityWithLLM({
+      painClaim: "STILL_COMPOUND_REPLACE_TARGET: multi-issue claim with bad replacement",
+      painId: "pain_replace_bad",
+      evidenceUids: ["EV_1"],
+      evidenceTexts: ["Quote 1"],
+      accountId: "acc_test",
+    });
+
+    expect(result.verdict).toBe("ATOMICITY_INCOMPLETE");
+  });
+
+  // Test D: Evidence IDs remain aligned with exact evidence text after missing evidence filtering
+  it("Test D — LINEAGE INTEGRITY: Missing evidence entries are filtered as PAIRS without index misalignment", () => {
+    const pain = {
+      painId: "pain_lineage_test",
+      canonical: "Test pain",
+      originalStatement: "Test pain",
+      normalizedStatement: "test pain",
+      classification: "NOT_EVALUATED" as const,
+      rank: 1,
+      productFit: "UNKNOWN" as const,
+      eligible: false,
+      allowedUses: [],
+      prohibitedUses: [],
+      evidenceUids: ["EV_A", "EV_B", "EV_C"],
+      sourceSignalIds: [],
+      sourceTypes: ["review"],
+      rootCauseIds: [],
+      segmentIds: ["seg_1"],
+      classifierVersion: "test",
+      classificationReason: "test",
+      lineage: { accountId: "acc_test", audienceSnapshotId: "snap_test" },
+    };
+
+    const evidenceContext = new Map([
+      ["EV_A", { label: "Review A", detail: "Detail text for A" }],
+      // EV_B is missing from context
+      ["EV_C", { label: "Review C", detail: "Detail text for C" }],
+    ]);
+
+    const paired = extractPairedEvidence(pain, evidenceContext);
+
+    // Invariant: EV_B is omitted, EV_A is paired with Text A, EV_C is paired with Text C
+    expect(paired).toHaveLength(2);
+    expect(paired[0]).toEqual({ evidenceId: "EV_A", text: "Detail text for A" });
+    expect(paired[1]).toEqual({ evidenceId: "EV_C", text: "Detail text for C" });
+
+    // Invariant: Prompt serializes paired items without shifting EV_B onto Text C
+    const prompt = buildAtomicityPrompt({
+      painClaim: pain.canonical,
+      evidenceItems: paired,
+    });
+
+    expect(prompt).toContain('[Evidence ID: EV_A] "Detail text for A"');
+    expect(prompt).toContain('[Evidence ID: EV_C] "Detail text for C"');
+    expect(prompt).not.toContain("EV_B");
+  });
+
+  // Test E: Production cannot bypass final atomicity with llmEnabled=false
+  it("Test E — NO PRODUCTION BYPASS: llmEnabled=false fails closed as ATOMICITY_INCOMPLETE without unvalidated bypass", async () => {
+    const unvalidatedPain = {
+      painId: "pain_unvalidated",
+      canonical: "Unvalidated candidate pain",
+      originalStatement: "Unvalidated candidate pain",
+      normalizedStatement: "unvalidated candidate pain",
+      classification: "NOT_EVALUATED" as const,
+      rank: 1,
+      productFit: "UNKNOWN" as const,
+      eligible: true,
+      allowedUses: [],
+      prohibitedUses: [],
+      evidenceUids: ["EV_1"],
+      sourceSignalIds: [],
+      sourceTypes: ["review"],
+      rootCauseIds: [],
+      segmentIds: ["seg_1"],
+      classifierVersion: "test",
+      classificationReason: "test",
+      lineage: { accountId: "acc_test", audienceSnapshotId: "snap_test" },
+    };
+
+    const refined = await refineFinalPainAtomicityRegistry([unvalidatedPain], {
       accountId: "acc_test",
       campaignId: "camp_test",
-      jobId: "job_test_c"
+      llmEnabled: false, // Disabling LLM must not silently allow pain to pass as valid
     });
 
-    // Invariant: If only a subset of a compound claim is directly addressed, the offering cannot receive DIRECT_FIT
-    expect(result.fitType).not.toBe("DIRECT_FIT");
-    expect(result.fitType).toBe("STRATEGIC_FIT");
+    expect(refined.registry).toHaveLength(1);
+    expect(refined.registry[0].classification).toBe("UNKNOWN");
+    expect(refined.registry[0].eligible).toBe(false);
+    expect(refined.registry[0].classificationReason).toContain("ATOMICITY_INCOMPLETE");
+    expect(refined.atomicityRejections).toHaveLength(1);
   });
 
-  // Test D: Full Direct Fit
-  it("Test D: Coherent pain where Product Truth genuinely addresses the full requirement receives DIRECT_FIT", async () => {
-    const result = await runProductAssessmentForPain({
-      painId: "test_d_atomic_pain",
-      canonicalPain: "Engineers spend hours debugging slow database queries without automated indexing recommendations",
-      campaignOfferingId: "off_test_saas",
-      businessUnderstandingAuthorityId: "bu_test_saas",
-      productTruthFacts: saasProductTruthFacts,
+  // Test F: Domain-neutral atomicity preserves coherent multi-attribute pains
+  it("Test F — COHERENT MULTI-ATTRIBUTE: Single causal problem unit with descriptive detail is preserved as ATOMIC + KEEP", async () => {
+    const coherentPain = {
+      painId: "pain_db_lock",
+      canonical: "Frequent application timeouts and high error rates during peak traffic spikes due to database lock contention",
+      originalStatement: "Frequent application timeouts and high error rates during peak traffic spikes due to database lock contention",
+      normalizedStatement: "frequent application timeouts and high error rates during peak traffic spikes due to database lock contention",
+      classification: "NOT_EVALUATED" as const,
+      rank: 1,
+      productFit: "UNKNOWN" as const,
+      eligible: false,
+      allowedUses: [],
+      prohibitedUses: [],
+      evidenceUids: ["EV_LOCK_1"],
+      sourceSignalIds: [],
+      sourceTypes: ["system_log"],
+      rootCauseIds: [],
+      segmentIds: ["seg_backend"],
+      classifierVersion: "test",
+      classificationReason: "test",
+      lineage: { accountId: "acc_test", audienceSnapshotId: "snap_test" },
+    };
+
+    const refined = await refineFinalPainAtomicityRegistry([coherentPain], {
       accountId: "acc_test",
       campaignId: "camp_test",
-      jobId: "job_test_d"
+      llmEnabled: true,
     });
 
-    // Invariant: Genuine full capability match yields DIRECT_FIT
-    expect(result.fitType).toBe("DIRECT_FIT");
+    expect(refined.registry).toHaveLength(1);
+    expect(refined.registry[0].painId).toBe("pain_db_lock");
+    expect(refined.registry[0].canonical).toBe("Frequent application timeouts and high error rates during peak traffic spikes due to database lock contention");
   });
 
-  // Test E: Direct Fit Does Not Guarantee CORE
-  it("Test E: DIRECT_FIT does not mechanically imply CORE_PURCHASE when evidence/context indicates secondary friction", async () => {
-    const testJobId = "job_test_e";
-    const painId = "test_e_secondary_pain";
-    const spd = await judgeStrategicPainDecision({
-      jobId: testJobId,
-      painId,
-      targetUnderstandingAuthorityId: "tu_test",
-      productTruthFactIds: ["fact_saas_2"],
-      campaignOfferingId: "off_test_saas",
-      targetAssessmentAuthorityId: `ta_${testJobId}_${painId}`,
-      productAssessmentAuthorityId: `pa_${testJobId}_${painId}`,
-      targetAssessmentParentAuthorityIds: ["tu_test", painId],
-      productAssessmentParentAuthorityIds: ["bu_test_saas", "off_test_saas", painId],
-      targetAssessmentJobId: testJobId,
-      productAssessmentJobId: testJobId,
-      painClaim: "Engineers prefer Slack over email for alert delivery",
-      productFitType: "DIRECT_FIT",
-      targetCoverageDecision: "COVERED",
-      materialityContext: {
-        citationCount: 2,
-        evidenceUids: ["ev_1", "ev_2"],
-        sourceTypes: ["review"],
-        evidenceSummaries: ["Users noted they like Slack alerts more than email notifications."]
-      },
-      accountId: "acc_test",
-      campaignId: "camp_test"
-    });
+  // Test G: No circular runtime dependency exists
+  it("Test G — MODULE BOUNDARY: pain-atomicity.ts does not depend on pain-classifier.ts", async () => {
+    // Read raw file text of pain-atomicity.ts
+    const fs = await import("fs");
+    const path = await import("path");
+    const atomicityFilePath = path.resolve(__dirname, "../shared/pain-atomicity.ts");
+    const content = fs.readFileSync(atomicityFilePath, "utf-8");
 
-    // Invariant: DIRECT_FIT + COVERED does not mechanically force CORE_PURCHASE
-    expect(["SUPPORTING", "EXCLUDE"]).toContain(spd.finalClassification);
-    expect(spd.finalClassification).toBe("SUPPORTING");
+    // Ensure zero imports from pain-classifier
+    expect(content).not.toMatch(/from\s+["'].*pain-classifier["']/);
   });
 
-  // Test F: Purchase Lifecycle & Strategic Priority
-  it("Test F: SPD evaluates primary buying constraints and can award CORE_PURCHASE when justified by commercial consequence", async () => {
-    const testJobId = "job_test_f";
-    const painId = "test_f_core_pain";
-    const spd = await judgeStrategicPainDecision({
-      jobId: testJobId,
-      painId,
-      targetUnderstandingAuthorityId: "tu_test",
-      productTruthFactIds: ["fact_saas_1"],
-      campaignOfferingId: "off_test_saas",
-      targetAssessmentAuthorityId: `ta_${testJobId}_${painId}`,
-      productAssessmentAuthorityId: `pa_${testJobId}_${painId}`,
-      targetAssessmentParentAuthorityIds: ["tu_test", painId],
-      productAssessmentParentAuthorityIds: ["bu_test_saas", "off_test_saas", painId],
-      targetAssessmentJobId: testJobId,
-      productAssessmentJobId: testJobId,
-      painClaim: "Production database outages caused by unindexed slow queries costing thousands per hour in downtime",
-      productFitType: "DIRECT_FIT",
-      targetCoverageDecision: "COVERED",
-      materialityContext: {
-        citationCount: 15,
-        evidenceUids: ["ev_1", "ev_2", "ev_3", "ev_4", "ev_5"],
-        sourceTypes: ["review", "case_study"],
-        evidenceSummaries: ["Critical unindexed query spikes take down checkout during peak hours, causing immediate lost revenue."]
-      },
-      accountId: "acc_test",
-      campaignId: "camp_test"
-    });
+  // Test H: Product Assessment receives only valid atomic pains, never compound parents
+  it("Test H — DOWNSTREAM PURITY: PA receives ONLY ATOMIC+KEEP, validated split children, and validated REPLACE results", async () => {
+    const parentCompoundPain = {
+      painId: "parent_compound_pain_id",
+      canonical: "Difficulty finding budget-friendly modest clothes made from natural fabrics that provide comfort in hot weather",
+      originalStatement: "Difficulty finding budget-friendly modest clothes made from natural fabrics that provide comfort in hot weather",
+      normalizedStatement: "difficulty finding budget-friendly modest clothes made from natural fabrics that provide comfort in hot weather",
+      classification: "NOT_EVALUATED" as const,
+      rank: 1,
+      productFit: "UNKNOWN" as const,
+      eligible: false,
+      allowedUses: [],
+      prohibitedUses: [],
+      evidenceUids: ["EV_BUDGET_1", "EV_FABRIC_1", "EV_FABRIC_2"],
+      sourceSignalIds: [],
+      sourceTypes: ["review"],
+      rootCauseIds: [],
+      segmentIds: ["seg_1"],
+      segmentName: "Modest Fashion Shoppers",
+      classifierVersion: "initial_neutral_registry",
+      classificationReason: "initial unassessed",
+      lineage: { accountId: "acc_test", audienceSnapshotId: "snap_test" },
+    };
 
-    // Invariant: Severe operational bottleneck directly addressed by the product can anchor CORE_PURCHASE
-    expect(spd.finalClassification).toBe("CORE_PURCHASE");
-  });
-
-  // Test G: Canonical Product Truth Structure
-  it("Test G: Product Assessment requires array of structured Product Truth facts and fails closed if missing", async () => {
-    const incompleteRes = await runProductAssessmentForPain({
-      painId: "test_g_pain",
-      canonicalPain: "Any customer pain",
-      campaignOfferingId: "",
-      businessUnderstandingAuthorityId: "",
-      productTruthFacts: [] as any[],
+    const refined = await refineAudiencePainRegistry([parentCompoundPain], {
       accountId: "acc_test",
       campaignId: "camp_test",
-      jobId: "job_test_g"
+      audienceSegments: [{ id: "seg_1", name: "Modest Fashion Shoppers" }],
+      productCapabilities: "Modest clothing with breathable fabrics",
+      llmEnabled: true,
     });
 
-    // Invariant: Fails closed to UNKNOWN when canonical facts are absent
-    expect(incompleteRes.fitType).toBe("UNKNOWN");
-    expect(incompleteRes.status).toBe("INCOMPLETE");
+    // Invariant 1: The compound parent ID never appears in the refined authoritative registry
+    expect(refined.registry.some(p => p.painId === "parent_compound_pain_id")).toBe(false);
+
+    // Invariant 2: Refined registry contains only the split children
+    expect(refined.registry.length).toBe(2);
+    expect(refined.registry[0].painId).toBe("parent_compound_pain_id_split_1");
+    expect(refined.registry[1].painId).toBe("parent_compound_pain_id_split_2");
+
+    // Invariant 3: Product Assessment and SPD decisions are recorded per child
+    expect(refined.registry[0].productAssessmentAuthorityId).toBeDefined();
+    expect(refined.registry[1].productAssessmentAuthorityId).toBeDefined();
+    expect(refined.registry[0].strategicPainDecisionAuthorityId).toBeDefined();
+    expect(refined.registry[1].strategicPainDecisionAuthorityId).toBeDefined();
   });
 });

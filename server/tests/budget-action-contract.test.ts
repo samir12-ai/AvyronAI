@@ -1,16 +1,19 @@
 /**
- * Budget Governor decision-action contract — proof tests (H3, May 2026)
+ * Budget Governor recommendation-only contract — proof tests
  *
- * The budget_governor engine emits an F9 action vocabulary distinct from F1
- * engine-execution status:
- *   - `decision.action` ∈ { test | scale | hold | halt }
+ * The budget_governor engine emits a recommendation_only contract:
+ *   - `mode`: "recommendation_only"
+ *   - `status`: "COMPLETE" | "BUDGET_NOT_PROVIDED" | "ZERO_BUDGET" | "MISSING_CHANNELS" | "FAILED"
+ *   - `statusMessage`: string
+ *   - `allocations`: ChannelAllocation[]
+ *   - `overallRationale`: string
+ *   - Optional legacy adapter: `decision.action` ∈ { test | scale | hold | halt }
  *
  * These tests prove:
- *   1. Canonical action satisfies the contract
- *   2. Wrong vocabulary is rejected (verdict-shape, status-shape, uppercase)
- *   3. Missing canonical action → CONTRACT_INCOMPLETE
- *   4. The legacy fallback `decision.verdict || decision.status || "reviewed"`
- *      (offender O2) cannot accidentally satisfy the contract under any vocab
+ *   1. Recommendation mode and status vocabularies satisfy the contract
+ *   2. Wrong mode or status vocabulary is rejected
+ *   3. Missing required recommendation fields → CONTRACT_INCOMPLETE
+ *   4. Legacy adapter field (if present) is properly validated without forcing spending semantics
  *
  * Run with:  npx tsx server/tests/budget-action-contract.test.ts
  */
@@ -37,89 +40,127 @@ function describe(verdict: Verdict): string {
 
 function baseOutput(overrides: Record<string, any> = {}) {
   return {
-    decision: { action: "test", reasoning: "begin with small test budget" },
-    testBudgetRange: { min: 500, max: 1500 },
-    scaleBudgetRange: { min: 5000, max: 15000 },
-    killFlag: false,
-    killReasons: [],
-    guardResult: { warnings: [] },
-    expansionPermission: { allowed: false },
-    cacAssumptionCheck: { ok: true },
-    confidenceScore: 0.6,
+    mode: "recommendation_only",
+    status: "COMPLETE",
+    statusMessage: "Budget recommendation complete.",
+    allocations: [
+      {
+        channel: "Meta Ads",
+        sharePercentage: 60,
+        allocatedAmount: 3000,
+        rationale: "Primary conversion engine for validated audience",
+      },
+      {
+        channel: "Google Search",
+        sharePercentage: 40,
+        allocatedAmount: 2000,
+        rationale: "Captures high intent search queries",
+      },
+    ],
+    overallRationale: "Balanced distribution across validated acquisition channels.",
+    totalMonthlyBudget: 5000,
+    currency: "USD",
     ...overrides,
   };
 }
 
 console.log("\n══════════════════════════════════════════════════════════════════");
-console.log("  Budget Governor — decision.action Contract Hardening (H3)");
+console.log("  Budget Governor — Recommendation-Only Contract Verification");
 console.log("══════════════════════════════════════════════════════════════════\n");
 
-// ── S0: registry has strict enum on decisionAction ──────────────────────────
+// ── S0: registry has required recommendation fields ──────────────────────────
 const contract = getContract("budget_governor");
-const actField = contract?.requiredOutputs.find((f) => f.id === "decisionAction");
-assert(!!actField, "S0: registry has budget_governor.decisionAction field");
-assert(
-  JSON.stringify(actField?.path) === JSON.stringify(["decision", "action"]),
-  "S0: canonical path is ['decision','action']",
-);
+assert(!!contract, "S0: registry has budget_governor contract");
+const modeField = contract?.requiredOutputs.find((f) => f.id === "mode");
+assert(!!modeField, "S0: contract requires 'mode'");
+const statusField = contract?.requiredOutputs.find((f) => f.id === "status");
+assert(!!statusField, "S0: contract requires 'status'");
+const allocField = contract?.requiredOutputs.find((f) => f.id === "allocations");
+assert(!!allocField, "S0: contract requires 'allocations'");
+const ratField = contract?.requiredOutputs.find((f) => f.id === "overallRationale");
+assert(!!ratField, "S0: contract requires 'overallRationale'");
 
-// ── S1: each canonical action vocab passes ─────────────────────────────────
-for (const action of ["test", "scale", "hold", "halt"]) {
-  const out = baseOutput({ decision: { action, reasoning: "x" } });
+// ── S1: each canonical recommendation status passes ─────────────────────────
+const canonicalStatuses = ["COMPLETE", "BUDGET_NOT_PROVIDED", "ZERO_BUDGET", "MISSING_CHANNELS", "FAILED"];
+for (const status of canonicalStatuses) {
+  const out = baseOutput({ status });
   const v = validateContractCompleteness("budget_governor", out);
   assert(
     v.status === "COMPLETE",
-    `S1: canonical action '${action}' satisfies contract`,
+    `S1: canonical status '${status}' satisfies contract`,
     describe(v),
   );
 }
 
-// ── S2: wrong vocabularies rejected (incl. O2 fallback chain values) ────────
-const wrongVocabs = [
-  "TEST",            // uppercase — wrong case
-  "reviewed",        // O2 fallback literal
-  "PASS",            // verdict-shape leaking in
-  "COMPLETE",        // execution-status leaking in
+// ── S2: wrong mode rejected ────────────────────────────────────────────────
+for (const mode of ["spending", "automatic", "scale", "autonomous"]) {
+  const out = baseOutput({ mode });
+  const v = validateContractCompleteness("budget_governor", out);
+  assert(
+    v.status === "INVALID" && v.invalidFields.some((f) => f.fieldId === "mode"),
+    `S2: invalid mode='${mode}' rejected`,
+    describe(v),
+  );
+}
+
+// ── S3: wrong status rejected ──────────────────────────────────────────────
+const wrongStatuses = [
+  "TEST",
+  "SCALE",
+  "HOLD",
+  "HALT",
+  "PASS",
   "approved",
-  "denied",
+  "pending",
 ];
-for (const action of wrongVocabs) {
-  const out = baseOutput({ decision: { action, reasoning: "x" } });
+for (const status of wrongStatuses) {
+  const out = baseOutput({ status });
   const v = validateContractCompleteness("budget_governor", out);
   assert(
-    v.status === "INVALID" && v.invalidFields.some((f) => f.fieldId === "decisionAction"),
-    `S2: wrong-vocab action='${action}' rejected by strict enum`,
+    v.status === "INVALID" && v.invalidFields.some((f) => f.fieldId === "status"),
+    `S3: invalid status='${status}' rejected by strict enum`,
     describe(v),
   );
 }
 
-// ── S3: missing decision.action → INCOMPLETE ───────────────────────────────
+// ── S4: missing required outputs → INCOMPLETE ──────────────────────────────
 {
-  const out = baseOutput({ decision: { reasoning: "no action set" } });
+  const out = baseOutput();
+  delete (out as any).mode;
   const v = validateContractCompleteness("budget_governor", out);
   assert(
-    v.status === "INCOMPLETE" && v.missingRequiredOutputs.includes("decisionAction"),
-    "S3: missing decision.action → CONTRACT_INCOMPLETE",
+    v.status === "INCOMPLETE" && v.missingRequiredOutputs.includes("mode"),
+    "S4: missing mode → CONTRACT_INCOMPLETE",
+    describe(v),
+  );
+}
+{
+  const out = baseOutput();
+  delete (out as any).overallRationale;
+  const v = validateContractCompleteness("budget_governor", out);
+  assert(
+    v.status === "INCOMPLETE" && v.missingRequiredOutputs.includes("overallRationale"),
+    "S4: missing overallRationale → CONTRACT_INCOMPLETE",
     describe(v),
   );
 }
 
-// ── S4: O2 simulation — decision.verdict / decision.status cannot stand in ──
-// Even if the engine fabricated a `verdict` or `status` field on `decision`,
-// the contract refuses to read them. Proves no semantic fallback path exists.
+// ── S5: optional legacy decision adapter ────────────────────────────────────
 {
-  const out = baseOutput({ decision: { verdict: "test", status: "test" } });
+  // Valid legacy decision adapter
+  const out = baseOutput({ decision: { action: "hold", reasoning: "legacy adapter" } });
   const v = validateContractCompleteness("budget_governor", out);
-  assert(
-    v.status === "INCOMPLETE" && v.missingRequiredOutputs.includes("decisionAction"),
-    "S4: decision.verdict/status alone cannot satisfy decisionAction (no semantic fallback)",
-    describe(v),
-  );
+  assert(v.status === "COMPLETE", "S5: optional legacy decision.action='hold' accepted", describe(v));
+
+  const actField = contract?.optionalOutputs.find((f) => f.id === "decisionAction");
+  assert(!!actField, "S5: registry has optional decisionAction field");
+  assert(actField?.shape.safeParse("hold").success === true, "S5: 'hold' matches decisionAction shape");
+  assert(actField?.shape.safeParse("INVALID_VOCAB").success === false, "S5: invalid legacy decision.action rejected by shape");
 }
 
 console.log("\n══════════════════════════════════════════════════════════════════");
 if (failed === 0) {
-  console.log("  SUITE: ALL TESTS PASSED — budget action contract is hardened.");
+  console.log("  SUITE: ALL TESTS PASSED — recommendation contract verified.");
   console.log("══════════════════════════════════════════════════════════════════\n");
   process.exit(0);
 } else {

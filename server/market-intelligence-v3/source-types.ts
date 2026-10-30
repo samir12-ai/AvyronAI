@@ -150,18 +150,18 @@ export interface SourceFreshnessRecord {
 }
 
 export function computeSourceAvailability(competitor: {
-  profileLink?: string | null;
+  
   websiteUrl?: string | null;
-  blogUrl?: string | null;
+  
   postsCollected?: number | null;
   websiteEnrichmentStatus?: string | null;
   blogEnrichmentStatus?: string | null;
   tiktokPostCount?: number;
   reviewCount?: number;
 }): SourceAvailability {
-  const instagram = !!(competitor.profileLink && (competitor.postsCollected ?? 0) > 0);
+  const instagram = !!((competitor.postsCollected ?? 0) > 0);
   const website = !!(competitor.websiteUrl && competitor.websiteEnrichmentStatus !== "NONE" && competitor.websiteEnrichmentStatus !== "FAILED");
-  const blog = !!(competitor.blogUrl && competitor.blogEnrichmentStatus !== "NONE" && competitor.blogEnrichmentStatus !== "FAILED");
+  const blog = !!(competitor.blogEnrichmentStatus && competitor.blogEnrichmentStatus !== "NONE" && competitor.blogEnrichmentStatus !== "FAILED");
   const tiktok = (competitor.tiktokPostCount ?? 0) > 0;
   const reviews = (competitor.reviewCount ?? 0) > 0;
 

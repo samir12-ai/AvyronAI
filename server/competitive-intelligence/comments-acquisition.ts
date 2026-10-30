@@ -197,6 +197,7 @@ export async function scrapeTikTokCommentsForCompetitor(opts: {
         try {
           await db.insert(ciCompetitorComments).values({
             id: dbId,
+            sourceId: sourceId || null,
             competitorId,
             accountId,
             postId: parentPostId,
@@ -392,6 +393,7 @@ export async function scrapeYouTubeCommentsForCompetitor(opts: {
         try {
           await db.insert(ciCompetitorComments).values({
             id: dbId,
+            sourceId: sourceId || null,
             competitorId,
             accountId,
             postId: parentPostId,

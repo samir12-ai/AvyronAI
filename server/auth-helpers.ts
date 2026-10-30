@@ -136,11 +136,39 @@ export async function assertFetchJobBelongsTo(
   return row;
 }
 
+import { verifyToken } from "./auth";
+
+export class AuthenticationRequiredError extends Error {
+  status = 401;
+  code = "AUTHENTICATION_REQUIRED";
+  constructor(message = "Authentication required for plan approval or rejection") {
+    super(message);
+    this.name = "AuthenticationRequiredError";
+  }
+}
+
+export class PlanAuthorizationError extends Error {
+  status = 403;
+  code = "FORBIDDEN_PLAN_ACCESS";
+  constructor(message = "Account does not have authorization to approve or reject this plan") {
+    super(message);
+    this.name = "PlanAuthorizationError";
+  }
+}
+
 /** Express helper: writes a JSON 4xx if the error is an ownership error.
  *  P3 isolation seal: response body intentionally OMITS campaignId/accountId
  *  to prevent attacker-supplied identifiers from being reflected back in
  *  denial responses (cross-tenant identifier leak surface). */
 export function handleOwnershipError(err: unknown, res: any): boolean {
+  if (err instanceof AuthenticationRequiredError) {
+    res.status(err.status).json({ error: err.code, message: err.message });
+    return true;
+  }
+  if (err instanceof PlanAuthorizationError) {
+    res.status(err.status).json({ error: err.code, message: err.message });
+    return true;
+  }
   if (err instanceof CampaignOwnershipError) {
     res.status(err.status).json({ error: err.code, message: "Campaign not found" });
     return true;
@@ -154,4 +182,39 @@ export function handleOwnershipError(err: unknown, res: any): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Resolves the genuine provenance actor for plan approval/rejection.
+ * Strictly verifies authentication and account matching.
+ * Never defaults unauthenticated callers to "automation_script" and never trusts caller-supplied decidedBy/x-actor-id.
+ */
+export function resolveApprovalProvenance(req: any, plan?: { accountId?: string }): string {
+  let userId = req.userId || req.user?.id;
+  let accountId = req.accountId || (req.user as any)?.accountId;
+  let userEmail = req.user?.email;
+
+  // If not already resolved by middleware, try bearer token from headers
+  if (!userId && req.headers?.authorization?.startsWith("Bearer ")) {
+    const token = req.headers.authorization.slice(7);
+    const payload = verifyToken(token);
+    if (payload) {
+      userId = payload.userId;
+      accountId = payload.accountId || payload.userId;
+      userEmail = payload.email;
+    }
+  }
+
+  // Strict check: unauthenticated requests cannot approve or reject plans
+  if (!userId && !accountId) {
+    throw new AuthenticationRequiredError("Authentication required: unauthenticated callers cannot approve or reject plans");
+  }
+
+  // Account boundary: caller account must match the plan's account
+  if (plan?.accountId && accountId && accountId !== plan.accountId) {
+    throw new PlanAuthorizationError(`Account mismatch: caller account ${accountId} cannot act on plan for account ${plan.accountId}`);
+  }
+
+  const identifier = userEmail || userId || accountId;
+  return `client:${identifier}`;
 }

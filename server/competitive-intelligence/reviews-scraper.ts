@@ -48,7 +48,13 @@ export interface ExtractedReview {
   text: string;
   rating: number;
   time: number;
+  reviewDateMs?: number;
+  nativeReviewId?: string;
   authorName?: string;
+  isVerified?: boolean;
+  verificationLevel?: string;
+  platform?: string;
+  reviewUrl?: string;
 }
 
 function dedupeReviews(reviews: ExtractedReview[]): ExtractedReview[] {
@@ -233,31 +239,45 @@ export async function persistExtractedReviews(
   campaignId: string,
   placeId: string | null,
   reviews: ExtractedReview[],
+  outPersistedRowIds?: string[],
 ): Promise<number> {
   const { reviewIdHash, authorHash } = await import("./scrape-safety");
   let inserted = 0;
   for (const review of reviews) {
-    const reviewId = reviewIdHash(placeId || "unknown", review.authorName || "anonymous", review.text, review.time);
+    const reviewId =
+      !placeId && review.nativeReviewId
+        ? review.nativeReviewId
+        : reviewIdHash(placeId || "unknown", review.authorName || "anonymous", review.text, review.time);
     const existing = await db.select({ id: ciCompetitorReviews.id })
       .from(ciCompetitorReviews)
       .where(sql`${ciCompetitorReviews.competitorId} = ${competitorId} AND ${ciCompetitorReviews.reviewId} = ${reviewId}`)
       .limit(1);
 
-    if (existing.length > 0) continue;
+    if (existing.length > 0) {
+      if (outPersistedRowIds) outPersistedRowIds.push(existing[0].id);
+      continue;
+    }
 
+    const newRowId = `rev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     await db.insert(ciCompetitorReviews).values({
-      id: `rev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      id: newRowId,
       competitorId,
       accountId,
       campaignId,
       reviewId,
       reviewText: review.text,
       rating: review.rating,
-      platform: "google",
-      reviewDate: review.time ? new Date(review.time * 1000) : null,
+      platform: review.platform || "google",
+      reviewDate:
+        typeof review.reviewDateMs === "number" && review.reviewDateMs > 0
+          ? new Date(review.reviewDateMs)
+          : review.time
+            ? new Date(review.time * 1000)
+            : null,
       isSynthetic: false,
       authorHash: review.authorName ? authorHash(review.authorName) : null,
     });
+    if (outPersistedRowIds) outPersistedRowIds.push(newRowId);
     inserted++;
   }
   return inserted;
@@ -267,6 +287,7 @@ export async function scrapeReviewsForCompetitor(
   competitorId: string,
   accountId: string,
   campaignId: string,
+  explicitStartUrl?: string,
 ): Promise<ReviewScrapedResult> {
   const result: ReviewScrapedResult = {
     competitorId,
@@ -277,7 +298,7 @@ export async function scrapeReviewsForCompetitor(
 
   // Ownership scoping stays live even while the provider is pending — a
   // caller probing another tenant's competitor still gets "not found".
-  const [competitor] = await db.select({ name: ciCompetitors.name, url: ciCompetitors.profileLink })
+  const [competitor] = await db.select({ name: ciCompetitors.name, url: ciCompetitors.websiteUrl })
     .from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId)));
 
@@ -286,12 +307,71 @@ export async function scrapeReviewsForCompetitor(
     return result;
   }
 
-  // P-6.12 — Bright Data retired; no verified Apify actor for Google review
-  // texts yet. Fail fast with a machine-readable class (B4 — explicit
-  // classification over hidden ambiguity). No fabrication, no silent empty.
-  const provider = getGoogleReviewsProviderStatus();
-  result.error = `PROVIDER_PENDING: Google reviews acquisition has no active provider (${provider.envSlot}${provider.actorId ? `=${provider.actorId} — not yet implemented/verified` : " not set"}). ${provider.detail}`;
-  console.warn(`[ReviewsScraper] ${result.error} (competitorId=${competitorId})`);
+  const { competitorSources } = await import("@shared/schema");
+  const [gSource] = await db
+    .select()
+    .from(competitorSources)
+    .where(and(
+      eq(competitorSources.competitorId, competitorId),
+      sql`${competitorSources.platform} IN ('GOOGLE', 'GOOGLE_REVIEWS')`,
+      eq(competitorSources.accountId, accountId),
+      eq(competitorSources.campaignId, campaignId)
+    ))
+    .limit(1);
+
+  const { isApifyAcquisitionConfigured, runActorAndGetItems } = await import("../acquisition/apify-client");
+
+  if (!isApifyAcquisitionConfigured()) {
+    result.error = `PROVIDER_PENDING: Apify API key not configured for Google reviews.`;
+    return result;
+  }
+
+  const actorId = process.env.GOOGLE_REVIEWS_ACTOR_ID || "compass~google-maps-reviews-scraper";
+  const startUrl = (explicitStartUrl || gSource?.canonicalUrl || "").trim();
+  if (!startUrl || (!startUrl.includes("google.com/maps") && !startUrl.includes("goo.gl"))) {
+    return result;
+  }
+
+  const input: Record<string, any> = {
+    startUrls: [{ url: startUrl }],
+    maxReviews: 10,
+    reviewsSort: "newest",
+    personalData: false,
+  };
+
+  try {
+    const { items } = await runActorAndGetItems({ actorId, input, budgetMs: 120_000 });
+    const extractedReviews: ExtractedReview[] = [];
+
+    for (const item of items) {
+      const text = (item.text || item.reviewText || item.snippet || item.review || "").trim();
+      if (!text || text.length < 5) continue;
+      const rating = typeof item.stars === "number" ? Math.round(item.stars) : (typeof item.rating === "number" ? Math.round(item.rating) : 5);
+      const time = item.publishedAtDate
+        ? Math.floor(new Date(item.publishedAtDate).getTime() / 1000)
+        : (item.timestamp ? Math.floor(item.timestamp / 1000) : Math.floor(Date.now() / 1000));
+      const authorName = item.name || item.reviewerName || item.author || "anonymous";
+      extractedReviews.push({ text, rating, time, authorName });
+    }
+
+    const placeId = items[0]?.placeId || items[0]?.googlePlaceId || null;
+    result.placeId = placeId;
+    result.reviewsFetched = extractedReviews.length;
+
+    if (extractedReviews.length > 0) {
+      result.reviewsInserted = await persistExtractedReviews(
+        competitorId,
+        accountId,
+        campaignId,
+        placeId,
+        extractedReviews
+      );
+    }
+  } catch (err: any) {
+    result.error = `Google reviews acquisition failed: ${err?.message || err}`;
+    console.warn(`[ReviewsScraper] ${result.error} (competitorId=${competitorId})`);
+  }
+
   return result;
 }
 

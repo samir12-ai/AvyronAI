@@ -17,7 +17,7 @@
  */
 import { db } from "../db";
 import { ciCompetitorPosts, ciCompetitorComments, ciCompetitors } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, or, sql } from "drizzle-orm";
 
 export interface TiktokComment {
   commentId: string;
@@ -58,7 +58,7 @@ export interface TiktokScrapedResult {
   /** F7.3 — machine-readable reason for downstream gates. Post-P-6.12 runs
    *  emit only NO_HANDLE | NO_SOURCE_CONFIGURED | APIFY_FAIL; the other
    *  literals are legacy (pre-migration snapshots may still carry them). */
-  degradedReason?: "APIFY_FAIL" | "NO_SOURCE_CONFIGURED" | "NO_HANDLE";
+  degradedReason?: "APIFY_FAIL" | "NO_SOURCE_CONFIGURED" | "NO_HANDLE" | "BOTH_SOURCES_DOWN";
 }
 
 /**
@@ -186,7 +186,7 @@ export async function scrapeTiktokForCompetitor(
     whereConditions.push(eq(ciCompetitors.campaignId, campaignId));
   }
 
-  const [competitor] = await db.select({ name: ciCompetitors.name, profileLink: ciCompetitors.profileLink, tiktokUrl: ciCompetitors.tiktokUrl })
+  const [competitor] = await db.select({ id: ciCompetitors.id, name: ciCompetitors.name, campaignId: ciCompetitors.campaignId, accountId: ciCompetitors.accountId })
     .from(ciCompetitors)
     .where(and(...whereConditions));
 
@@ -195,7 +195,13 @@ export async function scrapeTiktokForCompetitor(
     return result;
   }
 
-  const handle = extractHandleFromProfileUrl(competitor.tiktokUrl || "") || extractHandleFromProfileUrl(competitor.profileLink || "") || competitor.name || "";
+  const { competitorSources } = await import("@shared/schema");
+    const [ttSource] = await db.select().from(competitorSources).where(and(
+      eq(competitorSources.competitorId, competitorId),
+      eq(competitorSources.platform, "TIKTOK"),
+      or(eq(competitorSources.status, "VERIFIED"), eq(competitorSources.status, "ACTIVE"))
+    ));
+    const handle = ttSource?.canonicalUrl ? (extractHandleFromProfileUrl(ttSource.canonicalUrl) || ttSource.externalAccountId || "") : "";
   if (!handle) {
     result.error = "Could not determine TikTok handle for competitor";
     result.degraded = true;

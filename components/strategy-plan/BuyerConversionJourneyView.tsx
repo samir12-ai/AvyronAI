@@ -378,7 +378,7 @@ export default function BuyerConversionJourneyView({
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.messageStepTitle}>
-                    {translateMessageStepLabel(m.stepLabel, mIdx)}
+                    {translateMessageStepLabel(m.stepLabel, mIdx, (m as any).messageFocus || m.step)}
                   </Text>
                   {m.rationale ? (
                     <Text style={styles.messageStepRationale}>{m.rationale}</Text>
@@ -404,11 +404,36 @@ export default function BuyerConversionJourneyView({
           <View style={styles.objectionList}>
             {persuasion.objections.map((obj, oIdx) => {
               const handledInStageName = obj.funnelStageId ? stageNameById.get(obj.funnelStageId) : undefined;
+              const objAny = obj as any;
+              const competitorNames: string[] = Array.isArray(objAny.competitorNames) ? objAny.competitorNames : [];
+              const subjectScope: string | undefined = objAny.subjectScope;
               return (
                 <View key={obj.objectionId || oIdx} style={styles.objectionCard}>
                   {/* Barrier */}
                   <View style={styles.objectionRow}>
-                    <Text style={styles.objectionLabel}>BARRIER / SKEPTICISM</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                      <Text style={styles.objectionLabel}>BARRIER / SKEPTICISM</Text>
+                      {subjectScope && (
+                        <View style={{
+                          backgroundColor: subjectScope === 'COMPETITOR_SPECIFIC' ? '#F59E0B20' : '#3B82F620',
+                          borderColor: subjectScope === 'COMPETITOR_SPECIFIC' ? '#F59E0B50' : '#3B82F650',
+                          borderWidth: 1,
+                          borderRadius: 4,
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                        }}>
+                          <Text style={{
+                            fontSize: 9,
+                            fontWeight: '700',
+                            color: subjectScope === 'COMPETITOR_SPECIFIC' ? '#FBBF24' : '#60A5FA',
+                          }}>
+                            {subjectScope === 'COMPETITOR_SPECIFIC' && competitorNames.length > 0
+                              ? `COMPETITOR-ATTRIBUTED (${competitorNames.join(', ')})`
+                              : subjectScope.replace(/_/g, ' ')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={styles.objectionText}>"{obj.objection}"</Text>
                   </View>
 

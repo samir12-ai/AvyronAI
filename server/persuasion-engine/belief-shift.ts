@@ -34,7 +34,7 @@ function buildBeliefShiftPrompt(input: BeliefShiftInput, judgeFeedback?: string)
   const objBlock = (input.objectionStatements || []).slice(0, 6).map((o, i) => `[OBJ${i + 1}] ${o}`).join("\n") || "(none)";
 
   const ptBlock = (input.productTruthFacts || [])
-    .slice(0, 8)
+    .slice(0, 15)
     .map(f => `- ${f.id}: ${f.text || f.capability}`)
     .join("\n") || "(none supplied)";
 
@@ -67,9 +67,13 @@ ${ptBlock}
 ═══ HARD RULES ═══
 1. currentBelief MUST be a non-empty, substantive statement of the buyer's current flawed assumption.
 2. desiredBelief MUST be a non-empty, substantive statement of the required conviction.
-3. PRODUCT TRUTH BOUNDARY: desiredBelief MUST NOT claim features or capabilities outside the Product Truth above (e.g. do NOT claim automated billing/refund portals or dispute resolution unless explicitly in Product Truth).
-4. desiredBelief must be distinct and contradictory to currentBelief.
-5. Return ONLY valid JSON.
+3. PRODUCT TRUTH BOUNDARY:
+   - desiredBelief and contradictionLogic MUST NOT claim features, human staffing, or operational guarantees outside the Product Truth above.
+   - Specifically: Do NOT claim "a human-driven process over automation", "human studio musicians/composers", "phonetic pronunciation control", "specify name pronunciation", "permanent/lifetime cloud link hosting", or "automated billing/refund portals" unless explicitly stated in CANONICAL PRODUCT TRUTH.
+   - Ground desiredBelief and contradictionLogic strictly in how the verified product workflow, customization steps, evaluation/preview mechanism, and delivery format stated in CANONICAL PRODUCT TRUTH resolve buyer skepticism.
+4. COMPETITOR ATTRIBUTION BOUNDARY: Do NOT state or imply that our business had expired links or hidden fees; treat those as market/competitor experiences that make buyers cautious.
+5. desiredBelief must be distinct and contradictory to currentBelief.
+6. Return ONLY valid JSON.
 
 Return JSON shape:
 {
@@ -127,6 +131,9 @@ export async function designBeliefShift(input: BeliefShiftInput): Promise<Canoni
     judge: async (inp, candidate): Promise<JudgeResult<CanonicalBeliefShift>> => {
       const cur = (candidate.currentBelief || "").trim();
       const des = (candidate.desiredBelief || "").trim();
+      const logic = (candidate.contradictionLogic || "").trim();
+      const combined = `${des} ${logic}`;
+      const ptText = (inp.productTruthFacts || []).map(f => f.text || f.capability || "").join(" ").toLowerCase();
 
       if (!cur || cur.length < 15 || !des || des.length < 15) {
         return {
@@ -150,13 +157,35 @@ export async function designBeliefShift(input: BeliefShiftInput): Promise<Canoni
         };
       }
 
-      if (/refund|billing\s*dispute|automated\s*chargeback/i.test(des)) {
+      if (/refund|billing\s*dispute|automated\s*chargeback/i.test(des) && !ptText.includes("refund")) {
         return {
           valid: false,
           failureClass: "HALLUCINATION",
           rejections: [{
             field: "desiredBelief",
             reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief claims billing/refund capability outside Product Truth",
+          }],
+        };
+      }
+
+      if (/\bhuman[- ]driven\b|\bhuman composer|\bhuman musician|\bover automation\b|\breplacing automation with human\b/i.test(combined) && !ptText.includes("human composer")) {
+        return {
+          valid: false,
+          failureClass: "HALLUCINATION",
+          rejections: [{
+            field: "desiredBelief",
+            reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief or contradictionLogic claims a human-driven process over automation, which is not supported by Product Truth.",
+          }],
+        };
+      }
+
+      if (/\bphonetic\b|\bspecify name pronunciation\b|\bpronunciation guide\b|\blifetime access\b|\bpermanent link\b|\bpermanent access\b|\bnever generic\b/i.test(combined) && !ptText.includes("phonetic") && !ptText.includes("lifetime access")) {
+        return {
+          valid: false,
+          failureClass: "HALLUCINATION",
+          rejections: [{
+            field: "desiredBelief",
+            reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief claims phonetic pronunciation input, lifetime/permanent link hosting, or unsupported absolutes not present in Product Truth. Ground strictly in verified Product Truth capabilities.",
           }],
         };
       }

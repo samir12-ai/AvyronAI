@@ -21,6 +21,7 @@ export type CollectorEntityType =
   | "competitor_website"
   | "competitor_instagram"
   | "competitor_tiktok"
+  | "competitor_youtube"
   | "competitor_reviews"
   | "competitor_google_search"
   | "competitor_linkedin"

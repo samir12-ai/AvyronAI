@@ -77,6 +77,35 @@ export default function CompetitorLibraryView({
                     <View style={styles.categoryPill}>
                       <Text style={styles.categoryPillText}>{c.category}</Text>
                     </View>
+                    {c.isPrimaryCohort && (
+                      <View style={styles.primaryCohortPill}>
+                        <Feather name="star" size={9} color="#F59E0B" style={{ marginRight: 3 }} />
+                        <Text style={styles.primaryCohortPillText}>PRIMARY COHORT</Text>
+                      </View>
+                    )}
+                    {c.geographicLabel && (
+                      <View style={[
+                        styles.geoPill,
+                        (c.geographicStatus === 'LOCAL_MARKET' || c.geographicStatus === 'DIRECT_LEBANON') && styles.geoPillDirect,
+                        (c.geographicStatus === 'GLOBAL_RELEVANT' || c.geographicStatus === 'REGIONAL_DELIVERS_TO_LEBANON') && styles.geoPillRegional,
+                        c.geographicStatus === 'REFERENCE_BRAND' && styles.geoPillRef,
+                      ]}>
+                        <Feather
+                          name={(c.geographicStatus === 'LOCAL_MARKET' || c.geographicStatus === 'DIRECT_LEBANON') ? 'map-pin' : 'globe'}
+                          size={10}
+                          color={(c.geographicStatus === 'LOCAL_MARKET' || c.geographicStatus === 'DIRECT_LEBANON') ? '#10B981' : '#60A5FA'}
+                          style={{ marginRight: 4 }}
+                        />
+                        <Text style={[
+                          styles.geoPillText,
+                          (c.geographicStatus === 'LOCAL_MARKET' || c.geographicStatus === 'DIRECT_LEBANON') && { color: '#10B981' },
+                          (c.geographicStatus === 'GLOBAL_RELEVANT' || c.geographicStatus === 'REGIONAL_DELIVERS_TO_LEBANON') && { color: '#60A5FA' },
+                          c.geographicStatus === 'REFERENCE_BRAND' && { color: '#9CA3AF' },
+                        ]}>
+                          {c.geographicLabel}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                   <Feather name="chevron-right" size={16} color={isSelected ? '#A78BFA' : '#6B7280'} />
                 </View>
@@ -206,6 +235,49 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontSize: 11,
     fontWeight: '600',
+  },
+  primaryCohortPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    backgroundColor: '#F59E0B15',
+    borderColor: '#F59E0B40',
+  },
+  primaryCohortPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#FBBF24',
+    letterSpacing: 0.5,
+  },
+  geoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    backgroundColor: '#1F2937',
+    borderColor: '#374151',
+  },
+  geoPillDirect: {
+    backgroundColor: '#10B98115',
+    borderColor: '#10B98140',
+  },
+  geoPillRegional: {
+    backgroundColor: '#3B82F615',
+    borderColor: '#3B82F640',
+  },
+  geoPillRef: {
+    backgroundColor: '#6B728015',
+    borderColor: '#6B728040',
+  },
+  geoPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   oneLineSummary: {
     fontSize: 13,

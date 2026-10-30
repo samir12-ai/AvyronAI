@@ -21,6 +21,8 @@ export function translateJourneyType(rawType: string | undefined | null): string
     standard: "Strategic Conversion Flow",
     b2b_saas: "B2B SaaS Conversion",
     direct_response: "Direct Response Flow",
+    direct: "Direct Self-Serve Conversion",
+    tripwire: "Low-Friction Preview / Tripwire Flow",
   };
 
   return map[norm] || rawType.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -52,17 +54,30 @@ export function translateEntryTrigger(rawTrigger: string | undefined | null): st
     proof_led_entry: "Start With Proof",
     primary_problem_agitation: "Primary Problem Agitation",
     diagnostic_assessment: "Diagnostic Audit",
+    audit: "Diagnostic Audit",
+    discovery: "Self-Serve Preview & Discovery",
     interactive_demo: "Interactive Demonstration",
     case_study_benchmark: "Verified Case Benchmark",
     expert_narrative: "Expert Strategic Insight",
+    education: "Educational Insight",
+    comparison: "Competitive Contrast",
   };
 
   return map[norm] || rawTrigger.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function translateMessageStepLabel(rawLabel: string | undefined | null, idx: number): string {
-  if (!rawLabel) return `Step ${idx + 1}`;
-  const norm = rawLabel.toLowerCase().replace(/[-_\s]+/g, "_");
+export function translateMessageStepLabel(
+  rawLabel: string | undefined | null,
+  idx: number,
+  messageFocus?: string | undefined | null,
+): string {
+  const focus = typeof messageFocus === "string" ? messageFocus.trim() : "";
+  const label = typeof rawLabel === "string" ? rawLabel.trim() : "";
+  const isGenericPhase = /^phase\s+\d+$/i.test(label) || /^step[_\s]+\d+$/i.test(label);
+
+  const candidate = (!isGenericPhase && label) ? label : (focus || label);
+  if (!candidate) return `Step ${idx + 1}`;
+  const norm = candidate.toLowerCase().replace(/[-_\s]+/g, "_");
 
   const map: Record<string, string> = {
     disrupt_belief: "Challenge the Current Assumption",
@@ -76,5 +91,7 @@ export function translateMessageStepLabel(rawLabel: string | undefined | null, i
     show_speed: "Demonstrate Rapid Value",
   };
 
-  return map[norm] || rawLabel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  if (map[norm]) return map[norm];
+  if (candidate.includes(" ") && candidate.length > 18) return candidate;
+  return candidate.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }

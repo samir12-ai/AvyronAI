@@ -1,9 +1,10 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, Linking } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useWatchtowerEventDetail } from '@/hooks/useWatchtowerEventDetail';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
+import { getApiUrl } from '@/lib/query-client';
 
 interface Props {
   campaignId: string | null;
@@ -60,7 +61,7 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
     );
   }
 
-  const { event, presentation, observation, competitors, lineage, strategicBrief } = detailData;
+  const { event, presentation, observation, competitors, lineage, strategicBrief } = detailData as any;
 
   const getImpactColor = (impact: string) => {
     const i = (impact || '').toLowerCase();
@@ -80,9 +81,26 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
   
   const impactColor = getImpactColor(presentation.impactLabel);
   const statusBadgeColor = getStatusColor(presentation.statusLabel);
-  const evidenceNotes = observation.evidenceNotes || [];
+  const evidenceNotes: string[] = observation.evidenceNotes || [];
+  const evidenceUrls: string[] = observation.evidenceUrls || [];
   const isCandidate = event.status === 'candidate';
   const brief = strategicBrief?.brief;
+  const linkedScenarioId = presentation.linkedScenarioId || null;
+  const investigationStatus = presentation.investigationStatus || null;
+  const competitorName = competitors?.[0]?.competitorName || 'Market Competitor';
+
+  const openEvidenceUrl = (rawUrl: string) => {
+    try {
+      const fullUrl = rawUrl.startsWith('http')
+        ? rawUrl
+        : new URL(rawUrl, getApiUrl()).toString();
+      if (typeof window !== 'undefined' && window.open) {
+        window.open(fullUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        Linking.openURL(fullUrl);
+      }
+    } catch {}
+  };
 
   return (
     <View style={styles.container}>
@@ -111,8 +129,8 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
 
         <View style={styles.metaGrid}>
           <View style={styles.metaCol}>
-            <Text style={styles.metaLabel}>Detected</Text>
-            <Text style={styles.metaValue} numberOfLines={1}>{formatWatchtowerDate(event.detectedAt)}</Text>
+            <Text style={styles.metaLabel}>Competitor</Text>
+            <Text style={styles.metaValue} numberOfLines={1}>{competitorName}</Text>
           </View>
           <View style={styles.metaDivider} />
           <View style={styles.metaCol}>
@@ -128,8 +146,10 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
           </View>
           <View style={styles.metaDivider} />
           <View style={styles.metaCol}>
-            <Text style={styles.metaLabel}>Category</Text>
-            <Text style={styles.metaValue} numberOfLines={1}>{presentation.category}</Text>
+            <Text style={styles.metaLabel}>Confidence</Text>
+            <Text style={styles.metaValue} numberOfLines={1}>
+              {presentation.evidenceConfidence ? `${Math.round(presentation.evidenceConfidence * 100)}% Verified` : presentation.category}
+            </Text>
           </View>
         </View>
       </View>
@@ -137,14 +157,72 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
       {/* SCROLLABLE CONTENT */}
       <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={true}>
         
+        {/* ACTIONABLE DEEP REASONING CTA (FOR THE 3 STRATEGIC SCENARIOS) */}
+        {linkedScenarioId ? (
+          <Pressable
+            style={{
+              backgroundColor: investigationStatus === 'APPLIED' ? '#10B98118' : '#7C3AED25',
+              borderColor: investigationStatus === 'APPLIED' ? '#10B98170' : '#8B5CF6',
+              borderWidth: 1.5,
+              borderRadius: 12,
+              padding: 18,
+              marginBottom: 16,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              cursor: 'pointer' as any,
+            }}
+            onPress={() =>
+              router.push(
+                `/(tabs)/reasoning-evidence?tab=cases&investigateEventId=${eventId}&scenarioId=${linkedScenarioId}` as any,
+              )
+            }
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+              <View
+                style={{
+                  width: 38,
+                  height: 38,
+                  borderRadius: 10,
+                  backgroundColor: investigationStatus === 'APPLIED' ? '#10B98130' : '#8B5CF635',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Feather
+                  name={investigationStatus === 'APPLIED' ? 'check-circle' : 'zap'}
+                  size={20}
+                  color={investigationStatus === 'APPLIED' ? '#34D399' : '#C4B5FD'}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: '#FFFFFF', marginBottom: 4 }}>
+                  {investigationStatus === 'APPLIED'
+                    ? `Strategy Patch Applied (Strategy v${presentation.appliedStrategyVersion || 2})`
+                    : investigationStatus === 'PENDING_USER_APPROVAL' ||
+                      investigationStatus === 'INVESTIGATED_PENDING_APPROVAL'
+                    ? 'Deep Reasoning Complete · Review & Approve Strategy Patch'
+                    : 'Run Deep Reasoning Investigation'}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#DDD6FE' }}>
+                  {investigationStatus === 'APPLIED'
+                    ? 'Click to inspect the applied BEFORE / AFTER strategy patch and causal hypotheses in Deep Reasoning.'
+                    : 'Open event-specific causal investigation, inspect BEFORE / AFTER strategy patch, and approve or hold.'}
+                </Text>
+              </View>
+            </View>
+            <Feather name="arrow-right" size={20} color="#C4B5FD" />
+          </Pressable>
+        ) : null}
+
         {/* REASONING DETAIL LINK BANNER */}
         <Pressable
           style={{
-            backgroundColor: '#8B5CF618',
-            borderColor: '#8B5CF660',
-            borderWidth: 1.5,
+            backgroundColor: '#8B5CF612',
+            borderColor: '#8B5CF645',
+            borderWidth: 1,
             borderRadius: 12,
-            padding: 18,
+            padding: 16,
             marginBottom: 20,
             flexDirection: 'row',
             alignItems: 'center',
@@ -154,14 +232,128 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
           onPress={() => router.push(`/(tabs)/reasoning-evidence?tab=events&eventId=${eventId}` as any)}
         >
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-            <Feather name="cpu" size={20} color="#8B5CF6" />
+            <Feather name="cpu" size={18} color="#8B5CF6" />
             <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: '#E0E7FF', marginBottom: 4 }}>View Full Market Intelligence in Reasoning</Text>
-              <Text style={{ fontSize: 12, color: '#A5B4FC' }}>Complete analysis including what changed, strategic interpretation, impact assessment, and adaptive recommendations</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#E0E7FF', marginBottom: 2 }}>View Full Market Intelligence Brief in Reasoning</Text>
+              <Text style={{ fontSize: 12, color: '#A5B4FC' }}>Inspect complete strategic brief, assumptions, and market context</Text>
             </View>
           </View>
-          <Feather name="arrow-right" size={20} color="#8B5CF6" />
+          <Feather name="arrow-right" size={18} color="#8B5CF6" />
         </Pressable>
+
+        {/* RELEVANT PRODUCT, SEGMENT, LANE & NEXT ACTION */}
+        {(presentation.productReferenced || presentation.segmentName || presentation.laneTitle || presentation.nextActionLabel) && (
+          <View style={[styles.sectionBlock, { marginBottom: 18 }]}>
+            <View style={styles.sectionBlockHeader}>
+              <View style={[styles.iconCircle, { backgroundColor: '#8B5CF620' }]}>
+                <Feather name="target" size={16} color="#A78BFA" />
+              </View>
+              <Text style={styles.sectionBlockTitle}>Affected Scope & Intended Response</Text>
+            </View>
+            <View style={{ gap: 10, marginTop: 8 }}>
+              {presentation.productReferenced ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#9CA3AF', fontWeight: '600' }}>Product / Pack:</Text>
+                  <Text style={{ fontSize: 13, color: '#F3F4F6', fontWeight: '600', flex: 1, textAlign: 'right' }}>{presentation.productReferenced}</Text>
+                </View>
+              ) : null}
+              {presentation.segmentName ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#9CA3AF', fontWeight: '600' }}>Customer Segment:</Text>
+                  <Text style={{ fontSize: 13, color: '#F3F4F6', fontWeight: '600', flex: 1, textAlign: 'right' }}>{presentation.segmentName}</Text>
+                </View>
+              ) : null}
+              {presentation.laneTitle ? (
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
+                  <Text style={{ fontSize: 12, color: '#9CA3AF', fontWeight: '600' }}>Strategic Lane:</Text>
+                  <Text style={{ fontSize: 13, color: '#C4B5FD', fontWeight: '600', flex: 1, textAlign: 'right' }}>{presentation.laneTitle}</Text>
+                </View>
+              ) : null}
+              {presentation.nextActionLabel ? (
+                <View style={{ marginTop: 6, padding: 12, borderRadius: 8, backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155' }}>
+                  <Text style={{ fontSize: 11, color: '#94A3B8', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>
+                    Recommended Next Action ({presentation.actionabilityType || 'REVIEW'})
+                  </Text>
+                  <Text style={{ fontSize: 13, color: '#F8FAFC', fontWeight: '700' }}>{presentation.nextActionLabel}</Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        )}
+
+        {/* BEFORE / AFTER OBSERVATION & BUSINESS RELEVANCE */}
+        {(observation.diff || evidenceNotes.length > 0 || observation.businessRelevance) && (
+          <View style={[styles.sectionBlock, { marginBottom: 18 }]}>
+            <View style={styles.sectionBlockHeader}>
+              <View style={[styles.iconCircle, { backgroundColor: '#F59E0B20' }]}>
+                <Feather name="eye" size={16} color="#FBBF24" />
+              </View>
+              <Text style={styles.sectionBlockTitle}>Before / After Observation & Business Relevance</Text>
+            </View>
+
+            {observation.diff && (observation.diff.prev != null || observation.diff.curr != null) ? (
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 10, marginBottom: 12 }}>
+                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#1E1B2E', borderWidth: 1, borderColor: '#3B3355' }}>
+                  <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Before</Text>
+                  <Text style={{ fontSize: 13, color: '#E5E7EB', fontWeight: '600' }}>{String(observation.diff.prev ?? '—')}</Text>
+                </View>
+                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#132A26', borderWidth: 1, borderColor: '#10B98150' }}>
+                  <Text style={{ fontSize: 11, color: '#34D399', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Observed Now</Text>
+                  <Text style={{ fontSize: 13, color: '#ECFDF5', fontWeight: '700' }}>{String(observation.diff.curr ?? '—')}</Text>
+                </View>
+              </View>
+            ) : null}
+
+            {observation.businessRelevance ? (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Why This Matters to Zeytun Atelier</Text>
+                <Text style={{ fontSize: 13, color: '#E2E8F0', lineHeight: 20 }}>{observation.businessRelevance}</Text>
+              </View>
+            ) : null}
+
+            {evidenceNotes.length > 0 ? (
+              <View style={{ gap: 8 }}>
+                <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase' }}>Recorded Telemetry Notes</Text>
+                {evidenceNotes.map((note, idx) => (
+                  <View key={idx} style={{ padding: 10, borderRadius: 8, backgroundColor: '#0B0F19', borderWidth: 1, borderColor: '#1E293B' }}>
+                    <Text style={{ fontSize: 12, color: '#CBD5E1', lineHeight: 18 }}>{note}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            {evidenceUrls.length > 0 ? (
+              <View style={{ marginTop: 14, gap: 8 }}>
+                <Text style={{ fontSize: 11, color: '#A78BFA', fontWeight: '700', textTransform: 'uppercase' }}>Supporting Synthetic Evidence Records</Text>
+                {evidenceUrls.map((u, idx) => (
+                  <Pressable
+                    key={idx}
+                    onPress={() => openEvidenceUrl(u)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: 10,
+                      borderRadius: 8,
+                      backgroundColor: '#8B5CF615',
+                      borderWidth: 1,
+                      borderColor: '#8B5CF640',
+                      cursor: 'pointer' as any,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <Feather name="file-text" size={14} color="#C4B5FD" />
+                      <Text style={{ fontSize: 12, color: '#E0E7FF', fontWeight: '600' }} numberOfLines={1}>
+                        Open Synthetic Evidence Inspector ({u.split('/').pop()})
+                      </Text>
+                    </View>
+                    <Feather name="external-link" size={14} color="#C4B5FD" />
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        )}
 
         {/* UNDER REVIEW PROVISIONAL NOTICE */}
         {isCandidate && (

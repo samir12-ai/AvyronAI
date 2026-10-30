@@ -25,6 +25,10 @@ export interface MechanismEngineDifferentiationInput {
   proofArchitecture: any[];
   /** v2: confidence flows downstream */
   confidenceScore?: number | null;
+  /** Canonical Product Truth snapshot lineage */
+  campaignOfferingId?: string;
+  productTruthSnapshotId?: string;
+  productTruthFingerprint?: string;
 }
 
 /** v2: structural causality — cause→impact→behavior tied to upstream signal IDs */
@@ -47,9 +51,15 @@ export type MechanismCommercialFunction =
   | "perception_change"
   | "category_capture";
 
+export type MechanismAuthorityRole =
+  | "STRATEGIC_SYNTHESIS"
+  | "VERIFIED_EXISTING_PROCESS"
+  | "PROPOSED_EXECUTION";
+
 export interface MechanismOutput {
   mechanismName: string;
   mechanismType: string;
+  mechanismAuthorityRole?: MechanismAuthorityRole;
   mechanismDescription: string;
   mechanismSteps: string[];
   mechanismPromise: string;
@@ -79,6 +89,36 @@ export interface MechanismOutput {
     positioningHook: string;
     differentiationHook: string;
   };
+  /** Validated capability IDs (cap_<hash>) cited by this mechanism (CAPABILITY_NAMESPACE) */
+  capabilityRefs?: string[];
+  /** Canonical factual claims structurally bound to Capability Registry entries */
+  factualCapabilities?: Array<{
+    role: "EXISTING_FACTUAL_CLAIM";
+    capabilityRef: string;
+    canonicalStatement: string;
+    factType?: string;
+    sourceFactId?: string;
+    _debugClaimText?: string;
+  }>;
+  /** Proposed/future execution recommendations (distinct from existing capabilities) */
+  proposedExecutions?: string[];
+  /** Operational claims classified during semantic role judgment */
+  operationalClaims?: Array<{
+    claim: string;
+    role:
+      | "EXISTING_FACTUAL_CLAIM"
+      | "SUPPORTED_FACTUAL_STATEMENT"
+      | "REASONABLE_DESCRIPTIVE_SYNTHESIS"
+      | "BOUNDED_INTERPRETATION"
+      | "STRATEGIC_SYNTHESIS"
+      | "PROPOSED_EXECUTION"
+      | "UNSUPPORTED_MATERIAL_ASSERTION"
+      | string;
+    capabilityRef?: string | null;
+    supportedByCapability?: string | null;
+  }>;
+  productTruthSnapshotId?: string;
+  productTruthFingerprint?: string;
 }
 
 export interface MechanismEngineResult {
@@ -107,4 +147,7 @@ export interface MechanismEngineResult {
   confidencePenalty?: number;
   /** Alternatives the LLM considered but did not pick — surfaced for audit */
   alternativeMechanisms?: AlternativeMechanismRef[];
+  /** Canonical Product Truth snapshot lineage */
+  productTruthSnapshotId?: string;
+  productTruthFingerprint?: string;
 }

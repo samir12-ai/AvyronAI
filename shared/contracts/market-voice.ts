@@ -27,7 +27,12 @@ export type SearchIntentPlatform =
   | "YOUTUBE_SEARCH"
   | "WEB_FORUMS"
   | "INSTAGRAM"
-  | "TIKTOK";
+  | "TIKTOK"
+  | "GOOGLE_REVIEWS"
+  | "TRUSTPILOT"
+  | "TRENDYOL"
+  | "G2"
+  | "CAPTERRA";
 
 export type DiscoveryResultStatus =
   | "DISCOVERED"
@@ -351,6 +356,8 @@ export type ContentAuthorRole =
   | "CUSTOMER_COMMUNITY_USER"
   | "BRAND_REPRESENTATIVE"
   | "SEO_CONTENT_WRITER"
+  | "EDITORIAL_JOURNALIST"
+  | "MARKET_RESEARCH_COMMENTATOR"
   | "SPAM_OR_BOT"
   | "UNKNOWN";
 
@@ -400,6 +407,39 @@ export interface FetchedSourceResult {
   error?: string | null;
 }
 
+export type PrimaryMarketVoiceEligibilityVerdict =
+  | "PRIMARY_ELIGIBLE"
+  | "SUPPORTING_CONTEXT_ONLY"
+  | "IRRELEVANT"
+  | "AUTHORSHIP_UNRESOLVED"
+  | "MARKET_RELEVANCE_UNRESOLVED";
+
+export type SemanticEvidenceScope =
+  | "CATEGORY_RECURRING"
+  | "MARKET_TRANSFERABLE"
+  | "SINGLE_BRAND_SPECIFIC"
+  | "INCIDENT_SPECIFIC"
+  | "INSUFFICIENT_SCOPE";
+
+export type MarketTransferability =
+  | "SAME_MARKET"
+  | "ADJACENT_TRANSFERABLE_MARKET"
+  | "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH"
+  | "GEOGRAPHY_SPECIFIC_OPERATIONAL"
+  | "IRRELEVANT_GEOGRAPHY";
+
+export interface PrimaryEligibilityVerificationResult {
+  verdict: PrimaryMarketVoiceEligibilityVerdict;
+  isPrimaryEligible: boolean;
+  reasoning: string;
+  semanticScope: SemanticEvidenceScope;
+  transferability: MarketTransferability;
+  voiceType?: "EXPERIENCE" | "COMPLAINT" | "QUESTION" | "COMPARISON" | "HESITATION" | "RECOMMENDATION" | "OUTCOME" | "OTHER";
+  sentimentPolarity?: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED" | "UNCLASSIFIED" | null;
+  detectedGeography?: string | null;
+  detectedLanguage?: string | null;
+}
+
 export interface AuthorshipVerificationResult {
   authorRole: ContentAuthorRole;
   confidence: number;
@@ -411,9 +451,11 @@ export interface CustomerVoiceEligibilityResult {
   eligibility: CustomerVoiceEligibilityStatus;
   isEligible: boolean;
   voiceType?: "EXPERIENCE" | "COMPLAINT" | "QUESTION" | "COMPARISON" | "HESITATION" | "RECOMMENDATION" | "OUTCOME" | "OTHER";
+  sentimentPolarity?: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED" | "UNCLASSIFIED" | null;
   reasoning: string;
   detectedGeography?: string | null;
   detectedLanguage?: string | null;
+  primaryEligibility?: PrimaryEligibilityVerificationResult;
 }
 
 export interface EvidenceJudgeDecision {
@@ -425,6 +467,10 @@ export interface EvidenceJudgeDecision {
   language: string | null;
   finalReason: string;
   rejectionReason?: string | null;
+  primaryEligibilityVerdict?: PrimaryMarketVoiceEligibilityVerdict;
+  semanticScope?: SemanticEvidenceScope;
+  transferability?: MarketTransferability;
+  sentimentPolarity?: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED" | "UNCLASSIFIED" | null;
 }
 
 export interface VerifiedEvidenceItemResult {
@@ -448,6 +494,7 @@ export interface VerifiedEvidenceItemResult {
   language: string | null;
   judgeVerdict: EvidenceJudgeVerdict;
   judgeReason: string;
+  sentimentPolarity?: "POSITIVE" | "NEGATIVE" | "NEUTRAL" | "MIXED" | "UNCLASSIFIED" | null;
   persisted: boolean;
 }
 

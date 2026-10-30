@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useWhatToDoToday, ExecutionTaskItem, ChannelPlanItem } from '@/hooks/useWhatToDoToday';
+import { useCampaign } from '@/context/CampaignContext';
 import { useAppShellController } from '@/hooks/useAppShellController';
 import { GlobalHeader } from '@/components/GlobalHeader';
 import { TaskDetailModal } from '@/components/what-to-do-today/TaskDetailModal';
@@ -19,8 +20,9 @@ import { TaskExecutionWorkspace } from '@/components/what-to-do-today/TaskExecut
 
 export default function WhatToDoTodayScreen() {
   const router = useRouter();
+  const { selectedCampaign, selectedCampaignId } = useCampaign();
   const shellController = useAppShellController();
-  const campaignId = shellController.activeWorkspace?.id || 'campaign_1773576062201_6t0oxi';
+  const campaignId = selectedCampaign?.selectedCampaignId || selectedCampaignId || (selectedCampaign as any)?.id || shellController.activeWorkspace?.id || '';
   const { data, loading, refreshing, error, refetch, forceRegenerate, updateTaskStatus } = useWhatToDoToday(campaignId);
   const [selectedTask, setSelectedTask] = useState<ExecutionTaskItem | null>(null);
   const [activeExecutionTask, setActiveExecutionTask] = useState<ExecutionTaskItem | null>(null);
@@ -196,6 +198,23 @@ export default function WhatToDoTodayScreen() {
           }
         }}
       />
+    );
+  }
+
+  if (!campaignId) {
+    return (
+      <View style={styles.screen}>
+        <GlobalHeader
+          title="What To Do Today"
+          subtitle="Daily execution brain grounded in approved strategy"
+        />
+        <View style={styles.centerContainer}>
+          <Feather name="folder" size={36} color="#64748B" />
+          <Text style={[styles.loadingText, { marginTop: 12, textAlign: 'center' }]}>
+            No active campaign selected. Please select a campaign to view today's execution plan.
+          </Text>
+        </View>
+      </View>
     );
   }
 

@@ -91,35 +91,45 @@ export class WatchtowerController {
             baselineSnapshotId: s.baselineSnapshotId || 'none',
             currentSnapshotId: s.currentSnapshotId || 'none',
           },
-          title: s.label || 'Market Change Detected',
+          title: s.title || s.label || 'Market Change Detected',
           impact: this.mapSeverityToImpact(s.severity),
           status: s.status || 'candidate',
           competitors: [competitorName],
           timeDetected: s.detectedAt || s.createdAt || new Date().toISOString(),
-          category: s.label || 'Market Signal',
-          whatHappened: null,
-          whyItMatters: null,
-          recommendedResponse: null,
-          // BUG 1 FIX: use first evidence note as the display description — never null if notes exist
+          category: s.categoryLabel || s.label || 'Market Signal',
+          whatHappened: (s.evidence && s.evidence.length > 0) ? s.evidence[0] : null,
+          whyItMatters: s.businessRelevance || null,
+          recommendedResponse: s.nextActionLabel || null,
           evidenceText: (s.evidence && s.evidence.length > 0) ? s.evidence[0] : null,
           
-          displayTitle: s.label || 'Market Change',
-          displayCategory: s.label || 'Market Signal',
+          displayTitle: s.title || s.label || 'Market Change',
+          displayCategory: s.categoryLabel || s.label || 'Market Signal',
           displayImpact: this.mapSeverityToImpact(s.severity),
-          // BUG 3 FIX: clean status mapping — never expose internal flags like EVIDENCE_LINEAGE_INCOMPLETE
           displayStatus: (
             s.status === 'confirmed' ? 'Confirmed' :
             s.status === 'candidate' ? 'Under Review' :
             (s.status === 'archived' || s.status === 'dismissed' || s.status === 'closed' || s.status === 'superseded') ? 'Archived' :
             'Unknown'
           ),
-          // BUG 1 FIX: displayDescription must equal the same deterministic evidence the detail panel shows
           displayDescription: (s.evidence && s.evidence.length > 0) ? s.evidence[0] : null,
           displayCompetitorNames: competitorName,
           displayDate: s.createdAt || s.detectedAt,
           hasTrendData: false,
           trendValue: null,
-          trendLabel: null
+          trendLabel: null,
+          productReferenced: s.productReferenced || null,
+          segmentName: s.segmentName || null,
+          laneTitle: s.laneTitle || null,
+          businessRelevance: s.businessRelevance || null,
+          actionabilityType: s.actionabilityType || null,
+          nextActionLabel: s.nextActionLabel || null,
+          linkedScenarioId: s.linkedScenarioId || null,
+          investigationStatus: s.investigationStatus || null,
+          appliedStrategyVersion: s.appliedStrategyVersion || null,
+          evidenceUrls: s.evidenceUrls || [],
+          evidenceConfidence: s.evidenceConfidence || null,
+          prevValue: s.prevValue || null,
+          currValue: s.currValue || null,
         };
       });
       

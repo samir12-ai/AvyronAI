@@ -74,9 +74,10 @@ export async function revalidateCanonicalCompetitors(options: {
     .limit(1);
 
   const buPayload: any = buSnap?.businessUnderstanding || {};
-  const offeringName = buPayload.campaignOffering?.offeringName || "summer dresses";
-  const category = buPayload.campaignOffering?.category || "Modest Fashion / Dresses";
-  const targetMarket = buPayload.targetUnderstanding?.geography || "Lebanon / Middle East";
+  const businessName = buPayload.businessName || "Unknown Business";
+  const offeringName = buPayload.campaignOffering?.offeringName || buPayload.businessName || "Core Offering";
+  const category = buPayload.campaignOffering?.category || buPayload.generalIndustry || "General";
+  const targetMarket = buPayload.targetUnderstanding?.geography || "Unspecified";
   const productTruthFacts = (buPayload.campaignOffering?.productTruthFacts || []).map((f: any) => typeof f === "string" ? f : f.statement);
   const targetRoles = (buPayload.targetUnderstanding?.targetRoles || []).map((r: any) => typeof r === "string" ? r : r.roleTitle);
 
@@ -93,7 +94,7 @@ export async function revalidateCanonicalCompetitors(options: {
   const candidateResults: QualityRevalidationCandidateResult[] = [];
 
   for (const comp of activeComps) {
-    const rawUrl = comp.websiteUrl || comp.profileLink || "";
+    const rawUrl = comp.websiteUrl || "";
     const domain = getHostname(rawUrl);
 
     // Fetch existing stored web data or website snapshots
@@ -157,7 +158,7 @@ export async function revalidateCanonicalCompetitors(options: {
     }
 
     if (!evidenceSnippet) {
-      evidenceSnippet = `Competitor name: "${comp.name}", website: ${rawUrl}, tier: ${comp.tier}, platform: ${comp.platform}.`;
+      evidenceSnippet = `Competitor name: "${comp.name}", website: ${rawUrl}, tier: ${comp.tier}.`;
     }
 
     // Step A, B, C: Execute canonical shared quality pipeline (Identity -> Relevance -> Final Judge)
@@ -170,6 +171,7 @@ export async function revalidateCanonicalCompetitors(options: {
         evidenceText: evidenceSnippet,
       },
       {
+        businessName,
         offeringName,
         category,
         targetMarket,

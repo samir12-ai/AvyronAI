@@ -71,6 +71,7 @@ export async function loadCampaignProductAnchor(
  * failure here is a genuine environment failure, surfaced rather than swallowed.
  */
 import { resolveCurrentBusinessUnderstandingOrThrow } from "../business-understanding/resolver";
+import { loadProductDNA } from "../shared/product-dna";
 
 export async function seedDoctrine(
   ctx: DoctrineCtxLike,
@@ -93,6 +94,14 @@ export async function seedDoctrine(
 
   const productAnchor = await loadCampaignProductAnchor(campaignId, accountId);
 
+  // Resolve and freeze the canonical Product Truth snapshot once for the entire run
+  const canonicalDna = await loadProductDNA(campaignId, accountId, {
+    expectedOfferingId: payload.campaignOfferingId || undefined,
+    expectedSnapshotId: buResult.snapshot?.id || payload.businessUnderstandingAuthorityId || undefined,
+  });
+  (ctx as any).productDna = canonicalDna;
+  (ctx as any).productTruthSnapshot = canonicalDna?.canonicalProductTruthSnapshot || null;
+
   // We assign the new canonical doctrine with the authoritative productAnchor
   ctx.ssc.doctrine = {
     version: DOCTRINE_VERSION,
@@ -100,10 +109,13 @@ export async function seedDoctrine(
     businessUnderstanding: payload,
     productAnchor: productAnchor ?? null,
     anchorHash: payload.businessUnderstandingAuthorityId || (productAnchor ? computeAnchorHash(productAnchor) : ""),
+    campaignOfferingId: canonicalDna?.campaignOfferingId || payload.campaignOfferingId,
+    productTruthSnapshotId: canonicalDna?.snapshotId,
+    productTruthFingerprint: canonicalDna?.snapshotFingerprint,
   } as any;
 
   console.log(
-    `[Doctrine] SEEDED | campaign=${campaignId} | businessUnderstandingAuthorityId=${payload.businessUnderstandingAuthorityId} | productAnchor=${productAnchor ? productAnchor.name : "none"}`
+    `[Doctrine] SEEDED | campaign=${campaignId} | businessUnderstandingAuthorityId=${payload.businessUnderstandingAuthorityId} | productAnchor=${productAnchor ? productAnchor.name : "none"} | ptSnapshot=${canonicalDna?.snapshotId || "none"} | ptFingerprint=${canonicalDna?.snapshotFingerprint || "none"} | ptFacts=${canonicalDna?.productTruthFacts?.length ?? 0}`
   );
 }
 

@@ -15,6 +15,7 @@ import WatchtowerEventListItem from '@/components/watchtower/WatchtowerEventList
 import WatchtowerEventDetail from '@/components/watchtower/WatchtowerEventDetail';
 import FilterDropdown from '@/components/watchtower/FilterDropdown';
 import { Feather } from '@expo/vector-icons';
+import { useCampaign } from '@/context/CampaignContext';
 import { useAppShellController } from '@/hooks/useAppShellController';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
 import { GlobalHeader } from '@/components/GlobalHeader';
@@ -23,6 +24,7 @@ const TABS = ['All Changes', 'High Impact', 'Confirmed', 'Under Review', 'Archiv
 
 export default function WatchtowerPage() {
   const { user } = useAuth();
+  const { selectedCampaign, selectedCampaignId } = useCampaign();
   const shellController = useAppShellController();
   const [state, setState] = useState<WatchtowerSectionState | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -32,7 +34,7 @@ export default function WatchtowerPage() {
   const [selectedType, setSelectedType] = useState<string>('All Types');
   const [selectedImpact, setSelectedImpact] = useState<string>('All Impact');
 
-  const campaignId = shellController.activeWorkspace?.id || 'campaign_1773576062201_6t0oxi';
+  const campaignId = selectedCampaign?.selectedCampaignId || selectedCampaignId || shellController.activeWorkspace?.id || '';
   const controller = useMemo(() => new WatchtowerController(campaignId), [campaignId]);
 
   useEffect(() => {
@@ -55,7 +57,18 @@ export default function WatchtowerPage() {
       }
     }
     load();
-    return () => { isMounted = false; };
+    const handleDemoChange = () => {
+      load();
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('avyron-demo-state-changed', handleDemoChange);
+    }
+    return () => {
+      isMounted = false;
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('avyron-demo-state-changed', handleDemoChange);
+      }
+    };
   }, [controller, activeTab, selectedCompetitor, selectedType, selectedImpact]);
 
   if (!state) {
@@ -96,17 +109,17 @@ export default function WatchtowerPage() {
         <View style={styles.headerRight}>
           {/* Confirmed pill */}
           {confirmedCount > 0 && (
-            <View style={styles.pillConfirmed}>
+            <Pressable style={styles.pillConfirmed} onPress={() => setActiveTab('Confirmed')}>
               <View style={styles.pillDot} />
               <Text style={styles.pillText}>{confirmedCount} confirmed</Text>
-            </View>
+            </Pressable>
           )}
           {/* High impact pill */}
           {highImpactCount > 0 && (
-            <View style={styles.pillHighImpact}>
+            <Pressable style={styles.pillHighImpact} onPress={() => setActiveTab('High Impact')}>
               <Feather name="zap" size={11} color="#EF4444" />
               <Text style={styles.pillHighText}>{highImpactCount} high impact</Text>
-            </View>
+            </Pressable>
           )}
 
           {/* Last scan */}
@@ -116,7 +129,10 @@ export default function WatchtowerPage() {
           </View>
 
           {/* Bell */}
-          <Pressable style={styles.iconBtn}>
+          <Pressable
+            style={styles.iconBtn}
+            onPress={() => setActiveTab(highImpactCount > 0 ? 'High Impact' : 'Confirmed')}
+          >
             <Feather name="bell" size={16} color="#9CA3AF" />
             {(shellController.badges.watchtower ?? 0) > 0 && (
               <View style={styles.bellBadge}>
@@ -134,15 +150,15 @@ export default function WatchtowerPage() {
 
       {/* ── STAT STRIP ── */}
       <View style={styles.statStrip}>
-        <StatChip icon="activity" label="All Changes" value={state.tabCounts?.['All Changes'] ?? 0} color="#8B5CF6" />
+        <StatChip icon="activity" label="All Changes" value={state.tabCounts?.['All Changes'] ?? 0} color="#8B5CF6" onPress={() => setActiveTab('All Changes')} />
         <View style={styles.statDivider} />
-        <StatChip icon="zap" label="High Impact" value={highImpactCount} color="#EF4444" />
+        <StatChip icon="zap" label="High Impact" value={highImpactCount} color="#EF4444" onPress={() => setActiveTab('High Impact')} />
         <View style={styles.statDivider} />
-        <StatChip icon="check-circle" label="Confirmed" value={confirmedCount} color="#10B981" />
+        <StatChip icon="check-circle" label="Confirmed" value={confirmedCount} color="#10B981" onPress={() => setActiveTab('Confirmed')} />
         <View style={styles.statDivider} />
-        <StatChip icon="eye" label="First Obs." value={state.tabCounts?.['First Observation'] ?? 0} color="#3B82F6" />
+        <StatChip icon="eye" label="First Obs." value={state.tabCounts?.['First Observation'] ?? 0} color="#3B82F6" onPress={() => setActiveTab('Under Review')} />
         <View style={styles.statDivider} />
-        <StatChip icon="archive" label="Archived" value={state.tabCounts?.['Archived'] ?? 0} color="#6B7280" />
+        <StatChip icon="archive" label="Archived" value={state.tabCounts?.['Archived'] ?? 0} color="#6B7280" onPress={() => setActiveTab('Archived')} />
       </View>
 
       {/* ── TOOLBAR (tabs + filters) ── */}
@@ -281,16 +297,16 @@ export default function WatchtowerPage() {
 // ── Sub-components ──────────────────────────────────────────────────────────
 
 function StatChip({
-  icon, label, value, color,
+  icon, label, value, color, onPress,
 }: {
-  icon: string; label: string; value: number; color: string;
+  icon: string; label: string; value: number; color: string; onPress?: () => void;
 }) {
   return (
-    <View style={statStyles.chip}>
+    <Pressable style={statStyles.chip} onPress={onPress}>
       <Feather name={icon as any} size={13} color={color} style={{ marginRight: 6 }} />
       <Text style={[statStyles.value, { color }]}>{value}</Text>
       <Text style={statStyles.label}>{label}</Text>
-    </View>
+    </Pressable>
   );
 }
 

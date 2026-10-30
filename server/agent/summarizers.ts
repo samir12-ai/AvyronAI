@@ -9,10 +9,15 @@ function safeParseObj(v: any): any {
 }
 
 export function summarizeEngine(engineId: EngineId, output: any, status: string, blockReason?: string): string {
-  if (status === "SKIPPED" || status === "BLOCKED") {
+  if (status === "SKIPPED") {
     return blockReason ? `Skipped — ${blockReason.split("|")[0].trim()}` : "Skipped";
   }
-  if (status === "ERROR") return "Engine encountered an error";
+  if (status === "BLOCKED" || status === "INCOMPLETE") {
+    return blockReason ? `Blocked — ${blockReason.trim()}` : "Blocked";
+  }
+  if (status === "ERROR") {
+    return blockReason ? `Error — ${blockReason.split("|")[0].trim()}` : "Engine encountered an error";
+  }
   if (!output) return "No output produced";
 
   try {
@@ -28,7 +33,15 @@ export function summarizeEngine(engineId: EngineId, output: any, status: string,
       }
       case "audience": {
         const out = output.output || output;
-        const rawPains = out.audiencePains || out.painMap || out.painProfiles;
+        const registryArr = safeParseArr(out.painRegistry);
+        const qualifiedRegistry = registryArr
+          .filter((p: any) => p && (p.classification === "CORE_PURCHASE" || p.classification === "CORE" || p.classification === "SUPPORTING"))
+          .sort((a: any, b: any) => {
+            const aCore = a.classification === "CORE_PURCHASE" || a.classification === "CORE" ? 0 : 1;
+            const bCore = b.classification === "CORE_PURCHASE" || b.classification === "CORE" ? 0 : 1;
+            return aCore - bCore;
+          });
+        const rawPains = qualifiedRegistry.length > 0 ? qualifiedRegistry : (out.audiencePains || out.painMap || out.painProfiles);
         const painsArr = typeof rawPains === "string" ? safeParseArr(rawPains) : (Array.isArray(rawPains) ? rawPains : []);
         const pains = painsArr.length;
         const rawSegments = out.audienceSegments;

@@ -102,25 +102,64 @@ export function translatePerformanceToBll(
       sourceName: "Instagram",
       status: channelState.instagramConnected ? "CONNECTED" as const : "NOT_CONNECTED" as const,
       statusLabel: channelState.instagramConnected ? "Connected" : "Not Connected",
-      detail: channelState.instagramConnected ? `${(executionState.observedBusinessHistory as any)?.totalHistoricalPosts ?? 0} historical posts observed` : "No active Instagram profile linked",
+      detail: channelState.instagramConnected
+        ? `${(executionState.observedBusinessHistory as any)?.instagramPostsObserved ?? (executionState.observedBusinessHistory as any)?.totalHistoricalPosts ?? 0} historical posts observed`
+        : "No active Instagram profile linked",
     },
     {
       sourceName: "TikTok",
-      status: (channelState.tikTokStatus as any) || "COMING_SOON",
-      statusLabel: channelState.tikTokStatus === "CONNECTED" ? "Connected" : "Coming Soon",
-      detail: "Source contract ready for future scraper integration",
+      status: (channelState.tikTokStatus === "CONNECTED" || channelState.tikTokStatus === "COMPLETE")
+        ? ("CONNECTED" as const)
+        : ((channelState.tikTokStatus as any) || "COMING_SOON"),
+      statusLabel: (channelState.tikTokStatus === "CONNECTED" || channelState.tikTokStatus === "COMPLETE")
+        ? "Connected"
+        : "Coming Soon",
+      detail: (channelState.tikTokStatus === "CONNECTED" || channelState.tikTokStatus === "COMPLETE")
+        ? `${(executionState.observedBusinessHistory as any)?.tikTokPostsObserved ?? 0} historical videos observed`
+        : "Source contract ready for future scraper integration",
     },
     {
       sourceName: "YouTube",
-      status: (channelState.youTubeStatus as any) || "COMING_SOON",
-      statusLabel: channelState.youTubeStatus === "CONNECTED" ? "Connected" : "Coming Soon",
-      detail: "Source contract ready for future scraper integration",
+      status: (channelState.youTubeStatus === "CONNECTED" || channelState.youTubeStatus === "COMPLETE")
+        ? ("CONNECTED" as const)
+        : ((channelState.youTubeStatus as any) || "COMING_SOON"),
+      statusLabel: (channelState.youTubeStatus === "CONNECTED" || channelState.youTubeStatus === "COMPLETE")
+        ? "Connected"
+        : "Coming Soon",
+      detail: (channelState.youTubeStatus === "CONNECTED" || channelState.youTubeStatus === "COMPLETE")
+        ? `${(executionState.observedBusinessHistory as any)?.youTubePostsObserved ?? 0} historical videos observed`
+        : "Source contract ready for future scraper integration",
     },
     {
       sourceName: "LinkedIn",
-      status: "COMING_SOON" as const,
-      statusLabel: "Coming Soon",
-      detail: "Source contract ready for future scraper integration",
+      status:
+        channelState.linkedInStatus === "CONNECTED" || channelState.linkedInStatus === "COMPLETE"
+          ? ("CONNECTED" as const)
+          : channelState.linkedInStatus === "IDENTITY_UNRESOLVED" || channelState.linkedInStatus === "PARTIAL"
+            ? ("PARTIAL" as const)
+            : channelState.linkedInStatus === "FAILED"
+              ? ("FAILED" as const)
+              : channelState.linkedInStatus === "STALE"
+                ? ("STALE" as const)
+                : ("NOT_CONNECTED" as const),
+      statusLabel:
+        channelState.linkedInStatus === "CONNECTED" || channelState.linkedInStatus === "COMPLETE"
+          ? "Connected"
+          : channelState.linkedInStatus === "IDENTITY_UNRESOLVED"
+            ? "Identity Unresolved"
+            : channelState.linkedInStatus === "FAILED"
+              ? "Fetch Failed"
+              : channelState.linkedInStatus === "STALE"
+                ? "Stale"
+                : "Not Connected",
+      detail:
+        channelState.linkedInStatus === "CONNECTED" || channelState.linkedInStatus === "COMPLETE"
+          ? `${(executionState.observedBusinessHistory as any)?.linkedInPostsObserved ?? 0} historical posts observed`
+          : channelState.linkedInStatus === "IDENTITY_UNRESOLVED"
+            ? channelState.linkedInError || "Saved LinkedIn URL is missing its /company/<slug> or /in/<slug> identifier — update in Settings"
+            : channelState.linkedInStatus === "FAILED"
+              ? channelState.linkedInError || "LinkedIn scrape failed"
+              : "No active LinkedIn account linked",
     },
     {
       sourceName: "Facebook",

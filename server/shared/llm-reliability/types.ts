@@ -4,11 +4,17 @@ export interface JudgeRejection {
   rule: string;
   reason: string;
   claimId?: string;
+  canonicalClaimId?: string;
   claimType?: string;
   segmentId?: string;
   rejectionCode?: string;
   critique?: string;
   repairDirective?: string;
+  offendingClaimIds?: string[];
+  allowedClaimIds?: string[];
+  batchIndex?: number;
+  missingPainIds?: string[];
+  missingPains?: any[];
 }
 
 export interface JudgeResult<T> {
@@ -22,6 +28,7 @@ export interface ReliabilityTelemetry {
   engine: string;
   touchpoint: string;
   attempts: number;
+  maxAttempts?: number;
   technicalRetries: number;
   finalVerdict: "PASS" | "HONEST_FAIL" | "TECHNICAL_FAIL";
   repairLog: {

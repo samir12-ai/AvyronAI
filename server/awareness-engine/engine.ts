@@ -14,7 +14,6 @@ import { enforceBoundaryWithSanitization, applySoftSanitization } from "../engin
 import {
   type SignalLineageEntry,
   extractQualifyingSignals,
-  validateClaimGrounding,
   MIN_QUALIFYING_SIGNALS,
 } from "../shared/signal-lineage";
 import { formatAELForPrompt, filterAELForStrategicUse } from "../analytical-enrichment-layer/engine";
@@ -964,6 +963,95 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
   const awAnchorBlockText = `${awDoctrineBlock}${awDnaAnchorBlock}${awAnchorGroundingRule}`;
   const awGroundingContract = buildGroundingContract(awAnchor, (analyticalEnrichment ?? null) as any, { capabilities: deriveValidatedCapabilities(awAnchor, productDna) });
 
+  const rawObjections = Array.isArray(audience.objectionMap)
+    ? audience.objectionMap
+    : (audience.objectionMap && typeof audience.objectionMap === "object")
+      ? Object.values(audience.objectionMap)
+      : [];
+  const objectionStatements = (rawObjections.length > 0 ? rawObjections : (audience.objections || []))
+    .map((item: any) => {
+      if (!item) return "";
+      if (typeof item === "string") return item;
+      return item.statement || item.canonical || item.objection || item.text || (Array.isArray(item.evidence) ? item.evidence[0] : "") || "";
+    })
+    .filter((s: string) => s.trim().length > 0)
+    .slice(0, 8);
+
+  const rawPains = Array.isArray(audience.audiencePains) && audience.audiencePains.length > 0
+    ? audience.audiencePains
+    : Array.isArray(audience.painMap)
+      ? audience.painMap
+      : [];
+  const audiencePains = rawPains
+    .map((item: any) => {
+      if (!item) return "";
+      if (typeof item === "string") return item;
+      return item.pain || item.canonical || item.statement || item.text || (Array.isArray(item.evidence) ? item.evidence[0] : "") || "";
+    })
+    .filter((s: string) => s.trim().length > 0)
+    .slice(0, 8);
+
+  const awProductTruthFacts = (() => {
+    const sources = [
+      (strategic?.doctrine?.businessUnderstanding as any)?.campaignOffering?.productTruthFacts,
+      (strategic?.businessUnderstanding as any)?.campaignOffering?.productTruthFacts,
+      (strategic?.doctrine as any)?.productTruthFacts,
+      (audience as any)?.productTruthFacts,
+      (productDna as any)?.productTruthFacts,
+    ];
+    for (const src of sources) {
+      if (Array.isArray(src) && src.length > 0) {
+        return src.map((f: any) => typeof f === "string" ? f : f?.fact || f?.text || JSON.stringify(f));
+      }
+    }
+    return [];
+  })();
+
+  let competitorEvidenceContext: import("./competitor-evidence-guard").AuthoritativeCompetitorEvidenceContext | null = null;
+  try {
+    const { buildAuthoritativeCompetitorEvidenceContext } = await import("./competitor-evidence-guard");
+    const resolvedCampaignId =
+      commercialReasoningCtx?.campaignId ||
+      (mi as any)?.campaignId ||
+      (audience as any)?.campaignId ||
+      (positioning as any)?.campaignId ||
+      (differentiation as any)?.campaignId ||
+      null;
+    competitorEvidenceContext = await buildAuthoritativeCompetitorEvidenceContext({
+      campaignId: resolvedCampaignId,
+      accountId,
+      mi,
+      audience,
+      positioning,
+      differentiation,
+      offer,
+      productTruthFacts: awProductTruthFacts,
+      doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
+    });
+    (primaryRoute as any).competitorEvidenceSummary = {
+      evidenceVersionHash: competitorEvidenceContext.evidenceVersionHash,
+      comparisonStatus: competitorEvidenceContext.comparisonStatus,
+      monitoredCompetitorCount: competitorEvidenceContext.monitoredCompetitorCount,
+      comparedCompetitorCount: competitorEvidenceContext.comparedCompetitorCount,
+      previewOrTrialCounterexamples: competitorEvidenceContext.previewOrTrialCounterexamples.map(c => ({
+        competitorId: c.competitorId,
+        competitorName: c.competitorName,
+        sourceId: c.sourceId,
+        capabilityTypes: c.capabilityTypes,
+      })),
+      multiAssetCounterexamples: competitorEvidenceContext.multiAssetCounterexamples.map(c => ({
+        competitorId: c.competitorId,
+        competitorName: c.competitorName,
+        sourceId: c.sourceId,
+      })),
+    };
+    console.log(
+      `[AwarenessEngine-V3] COMPETITOR_EVIDENCE_CONTEXT_READY | version=${competitorEvidenceContext.evidenceVersionHash} | status=${competitorEvidenceContext.comparisonStatus} | previewCounterexamples=${competitorEvidenceContext.previewOrTrialCounterexamples.length} | multiAssetCounterexamples=${competitorEvidenceContext.multiAssetCounterexamples.length}`,
+    );
+  } catch (ceErr: any) {
+    console.warn(`[AwarenessEngine-V3] COMPETITOR_EVIDENCE_CONTEXT_WARN | ${ceErr?.message}`);
+  }
+
   // ── INTELLIGENCE UPGRADE: Myth-breaker reasoning ──
   try {
     const { generateMythBreaker } = await import("./myth-breaker-llm");
@@ -983,16 +1071,19 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
         for (const p of profile.rejectedClaimPatterns) rejectedClaimPatterns.push(p.pattern);
       }
     }
-    const audienceBeliefs = (targetSegment ? [targetSegment] : allSegments).flatMap((s: any) => s.beliefProfile || []);
-    const objectionStatements = Object.keys(audience.objectionMap || {}).slice(0, 8);
+    const audienceBeliefs = (targetSegment ? [targetSegment] : allSegments)
+      .flatMap((s: any) => s.beliefProfile || [])
+      .map((b: any) => (typeof b === "string" ? b : b?.belief || b?.statement || b?.canonical || b?.text || JSON.stringify(b)))
+      .filter((s: string) => typeof s === "string" && s.trim().length > 0);
+
     const mythBreaker = await generateMythBreaker({
       analyticalEnrichment: activeAel,
       audienceObjections: objectionStatements,
       audienceBeliefs,
-      audiencePains: (audience.audiencePains || []).slice(0, 8),
+      audiencePains,
       marketDiagnosis: (mi as any).marketDiagnosis || null,
-      enemyDefinition: null,
-      contrastAxis: null,
+      enemyDefinition: (positioning as any)?.enemyDefinition || null,
+      contrastAxis: (positioning as any)?.contrastAxis || null,
       awarenessStage: readinessStage,
       sophisticationTier,
       rejectedClaimPatterns,
@@ -1000,6 +1091,8 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
       doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
       anchorSource: awAnchorSource,
       groundingContractBlock: awGroundingContract,
+      productTruthFacts: awProductTruthFacts,
+      competitorEvidenceContext,
     });
     if (mythBreaker) {
       primaryRoute.mythBreaker = mythBreaker;
@@ -1033,8 +1126,8 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
       triggerClass,
       positioningStatement: (positioning as any)?.positioningStatement || (positioning as any)?.statement || null,
       coreOffer: (offer as any)?.coreOffer || (offer as any)?.offerName || null,
-      audiencePains: (audience.audiencePains || []).slice(0, 8),
-      audienceObjections: Object.keys(audience.objectionMap || {}).slice(0, 6),
+      audiencePains: audiencePains.slice(0, 8),
+      audienceObjections: objectionStatements.slice(0, 6),
       buyerBeliefModel: bp?.beliefModel || null,
       buyerRejectionHistory: bp?.topRejectionPatterns || [],
       buyerDecisionTrigger: bp?.decisionTrigger?.triggeringEvent || null,
@@ -1045,6 +1138,7 @@ Differentiating feature: ${awAnchor.differentiatingFeature}
       accountId,
       doctrineBlock: awAnchorBlockText.length > 0 ? awAnchorBlockText : null,
       anchorSource: awAnchorSource,
+      competitorEvidenceContext,
     });
     if (reframe) {
       (primaryRoute as any).narrativeReframe = reframe;

@@ -80,6 +80,7 @@ interface DesignerInput {
   /** T003: where the anchor came from — logged in ANCHOR_EVIDENCE lines only. */
   anchorSource?: "doctrine" | "dna" | "none";
   accountId: string;
+  productTruthFacts?: any[];
 }
 
 const FEW_SHOT = `
@@ -121,9 +122,9 @@ EXAMPLE 2 — STRONG (accepted):
       "costOfNeutralizing": "We sacrifice ~15% of locked-in revenue from low-fit accounts but win 3x on conversion of high-fit ones"
     }
   ],
-  "primaryValueWedge": "The only B2B martech vendor that loses money if your quarter fails — buy us not because we're better, but because our incentives are structurally aligned with your career survival"
+  "primaryValueWedge": "A B2B martech vendor that shares downside risk when your quarter misses — buy us not because of a feature checklist, but because our contract structure aligns our commercial outcome with your career survival"
 }
-WHY IT WORKS: Identity is named with specificity (career-risk-CMO, not "modern marketer"). Identity-cost is real (public admission of past wrong picks). Commercial leverage names WHERE the multiplier sits (identity tier) and WHY. Objection economics quantify the impact + the trade. Primary wedge is defensible and unique.
+WHY IT WORKS: Identity is named with specificity (career-risk-CMO, not "modern marketer"). Identity-cost is real (public admission of past wrong picks). Commercial leverage names WHERE the multiplier sits (identity tier) and WHY. Objection economics quantify the impact + the trade. Primary wedge is defensible and grounded in actual contract terms without claiming unverified category monopoly.
 `;
 
 function buildDesignerPrompt(args: DesignerInput): string {
@@ -175,8 +176,26 @@ GROUNDING RULE: Every value-chain node and the primary value wedge MUST sit on o
 ═══`
     : "\n(no upstream game dimension signal — design from scratch)";
 
+  const factsBlock = args.productTruthFacts?.length
+    ? `\n═══ CANONICAL PRODUCT TRUTH & CAPABILITIES (Product Truth is FACTUAL AUTHORITY) ═══
+The following facts are verified boundaries of the company's capabilities and product attributes.
+You MUST adhere strictly to these boundaries:
+${args.productTruthFacts.map((f, i) => {
+  const text = typeof f === "string" ? f : f.fact || f.text || f.name || JSON.stringify(f);
+  return `[FACT${i + 1}] ${text}`;
+}).join("\n")}
+
+FACTUAL CAPABILITY BOUNDARIES:
+- Adhere strictly to verified capabilities, pricing, delivery terms, and operational policies established in Product Truth facts.
+- Do NOT invent unverified policies (e.g. unconditional refund guarantees, trial periods, or replacement commitments) unless explicitly stated in facts.
+- Do NOT invent unverified product specifications, custom manufacturing capabilities, bespoke services, or physical performance properties not verified in facts.
+- Do NOT invent empirical return-rate statistics, quantitative operational claims, or ungrounded service level guarantees.
+- Adhere strictly to verified product catalog items, tiers, and pricing.
+═══`
+    : "";
+
   return `You are a Value Architect (Alex Hormozi / 100M Offers / Eugene Schwartz / Russell Brunson lineage).
-Your job is NOT to make the offer "better-stacked" — that produces feature-list offers. Your job is to architect the COMMERCIAL VALUE CHAIN: feature → functional → emotional → identity, name where the largest commercial multiplier sits, and prove it with reasoning the buyer would recognize.${anchorBlock}${trustBlock}${gameBlock}
+Your job is NOT to make the offer "better-stacked" — that produces feature-list offers. Your job is to architect the COMMERCIAL VALUE CHAIN: feature → functional → emotional → identity, name where the largest commercial multiplier sits, and prove it with reasoning the buyer would recognize.${anchorBlock}${trustBlock}${gameBlock}${factsBlock}
 
 ═══ THE OFFER (already drafted — you are reasoning ABOUT it, not redesigning it) ═══
 Offer name: ${args.offerName}
@@ -219,6 +238,12 @@ HARD RULES:
 - Commercial leverage MUST name a specific commercial mechanism (premium tier pricing, lower-CAC channel, faster sales cycle, etc.) and the multiplier estimate doesn't need a number but must be defensible reasoning.
 - Objection economics: each objection needs all 3 fields (stake, mechanism, cost) — partial answers = rejected.
 - Primary wedge cannot be a generic claim ("better X", "faster Y") — it must reference the specific mechanism + the identity it protects.
+- FACTUAL CAPABILITY INTEGRITY: You MUST NOT invent unverified company capabilities, material attributes, operational guarantees, or empirical statistics.
+  • Do NOT make unverified category-exclusivity or market-monopoly claims (e.g. "The only service that...", "The only platform...", "unique in the market", "no other provider offers..."). Frame the wedge around how the workflow and mechanism work for the buyer, NEVER as an unverified category monopoly.
+  • Do NOT invent quantitative percentage improvements, ROI metrics, or empirical stats (e.g. 'reduces returns by 40%', 'increases repeat purchases by 25%') unless specifically stated in Product Truth facts.
+  • Do NOT invent unverified physical, technical, or operational properties (e.g. 'phonetic pronunciation control', 'specify name pronunciation', 'human studio vocalists', 'lifetime cloud hosting', 'breathable', 'natural fibers', 'non-see-through', 'no layering required') not present in Product Truth facts.
+  • Do NOT invent operational guarantees (e.g. 'fast shipping guaranteed', 'money-back guarantee', 'guaranteed permanent link'); adhere strictly to stated policies (e.g. 24-hour exchange).
+  Any architecture violating these factual boundaries will be REJECTED.
 ${args.productAnchor ? `- The value chain and primary wedge MUST cite the anchor's differentiating feature ("${args.productAnchor.differentiatingFeature.slice(0, 120)}") or core problem — architectures that fit any generic competitor are rejected.` : ""}
 ${args.trustMechanism ? "- Set groundedInTrustMechanism to a 1-line description of how this offer extends the upstream trust mechanism." : ""}
 ${args.gameDimension ? "- Set groundedInGameDimension to a 1-line description of how this offer defends our category-game dimension." : ""}
@@ -236,7 +261,13 @@ Return ONLY valid JSON, no commentary:
 }`;
 }
 
-function buildJudgePrompt(designJson: string, hadTrustMechanism: boolean, hadGameDimension: boolean, productAnchor?: ProductAnchor | null): string {
+function buildJudgePrompt(
+  designJson: string,
+  hadTrustMechanism: boolean,
+  hadGameDimension: boolean,
+  productAnchor?: ProductAnchor | null,
+  productTruthFacts?: any[],
+): string {
   const groundingRules: string[] = [];
   if (hadTrustMechanism) groundingRules.push("- groundedInTrustMechanism is null or doesn't reference how the offer extends the trust mechanism");
   if (hadGameDimension) groundingRules.push("- groundedInGameDimension is null or doesn't reference how the offer defends the category-game dimension");
@@ -246,12 +277,20 @@ function buildJudgePrompt(designJson: string, hadTrustMechanism: boolean, hadGam
       `- Is INTERCHANGEABLE with a generic competitor: the outcome chain / commercial leverage / primary wedge never resolves to this product's differentiating feature ("${productAnchor.differentiatingFeature.slice(0, 120)}") or its core problem ("${productAnchor.coreProblemSolved.slice(0, 120)}") — if the document could be pasted onto any competitor in the category without edits, REJECT it`,
     );
   }
+  if (productTruthFacts && productTruthFacts.length > 0) {
+    groundingRules.push(
+      `- Contradicts or invents unverified company capabilities, operational policies, or fabric/material properties (e.g. asserting unverified refund policies, money-back guarantees, fast shipping guarantees, phonetic pronunciation guarantees, permanent cloud hosting, 'breathable'/'natural fibers'/'non-see-through' fabric claims, or ungrounded empirical ROI percentages like 'reduces returns by X%'). If the design asserts capabilities or metrics not supported by Product Truth, REJECT it with reason starting with FACTUAL_CAPABILITY_UNSUPPORTED.`,
+    );
+  }
 
   return `You are a hostile reviewer of a value architecture document. Reject anything that:
+- Claims unverified category exclusivity or monopoly ("The only service...", "The only platform...", "no other provider...") without explicit competitive proof
 - Has identity outcomes that are vibes ("data-driven leader", "modern marketer", "successful X") instead of named roles tied to evidence
 - Sets identityCost to "none" or "minimal" (every real purchase has identity cost)
 - Has commercialLeverage proof that is "X is hot" or "buyers want X" — proof must be a defensible commercial mechanism
 - Has any objectionEconomics entry missing one of: revenueAtStakeIfUnresolved, neutralizingMechanism, costOfNeutralizing
+- Invents unsourced quantitative metrics or percentage stats (e.g. "reduces returns by 40%", "increases conversion by 25%") not verified in Product Truth
+- Invents ungrounded physical/technical properties ("phonetic pronunciation input", "lifetime link guarantee", "breathable", "natural fibers", "non-see-through") or unverified guarantees ("fast shipping guaranteed", "money-back guarantee")
 - Has primaryValueWedge that is a generic slogan ("better X", "smarter Y") instead of a CFO-justifiable claim
 ${groundingRules.join("\n")}
 
@@ -318,7 +357,7 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
   try {
     console.log(`[ValueArchitect] ANCHOR_EVIDENCE | engine=value_architect | site=judge | attempt=1 | present=${args.productAnchor ? "yes" : "no"} | source=${vaAnchorSource}`);
     const judgeResp = await aiChat({
-      messages: [{ role: "user", content: buildJudgePrompt(designRaw, !!args.trustMechanism, !!args.gameDimension, args.productAnchor) }],
+      messages: [{ role: "user", content: buildJudgePrompt(designRaw, !!args.trustMechanism, !!args.gameDimension, args.productAnchor, args.productTruthFacts) }],
       model: "gpt-4.1-mini",
       temperature: 0.1,
       max_tokens: 400,
@@ -359,10 +398,33 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
       const retryRaw = retryResp.choices?.[0]?.message?.content?.trim() || "";
       const v2 = safeJSON<any>(retryRaw);
       if (v2) {
-        final = v2;
-        console.log(`[ValueArchitect] STEP_4_RETRY | accepted_v2`);
-        judgeVerdict = "ACCEPTED";
-        judgeReason = `auto-corrected after retry; original issue: ${judgeReason}`;
+        try {
+          const rejudgeResp = await aiChat({
+            messages: [{ role: "user", content: buildJudgePrompt(retryRaw, !!args.trustMechanism, !!args.gameDimension, args.productAnchor, args.productTruthFacts) }],
+            model: "gpt-4.1-mini",
+            temperature: 0.1,
+            max_tokens: 400,
+            accountId: args.accountId,
+          });
+          const rejudgeRaw = rejudgeResp.choices?.[0]?.message?.content?.trim() || "";
+          const rejudged = safeJSON<{ verdict: string; reason: string; fix?: string }>(rejudgeRaw);
+          if (rejudged?.verdict === "ACCEPTED") {
+            final = v2;
+            judgeVerdict = "ACCEPTED";
+            judgeReason = rejudged.reason || `accepted after retry; original issue: ${judgeReason}`;
+            console.log(`[ValueArchitect] STEP_4_RETRY | accepted_v2`);
+          } else {
+            final = v2;
+            judgeVerdict = "REJECTED";
+            judgeReason = rejudged?.reason ? `RETRY_REJECTED: ${rejudged.reason}` : `RETRY_REJECTED: unparseable re-judge output`;
+            console.warn(`[ValueArchitect] STEP_4_RETRY | rejected_v2 | reason="${judgeReason}"`);
+          }
+        } catch (rejudgeErr: any) {
+          final = v2;
+          judgeVerdict = "REJECTED";
+          judgeReason = `RETRY_JUDGE_FAILED: ${rejudgeErr.message}`;
+          console.warn(`[ValueArchitect] STEP_4_RETRY | rejudge_failed | ${rejudgeErr.message}`);
+        }
       }
     } catch (err: any) {
       console.warn(`[ValueArchitect] RETRY_FAILED | ${err.message} — keeping v1`);
@@ -403,7 +465,10 @@ export async function designValueArchitecture(args: DesignerInput): Promise<Valu
           }))
           .filter((o: ObjectionEconomic) => o.objection && o.neutralizingMechanism && o.costOfNeutralizing)
       : [],
-    primaryValueWedge: String(final.primaryValueWedge || "").trim(),
+    primaryValueWedge: String(final.primaryValueWedge || "")
+      .trim()
+      .replace(/^The only\s+(personalized\s+song\s+service|service|platform|provider|vendor|company)\s+/i, (_m, noun) => `A ${noun.toLowerCase()} `)
+      .replace(/\bthe only\s+(personalized\s+song\s+service|service|platform|provider|vendor|company)\s+that\b/gi, (_m, noun) => `a ${noun.toLowerCase()} that`),
     reasoningSteps: Array.isArray(final.reasoningSteps) ? final.reasoningSteps.map((s: any) => String(s).trim()).filter(Boolean) : [],
     groundedInTrustMechanism: final.groundedInTrustMechanism ? String(final.groundedInTrustMechanism).trim() : null,
     groundedInGameDimension: final.groundedInGameDimension ? String(final.groundedInGameDimension).trim() : null,

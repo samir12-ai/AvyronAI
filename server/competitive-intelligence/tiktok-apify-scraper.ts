@@ -11,6 +11,7 @@ function getApifyApiKey(): string | null {
 }
 
 export function isApifyConfigured(): boolean {
+  if (process.env.AVYRON_DEMO_MODE === "1") return false;
   return !!getApifyApiKey();
 }
 
@@ -165,6 +166,7 @@ function mapApifyItemToPost(item: ApifyDatasetResponse, handle: string): TiktokP
   const transcript = extractTranscriptFromApify(item);
   const { hookText, hookSource } = deriveHook(caption, transcript);
   const topComments = extractCommentsFromApify(item);
+  const authorFollowers = toNum((item.authorMeta as any)?.fans ?? (item.authorMeta as any)?.followers);
 
   return {
     postId,
@@ -180,7 +182,8 @@ function mapApifyItemToPost(item: ApifyDatasetResponse, handle: string): TiktokP
     permalink,
     timestamp,
     topComments,
-  };
+    ...(typeof authorFollowers === "number" ? { authorFollowers } : {}),
+  } as TiktokPost;
 }
 
 function extractTranscriptFromApify(item: ApifyDatasetResponse): string | null {
@@ -268,8 +271,8 @@ export function extractTiktokHandle(urlOrHandle: string): string | null {
 }
 
 export async function scrapeTiktokViaApify(handleOrUrl: string): Promise<TiktokPost[]> {
-  const apiKey = getApifyApiKey();
-  if (!apiKey) {
+  const { isApifyAcquisitionConfigured, runActorAndGetItems } = await import("../acquisition/apify-client");
+  if (!isApifyAcquisitionConfigured() && !getApifyApiKey()) {
     console.warn("[TiktokApify] APIFY_API_KEY not set — cannot scrape TikTok via Apify");
     return [];
   }
@@ -282,32 +285,26 @@ export async function scrapeTiktokViaApify(handleOrUrl: string): Promise<TiktokP
 
   console.log(`[TiktokApify] Starting scrape for @${handle} via Apify actor ${APIFY_TIKTOK_ACTOR}`);
 
-  const runResponse: ApifyRunResponse = await apifyFetch(
-    `/acts/${APIFY_TIKTOK_ACTOR}/runs`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        excludePinnedPosts: false,
-        profiles: [`https://www.tiktok.com/@${handle}`],
-        resultsPerPage: 30,
-        shouldDownloadCovers: false,
-        shouldDownloadVideos: false,
-        shouldDownloadSubtitles: false,
-      }),
+  const runResult = await runActorAndGetItems({
+    actorId: APIFY_TIKTOK_ACTOR,
+    input: {
+      excludePinnedPosts: false,
+      profiles: [`https://www.tiktok.com/@${handle}`],
+      resultsPerPage: 30,
+      shouldDownloadCovers: false,
+      shouldDownloadVideos: false,
+      shouldDownloadSubtitles: false,
     },
-  );
+    budgetMs: APIFY_RUN_TIMEOUT_MS,
+    label: `TikTokProfile-${handle}`,
+  });
 
-  const runId = runResponse.data.id;
-  console.log(`[TiktokApify] Run started: ${runId} — waiting for completion...`);
+  const runId = runResult.runId;
+  const datasetId = runResult.datasetId;
 
-  const completedRun = await waitForRun(runId);
-  const datasetId = completedRun.defaultDatasetId;
+  console.log(`[TiktokApify] Run ${runId} completed — dataset ${datasetId}`);
 
-  console.log(`[TiktokApify] Run ${runId} completed — fetching dataset ${datasetId}`);
-
-  const items: ApifyDatasetResponse[] = await apifyFetch(
-    `/datasets/${datasetId}/items?format=json&clean=true`,
-  );
+  const items: ApifyDatasetResponse[] = runResult.items;
 
   if (!Array.isArray(items) || items.length === 0) {
     console.warn(`[TiktokApify] No items returned for @${handle}`);

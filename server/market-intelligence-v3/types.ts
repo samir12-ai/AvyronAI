@@ -291,7 +291,7 @@ export interface CompetitorInput {
   id: string;
   name: string;
   platform: string;
-  profileLink: string;
+  websiteUrl?: string;
   businessType: string;
   postingFrequency: number | null;
   contentTypeRatio: string | null;
@@ -302,12 +302,13 @@ export interface CompetitorInput {
   messagingTone: string | null;
   socialProofPresence: string | null;
   websiteUrl?: string | null;
-  blogUrl?: string | null;
-  googleMapsUrl?: string | null;
+  
+  
   manualNotes?: string | null;
   pricingHints?: string | null;
   posts?: PostData[];
   comments?: CommentData[];
+  competitorUnderstanding?: any | null;
 }
 
 export interface PostData {

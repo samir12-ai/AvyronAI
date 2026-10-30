@@ -6,6 +6,8 @@ import { ShellTheme } from '@/constants/ShellTheme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppShellController, AppShellController, ShellMonitoringState } from '@/hooks/useAppShellController';
 import { AccountSwitcherModal } from '@/components/AccountSwitcherModal';
+import { DemoControlPanel } from '@/components/demo/DemoControlPanel';
+import { CampaignBar } from '@/components/CampaignSelector';
 
 const NAV_ITEMS = [
   { name: 'index', label: 'Dashboard', icon: 'grid' },
@@ -228,6 +230,7 @@ function SidebarContent({ controller, isCollapsed, onNavigate }: { controller: A
           let badgeValue: number | null = null;
           if (item.name === 'what-to-do-today') badgeValue = controller.badges.whatToDoToday;
           if (item.name === 'watchtower') badgeValue = controller.badges.watchtower;
+          if (item.name === 'performance') badgeValue = controller.badges.performance;
 
           return (
             <Pressable
@@ -335,6 +338,10 @@ export default function AppShellLayout() {
           </View>
         </Modal>
 
+        <View style={{ backgroundColor: '#0A0E14', borderBottomWidth: 1, borderBottomColor: '#1E293B', paddingBottom: 4 }}>
+          <CampaignBar />
+        </View>
+
         <Tabs 
           tabBar={() => null} 
           screenOptions={{ 
@@ -348,6 +355,7 @@ export default function AppShellLayout() {
           <Tabs.Screen name="calendar" options={{ href: null }} />
           <Tabs.Screen name="ai-management" options={{ href: null }} />
         </Tabs>
+        <DemoControlPanel />
       </View>
     );
   }
@@ -372,6 +380,10 @@ export default function AppShellLayout() {
       </View>
       
       <View style={styles.mainContent}>
+        <View style={{ backgroundColor: '#0A0E14', borderBottomWidth: 1, borderBottomColor: '#1E293B', paddingBottom: 4 }}>
+          <CampaignBar />
+        </View>
+
         <Tabs 
           tabBar={() => null} 
           screenOptions={{ 
@@ -385,6 +397,7 @@ export default function AppShellLayout() {
           <Tabs.Screen name="calendar" options={{ href: null }} />
           <Tabs.Screen name="ai-management" options={{ href: null }} />
         </Tabs>
+        <DemoControlPanel />
       </View>
     </View>
   );

@@ -4,6 +4,44 @@ import type { JudgeVerdict } from "../../shared/interchangeability-judge";
 import type { ContradictionJudgeVerdict } from "../../shared/contradiction-judge";
 import type { EngineDecisionSummary } from "../../shared/strategic-doctrine";
 
+export type IdentityStatus = "CONFIRMED" | "DISCOVERED" | "UNVERIFIED" | "UNRESOLVED";
+export type MetricStatus = "VERIFIED" | "USER_CONFIRMED" | "STALE" | "UNAVAILABLE" | "FAILED";
+export type MetricSource = "SCRAPE" | "USER_INPUT" | "PRIOR_VERIFIED_SNAPSHOT" | "NONE";
+
+export interface OwnedChannelContext {
+  platform: string;
+  handle: string | null;
+  url: string | null;
+  identityStatus: IdentityStatus;
+  metricStatus: MetricStatus;
+  metricSource: MetricSource;
+  followers: number | null;
+  followersObservedAt: string | null;
+  existingAudienceSize: number | null;
+  campaignId: string;
+  accountId: string;
+  recentPostCount?: number;
+  avgEngagement?: number | null;
+}
+
+export interface CompetitorPlatformData {
+  platform: string;
+  activeCompetitorCount: number;
+  totalCanonicalCompetitorCount: number;
+  coverageRatio: number;
+  recentContentCount: number;
+  recentActivityWindow: string;
+  representativeCompetitorNames: string[];
+  representativeCompetitorIds: string[];
+}
+
+export interface MarketVoiceChannelEvidence {
+  quoteText: string;
+  sourceDomain?: string;
+  channelMentioned?: string;
+  relevance: string;
+}
+
 export interface ChannelAudienceInput {
   audienceSegments: any[];
   emotionalDrivers: any[];
@@ -242,6 +280,7 @@ export interface AiChannelGateAttempt {
   interchangeabilityVerdict: JudgeVerdict;
   contradictionVerdict: ContradictionJudgeVerdict;
   rejectionFeedback: string;
+  finishReason?: string;
 }
 
 export interface AiChannelProposal {
@@ -256,4 +295,42 @@ export interface AiChannelProposal {
   swappedFromDeterministic: boolean;
   attempts: number;
   gateTrace: AiChannelGateAttempt[];
+  /** Detailed multi-channel recommendations from the dynamic LLM strategy engine */
+  dynamicRecommendations?: StrategicChannelRecommendation[];
+  /** Rejected alternative channels with reasoning */
+  dynamicRejectedChannels?: { channelName: string; channelType: string; rejectionReason: string }[];
+  /** Optional judge verdict trace */
+  judgeVerdict?: "APPROVE" | "REPAIR" | "BLOCK";
+  judgeFeedback?: string;
 }
+
+export interface StrategicChannelRecommendation {
+  channelName: string;
+  channelType: string;
+  role: FunnelRole;
+  priority: "PRIMARY" | "SECONDARY" | "SUPPORTING";
+  channelNature: "organic" | "paid";
+  fitScore: number;
+  confidence: number;
+  reasoning: string;
+  ownedAssetStatus: string;
+  audienceFitReasoning: string;
+  competitorEvidence: string;
+  marketVoiceEvidence: string | null;
+  campaignFit: string;
+  contentFit: string;
+  budgetFit: string;
+  risks: string[];
+}
+
+export interface DynamicChannelProposalOutput {
+  recommendedChannels: StrategicChannelRecommendation[];
+  rejectedChannels: {
+    channelName: string;
+    channelType: string;
+    rejectionReason: string;
+  }[];
+  strategicRationale: string;
+  funnelConsistencyNotes?: string;
+}
+

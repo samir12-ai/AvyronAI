@@ -56,23 +56,35 @@ export class WhatToDoTodayService {
   static async getOrCreateTodayPlan(
     campaignId: string,
     businessDateInput?: string,
-    forceRegenerate: boolean = false
+    forceRegenerate: boolean = false,
+    accountIdParam?: string
   ): Promise<ExecutionDayPayload> {
     const businessDate = businessDateInput || new Date().toISOString().split("T")[0];
 
-    // 1. Check if execution day already exists for this date
-    if (!forceRegenerate) {
-      const [existingDay] = await db
+    // 1. Check if execution day already exists for this date (or latest in Demo Mode)
+    if (!forceRegenerate || process.env.AVYRON_DEMO_MODE === "1") {
+      const conditions = [
+        eq(schema.executionDays.campaignId, campaignId),
+        eq(schema.executionDays.businessDate, businessDate),
+      ];
+      if (accountIdParam) {
+        conditions.push(eq(schema.executionDays.accountId, accountIdParam));
+      }
+      let [existingDay] = await db
         .select()
         .from(schema.executionDays)
-        .where(
-          and(
-            eq(schema.executionDays.campaignId, campaignId),
-            eq(schema.executionDays.businessDate, businessDate)
-          )
-        )
-        .orderBy(desc(schema.executionDays.generationVersion))
+        .where(and(...conditions))
+        .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt))
         .limit(1);
+
+      if (!existingDay && process.env.AVYRON_DEMO_MODE === "1") {
+        [existingDay] = await db
+          .select()
+          .from(schema.executionDays)
+          .where(eq(schema.executionDays.campaignId, campaignId))
+          .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt))
+          .limit(1);
+      }
 
       if (existingDay) {
         logger.info(`[WhatToDoToday] Returning existing execution day ${existingDay.id} for date ${businessDate}`);
@@ -81,7 +93,7 @@ export class WhatToDoTodayService {
     }
 
     // 2. Build Bounded Execution Planning Context
-    const context = await buildExecutionPlanningContext(campaignId, businessDate);
+    const context = await buildExecutionPlanningContext(campaignId, businessDate, accountIdParam);
 
     // 3. Generate Validated Daily Plan (Generator -> Semantic Judge -> Targeted Repair)
     const { plan, judgeReport, attempts } = await generateValidatedDailyPlan(context);

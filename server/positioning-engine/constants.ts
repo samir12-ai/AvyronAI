@@ -74,9 +74,6 @@ export const BOUNDARY_HARD_PATTERNS: Record<string, RegExp> = {
 import type { SoftPattern } from "../engine-hardening/types";
 
 export const BOUNDARY_SOFT_PATTERNS: SoftPattern[] = [
-  { pattern: /\bpricing\b/gi, domain: "pricing", replacement: "market value context" },
-  { pattern: /\bprice point\b/gi, domain: "price point", replacement: "market value context" },
-  { pattern: /\boffer pricing\b/gi, domain: "offer pricing", replacement: "market value context" },
   { pattern: /\bcompetitive analysis\b/gi, domain: "competitive analysis", replacement: "competitive landscape assessment" },
   { pattern: /\bcompetitor analysis\b/gi, domain: "competitor analysis", replacement: "competitive landscape assessment" },
   { pattern: /\bcompetitor comparison\b/gi, domain: "competitor comparison", replacement: "competitive landscape assessment" },
@@ -101,11 +98,20 @@ export interface Territory {
   signalSource?: string;
   /** Canonical AEL evidence IDs this territory's claims cite (grounding contract). */
   groundingRefs?: string[];
+  /** Validated capability IDs (cap_<hash>) cited by this territory (CAPABILITY_NAMESPACE). */
+  capabilityRefs?: string[];
   domainFailure?: string;
   operationalProblem?: string;
   proofRequirement?: string;
   provenance?: "system_default" | "mi_traced" | "orphaned" | "partial_traced" | "fully_traced";
   degraded?: boolean;
+  epistemicStatus?: "SUPPORTED_CAPABILITY" | "STRATEGIC_SYNTHESIS" | "PROPOSED_CAPABILITY" | "UNAVAILABLE_OR_FAILED";
+  productTruthStatus?: "SUPPORTED" | "PROPOSED" | null;
+  epistemicLabel?: string;
+  rationale?: string;
+  assumptions?: string[];
+  validationNeeds?: string[];
+  supportingEvidenceIds?: string[];
   laneRelevance?: Record<string, string>;
   _systemMapped?: boolean;
   semanticCollision?: {
@@ -128,6 +134,13 @@ export interface StrategyCard {
   evidenceSignals: string[];
   confidenceScore: number;
   isPrimary: boolean;
+  epistemicStatus?: "SUPPORTED_CAPABILITY" | "STRATEGIC_SYNTHESIS" | "PROPOSED_CAPABILITY" | "UNAVAILABLE_OR_FAILED";
+  productTruthStatus?: "SUPPORTED" | "PROPOSED" | null;
+  epistemicLabel?: string;
+  rationale?: string;
+  assumptions?: string[];
+  validationNeeds?: string[];
+  supportingEvidenceIds?: string[];
 }
 
 export interface MarketPowerEntry {

@@ -290,6 +290,8 @@ export interface SignalGroundingResult {
   composition: SignalComposition;
 }
 
+import { evaluateClaimSemanticEntailment } from "./claim-entailment";
+
 export function validateClaimGrounding(
   claims: string[],
   upstreamLineage: SignalLineageEntry[],
@@ -299,10 +301,14 @@ export function validateClaimGrounding(
   const groundedEntries: SignalLineageEntry[] = [];
   const strippedClaims: string[] = [];
   let idx = 0;
+  const evidenceTexts = upstreamLineage.map(e => e.signalText);
 
   for (const claim of claims) {
     const parent = findBestParentSignal(claim, upstreamLineage);
-    if (parent) {
+    const entailment = evaluateClaimSemanticEntailment(claim, evidenceTexts);
+
+    // Both candidate provenance (parent) and semantic entailment (no unsupported expansion or contradiction) are required
+    if (parent && entailment.isGrounded) {
       groundedEntries.push(createDerivedLineageEntry(engine, category, claim, parent, idx));
       idx++;
     } else {

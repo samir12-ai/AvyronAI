@@ -87,7 +87,12 @@ export function runCausalReasoningAnalysis(input: ReasoningAnalysisInput): Reaso
   // 1. Evaluate Confirmation States
   const hasConfirmedMarketEvent = marketSignals.some(s => s.confirmationState === "CONFIRMED");
   const hasPreliminaryMarketEvent = marketSignals.some(s => s.confirmationState === "PRELIMINARY");
-  const hasPerformanceWarning = performanceSignals.length > 0;
+  const isProofGapOnlySignal = (s: AdaptiveSignal) =>
+    s.signalType === "PROOF_GAP_UNMEASURED_TRUTH" || s.metadata?.isProofGapOnly === true;
+  const measuredPerformanceSignals = performanceSignals.filter(s => !isProofGapOnlySignal(s));
+  const proofGapSignals = performanceSignals.filter(isProofGapOnlySignal);
+  const hasPerformanceWarning = measuredPerformanceSignals.length > 0;
+  const hasOnlyProofGaps = !hasPerformanceWarning && proofGapSignals.length > 0 && !hasConfirmedMarketEvent;
 
   // 2. Multi-dimensional Analysis
   // Dimension 1: Temporal Match
@@ -126,12 +131,13 @@ export function runCausalReasoningAnalysis(input: ReasoningAnalysisInput): Reaso
 
     if (primaryMarketSignal.candidateAffectedAuthorities && primaryMarketSignal.candidateAffectedAuthorities.length > 0) {
       candidateAffectedAuthorities.push(...primaryMarketSignal.candidateAffectedAuthorities);
-    }
-    if (primaryMarketSignal.signalType.includes("FUNNEL") || primaryMarketSignal.signalType.includes("CONVERSION")) {
-      candidateAffectedAuthorities.push("FUNNEL");
-    }
-    if (primaryMarketSignal.confirmationState === "CONFIRMED") {
-      candidateAffectedAuthorities.push("DIFFERENTIATION");
+    } else if (!primaryMarketSignal.metadata?.observeOnly) {
+      if (primaryMarketSignal.signalType.includes("FUNNEL") || primaryMarketSignal.signalType.includes("CONVERSION")) {
+        candidateAffectedAuthorities.push("FUNNEL");
+      }
+      if (primaryMarketSignal.confirmationState === "CONFIRMED") {
+        candidateAffectedAuthorities.push("DIFFERENTIATION");
+      }
     }
   }
 
@@ -142,7 +148,7 @@ export function runCausalReasoningAnalysis(input: ReasoningAnalysisInput): Reaso
 
   // Dimension 4 & 5: Execution / Distribution Alternative Explanations
   if (hasPerformanceWarning) {
-    const primaryPerfSignal = performanceSignals[0];
+    const primaryPerfSignal = measuredPerformanceSignals[0];
 
     // Hypothesis B: Distribution / Execution Fluctuation
     hypotheses.push({
@@ -174,6 +180,21 @@ export function runCausalReasoningAnalysis(input: ReasoningAnalysisInput): Reaso
     if (!hasConfirmedMarketEvent) {
       candidateAffectedAuthorities.push("PLAN_SYNTHESIS");
     }
+  } else if (hasOnlyProofGaps) {
+    const gapSummaries = Array.from(new Set(proofGapSignals.map(s => s.summary))).join("; ");
+    const gapEvidenceIds = Array.from(new Set(proofGapSignals.flatMap(s => s.evidenceIds)));
+    hypotheses.push({
+      hypothesisId: `hyp_gap_${randomUUID().slice(0, 8)}`,
+      reasoningCaseId: reasoningCase.reasoningCaseId,
+      hypothesisType: "MEASUREMENT_OR_TRUTH_GAP",
+      explanation: `Campaign-window business and conversion metrics are unmeasured (${gapSummaries}). Missing manual conversion truth cannot substantiate ad fatigue, distribution cadence issues, or funnel friction.`,
+      supportingEvidenceIds: gapEvidenceIds,
+      contradictingEvidenceIds: [],
+      alternativeCauseIds: [],
+      confidence: 0.35,
+      status: "INCONCLUSIVE",
+      metadata: { isProofGapOnly: true },
+    });
   }
 
   // Hypothesis D: Statistical Noise / Insufficient Observation Baseline
@@ -185,13 +206,13 @@ export function runCausalReasoningAnalysis(input: ReasoningAnalysisInput): Reaso
     supportingEvidenceIds: [],
     contradictingEvidenceIds: [],
     alternativeCauseIds: [],
-    confidence: 0.50,
-    status: "PROPOSED",
+    confidence: hasOnlyProofGaps ? 0.35 : 0.50,
+    status: hasOnlyProofGaps ? "INCONCLUSIVE" : "PROPOSED",
   });
 
   // 3. Evidence Sufficiency Evaluation
   let evidenceSufficiency: "SUFFICIENT" | "PARTIAL" | "INSUFFICIENT" = "PARTIAL";
-  if (allEvidenceIds.length === 0 && !hasConfirmedMarketEvent) {
+  if ((allEvidenceIds.length === 0 && !hasConfirmedMarketEvent) || hasOnlyProofGaps) {
     evidenceSufficiency = "INSUFFICIENT";
   } else if (hasConfirmedMarketEvent && hasPerformanceWarning) {
     evidenceSufficiency = "SUFFICIENT";

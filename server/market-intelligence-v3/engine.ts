@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { db } from "../db";
-import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns } from "@shared/schema";
+import { miSnapshots, miSignalLogs, miTelemetry, ciCompetitors, growthCampaigns, competitorUnderstandingSnapshots } from "@shared/schema";
 import { inArray, eq, and, desc } from "drizzle-orm";
 import { pruneOldSnapshots } from "../engine-hardening";
 import { computeAllSignals, aggregateMissingFlags, classifyEngagementQuality, detectAudienceIntentSignals, detectSampleBias, computeRealDataRatio, clusterSemanticSignals } from "./signal-engine";
@@ -301,25 +301,103 @@ export async function persistValidatedSnapshot(snapshotPayload: any, caller: str
     }
   }
 
+  if (!snapshotPayload.jobId) {
+    snapshotPayload.jobId = `job_mi_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }
   const [snapshot] = await db.insert(miSnapshots).values(snapshotPayload).returning();
   await pruneOldSnapshots(db, miSnapshots, snapshotPayload.campaignId, 20, snapshotPayload.accountId);
 
   try {
-    const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
-    const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId, "mi");
-    if (inv.supersededRoots > 0) {
-      console.log(`[MIv3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+    const isBackgroundPersist =
+      caller === "persistSnapshotAfterFetch" ||
+      String(snapshotPayload.jobId || "").startsWith("persist:");
+    const { strategyRoots } = await import("@shared/schema");
+    const [activeRoot] = await db.select().from(strategyRoots)
+      .where(and(
+        eq(strategyRoots.campaignId, snapshotPayload.campaignId),
+        eq(strategyRoots.accountId, snapshotPayload.accountId),
+        eq(strategyRoots.status, "ACTIVE"),
+      ))
+      .limit(1);
+
+    if (activeRoot) {
+      // Routine Watchtower / background MI refreshes must NOT flip strategy_roots from
+      // ACTIVE to REVIEW_REQUIRED unless a confirmed material contradiction meets policy.
+      let isMaterialChange = false;
+      let deltas: any = null;
+
+      if (!isBackgroundPersist && activeRoot.miSnapshotId) {
+        const [boundMiSnapshot] = await db.select().from(miSnapshots)
+          .where(eq(miSnapshots.id, activeRoot.miSnapshotId))
+          .limit(1);
+
+        if (boundMiSnapshot) {
+          const parsedCurr = {
+            competitorHash: snapshotPayload.competitorHash,
+            signalData: parseJsonSafe(snapshotPayload.signalData, []),
+            intentData: parseJsonSafe(snapshotPayload.intentData, []),
+            trajectoryData: parseJsonSafe(snapshotPayload.trajectoryData, {}),
+            dominanceData: parseJsonSafe(snapshotPayload.dominanceData, []),
+          };
+          deltas = computeSnapshotDeltas(boundMiSnapshot, parsedCurr);
+          if (deltas && deltas.hasMeaningfulChanges && deltas.competitorHashMatch === false) {
+            // Verify whether a confirmed major Watchtower contradiction orSTRATEGY_CHANGE_REQUIRED decision exists
+            const { pipelineChangeEvents, adaptiveDecisions } = await import("@shared/schema");
+            const confirmedMajorEvents = await db
+              .select({ id: pipelineChangeEvents.id })
+              .from(pipelineChangeEvents)
+              .where(
+                and(
+                  eq(pipelineChangeEvents.campaignId, snapshotPayload.campaignId),
+                  eq(pipelineChangeEvents.status, "confirmed"),
+                  eq(pipelineChangeEvents.severity, "major"),
+                ),
+              )
+              .limit(1);
+            const changeDecisions = await db
+              .select({ id: adaptiveDecisions.id })
+              .from(adaptiveDecisions)
+              .where(
+                and(
+                  eq(adaptiveDecisions.campaignId, snapshotPayload.campaignId),
+                  eq(adaptiveDecisions.strategyRootId, activeRoot.id),
+                  eq(adaptiveDecisions.decisionType, "STRATEGY_CHANGE_REQUIRED"),
+                ),
+              )
+              .limit(1);
+
+            if (confirmedMajorEvents.length > 0 && changeDecisions.length > 0) {
+              isMaterialChange = true;
+            }
+          }
+        }
+      }
+
+      if (!isMaterialChange) {
+        console.log(`[MIv3] ROUTINE_MARKET_REFRESH | Root ${activeRoot.id} remains ACTIVE. Deltas below threshold or background persist.`);
+      } else {
+        console.log(`[MIv3] MATERIAL_MARKET_REFRESH | Root ${activeRoot.id} assumptions potentially affected. Transitioning to REVIEW_REQUIRED.`);
+        const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+        const inv = await invalidateDownstreamOnRegeneration(snapshotPayload.campaignId, snapshotPayload.accountId, "mi");
+        console.log(`[MIv3] ROOT_REVIEW_TRIGGERED | reviewRequired=${inv.reviewRequiredRoots} | offers=${inv.invalidatedOffers} | funnels=${inv.invalidatedFunnels} | integrity=${inv.invalidatedIntegrity}`);
+      }
     }
   } catch (invErr: any) {
-    console.error(`[MIv3] Root invalidation failed (non-blocking): ${invErr.message}`);
+    console.error(`[MIv3] Strategy root refresh check failed (non-blocking): ${invErr.message}`);
   }
 
   return snapshot;
 }
 
-async function getCompetitorData(accountId: string, campaignId: string): Promise<CompetitorInput[]> {
-  const competitors = await db.select().from(ciCompetitors)
+async function getCompetitorData(
+  accountId: string,
+  campaignId: string,
+  evidenceManifest?: import("@shared/schema").EvidenceManifest | null
+): Promise<CompetitorInput[]> {
+  const rawCompetitors = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+  // Sort deterministically by competitor ID so coverage and analysis are independent of DB row order.
+  const competitors = [...rawCompetitors].sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
 
   const pendingCount = competitors.filter(c => c.enrichmentStatus === "PENDING" || !c.enrichmentStatus).length;
   const enrichedCount = competitors.filter(c => c.enrichmentStatus === "ENRICHED").length;
@@ -328,16 +406,59 @@ async function getCompetitorData(accountId: string, campaignId: string): Promise
     console.log(`[MIv3] INVENTORY_STATUS | total=${competitors.length} | enriched=${enrichedCount} | pending=${pendingCount} | fastPassOnly=${fastPassOnly}`);
   }
 
+  const allowedPostIds = evidenceManifest?.includedPostIds ? (evidenceManifest.includedPostIds as string[]) : undefined;
+  const allowedCommentIds = evidenceManifest?.includedCommentIds ? (evidenceManifest.includedCommentIds as string[]) : undefined;
+
   const results: CompetitorInput[] = [];
   for (const c of competitors) {
-    const posts = await getStoredPostsForMIv3(c.id, accountId);
-    const comments = await getStoredCommentsForMIv3(c.id, accountId);
+    const posts = await getStoredPostsForMIv3(c.id, accountId, allowedPostIds);
+    const comments = await getStoredCommentsForMIv3(c.id, accountId, allowedCommentIds);
+
+    // Fetch compatible COMPLETE Competitor Understanding snapshot for this competitor
+    let competitorUnderstanding: any = null;
+    try {
+      const cuCandidates = await db
+        .select()
+        .from(competitorUnderstandingSnapshots)
+        .where(and(
+          eq(competitorUnderstandingSnapshots.accountId, accountId),
+          eq(competitorUnderstandingSnapshots.campaignId, campaignId),
+          eq(competitorUnderstandingSnapshots.competitorId, c.id),
+        ))
+        .orderBy(desc(competitorUnderstandingSnapshots.createdAt))
+        .limit(5);
+
+      const manifestCuIds = Array.isArray((evidenceManifest as any)?.competitorUnderstandingSnapshotIds)
+        ? ((evidenceManifest as any).competitorUnderstandingSnapshotIds as string[])
+        : null;
+
+      const cuSnap =
+        (manifestCuIds
+          ? cuCandidates.find(s => manifestCuIds.includes(s.id) && s.status !== "INVALIDATED")
+          : undefined) ||
+        cuCandidates.find(s => s.status === "COMPLETE" && s.competitorUnderstanding) ||
+        cuCandidates.find(s => s.status !== "INVALIDATED" && s.competitorUnderstanding);
+
+      if (cuSnap && cuSnap.competitorUnderstanding) {
+        const rawCu = typeof cuSnap.competitorUnderstanding === "string"
+          ? parseJsonSafe(cuSnap.competitorUnderstanding, null)
+          : cuSnap.competitorUnderstanding;
+        if (rawCu) {
+          competitorUnderstanding = {
+            ...rawCu,
+            snapshotId: cuSnap.id,
+            websiteSnapshotId: cuSnap.websiteSnapshotId || null,
+          };
+        }
+      }
+    } catch (cuErr) {
+      console.warn(`[MIv3] Failed to load competitor understanding for ${c.id}:`, cuErr);
+    }
 
     results.push({
       id: c.id,
       name: c.name,
-      platform: c.platform,
-      profileLink: c.profileLink,
+      platform: (c as any).platform || "instagram",
       businessType: c.businessType,
       postingFrequency: c.postingFrequency,
       contentTypeRatio: c.contentTypeRatio,
@@ -348,12 +469,101 @@ async function getCompetitorData(accountId: string, campaignId: string): Promise
       messagingTone: c.messagingTone,
       socialProofPresence: c.socialProofPresence,
       websiteUrl: c.websiteUrl || null,
-      blogUrl: c.blogUrl || null,
       posts,
       comments,
+      competitorUnderstanding,
     });
   }
   return results;
+}
+
+export interface CompetitorCoverageRecord {
+  competitorId: string;
+  competitorName: string;
+  websiteUrl: string | null;
+  availableEvidence: {
+    websiteUnderstanding: boolean;
+    websiteFactsCount: number;
+    postsCount: number;
+    commentsCount: number;
+    reviewsCount: number;
+  };
+  consumedBy: string[];
+  missingSources: string[];
+  limitations: string[];
+}
+
+export function buildCompetitorCoverageRegistry(
+  competitors: CompetitorInput[],
+  allReviews: Array<{ competitorId: string; reviews: any[] }> = []
+): CompetitorCoverageRecord[] {
+  const reviewMap = new Map<string, number>();
+  for (const r of allReviews) {
+    reviewMap.set(r.competitorId, Array.isArray(r.reviews) ? r.reviews.length : 0);
+  }
+  const ordered = [...competitors].sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+  return ordered.map(c => {
+    const cu = c.competitorUnderstanding || null;
+    const cuFactsCount =
+      (Array.isArray(cu?.capabilities) ? cu.capabilities.length : 0) +
+      (Array.isArray(cu?.offers) ? cu.offers.length : 0) +
+      (Array.isArray(cu?.positioning) ? cu.positioning.length : 0) +
+      (Array.isArray(cu?.proof) ? cu.proof.length : 0);
+    const hasWebsite = Boolean(cu && cuFactsCount > 0);
+    const postsCount = Array.isArray(c.posts) ? c.posts.length : 0;
+    const commentsCount = Array.isArray(c.comments) ? c.comments.length : 0;
+    const reviewsCount = reviewMap.get(c.id) ?? (Array.isArray((c as any).reviews) ? (c as any).reviews.length : 0);
+
+    const consumedBy: string[] = [];
+    const missingSources: string[] = [];
+    const limitations: string[] = [];
+
+    if (hasWebsite) {
+      consumedBy.push("competitor_understanding", "mi_commercial_signals", "differentiation_competitive_authority");
+    } else {
+      missingSources.push("website_commercial_understanding");
+      limitations.push("Website commercial claims/offers unavailable; commercial comparison relies on social/review evidence.");
+    }
+
+    if (postsCount > 0) {
+      consumedBy.push("mi_signal_engine", "mi_content_dna", "mi_dominance");
+    } else {
+      missingSources.push("social_posts");
+      limitations.push("No social posts acquired; posting cadence, hook archetypes, and social engagement volatility cannot be measured.");
+    }
+
+    if (commentsCount > 0) {
+      consumedBy.push("mi_engagement_quality", "audience_customer_voice");
+    } else {
+      missingSources.push("social_comments");
+    }
+
+    if (reviewsCount > 0) {
+      consumedBy.push("mi_reviews_intelligence", "audience_customer_voice", "differentiation_customer_evidence");
+    } else {
+      missingSources.push("customer_reviews");
+    }
+
+    if (commentsCount === 0 && reviewsCount === 0) {
+      limitations.push("No direct customer comments or reviews attributed to this competitor; represented via competitor-authored commercial/social evidence only.");
+    }
+
+    return {
+      competitorId: c.id,
+      competitorName: c.name,
+      websiteUrl: c.websiteUrl || null,
+      availableEvidence: {
+        websiteUnderstanding: hasWebsite,
+        websiteFactsCount: cuFactsCount,
+        postsCount,
+        commentsCount,
+        reviewsCount,
+      },
+      consumedBy,
+      missingSources,
+      limitations,
+    };
+  });
 }
 
 interface CacheResult {
@@ -453,7 +663,7 @@ export function computeEvidenceFreshness(
     }
   }
 
-  const hasWebSignals = competitors.some(c => !!(c.websiteUrl || c.blogUrl || c.pricingHints || c.manualNotes));
+  const hasWebSignals = competitors.some(c => !!(c.websiteUrl || c.pricingHints || c.manualNotes));
 
   if (totalCount === 0) {
     if (hasWebSignals) {
@@ -865,6 +1075,7 @@ export class MarketIntelligenceV3 {
     forceRefresh: boolean = false,
     goalMode: GoalMode = "STRATEGY_MODE",
     jobId?: string,
+    evidenceManifest?: import("@shared/schema").EvidenceManifest | null,
   ): Promise<MIv3DiagnosticResult> {
     const lockKey = `${accountId}:${campaignId}`;
     const LOCK_TIMEOUT_MS = 5 * 60 * 1000;
@@ -883,7 +1094,7 @@ export class MarketIntelligenceV3 {
       }
     }
 
-    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode, jobId);
+    const runPromise = this._executeRun(mode, accountId, campaignId, forceRefresh, goalMode, jobId, evidenceManifest);
     activeLocks.set(lockKey, runPromise);
 
     try {
@@ -901,6 +1112,7 @@ export class MarketIntelligenceV3 {
     forceRefresh: boolean,
     goalMode: GoalMode = "STRATEGY_MODE",
     jobId?: string,
+    evidenceManifest?: import("@shared/schema").EvidenceManifest | null,
   ): Promise<MIv3DiagnosticResult> {
     if (!goalMode || goalMode === "STRATEGY_MODE") {
       const campaignRows = await db.select().from(growthCampaigns).where(eq(growthCampaigns.id, campaignId)).limit(1);
@@ -922,11 +1134,12 @@ export class MarketIntelligenceV3 {
       );
     });
 
-    const allCompetitors = await getCompetitorData(accountId, campaignId);
+    const allCompetitors = await getCompetitorData(accountId, campaignId, evidenceManifest);
     const competitors = allCompetitors.filter(c => {
       const postCount = c.posts?.length || 0;
-      if (postCount === 0) {
-        console.log(`[MIv3] SCRAPING_RESILIENCE: skipping competitor ${c.name} (${c.id.slice(0, 8)}) — 0 posts, marked temporarily unavailable`);
+      const hasCU = Boolean(c.competitorUnderstanding);
+      if (postCount === 0 && !hasCU) {
+        console.log(`[MIv3] SCRAPING_RESILIENCE: skipping competitor ${c.name} (${c.id.slice(0, 8)}) — 0 posts and no website understanding, marked temporarily unavailable`);
         return false;
       }
       return true;
@@ -955,55 +1168,21 @@ export class MarketIntelligenceV3 {
 
     let cacheInvalidationReason: import("./types").CacheInvalidationReason = null;
 
-    if (!forceRefresh) {
-      const cacheResult = await getCachedSnapshot(accountId, campaignId, competitorHash, competitorContentHash);
-      if (cacheResult.snapshot) {
-        const cached = cacheResult.snapshot;
-        
-        const diag = cached.diagnosticsData ? JSON.parse(cached.diagnosticsData as string) : {};
-        if (!diag.executiveSummaryData || diag.executiveSummaryData.the_bottom_line?.includes("Data is currently being processed")) {
-          console.log(`[MIv3] Cached snapshot ${cached.id} missing executive summary. Running BLL translation on-the-fly to repair snapshot.`);
-          const { translateToBusinessLanguage } = await import("../core/business-language-layer");
-          const summary = await translateToBusinessLanguage(cached as any, accountId || "system");
-          if (summary) {
-            const diag = cached.diagnosticsData ? JSON.parse(cached.diagnosticsData as string) : {};
-            diag.executiveSummaryData = summary;
-            diag.executiveSummaryId = cached.id;
-            cached.diagnosticsData = JSON.stringify(diag);
-            const { db } = await import("../db");
-            const { miSnapshots } = await import("../../shared/schema");
-            const { eq } = await import("drizzle-orm");
-            await db.update(miSnapshots).set({ diagnosticsData: cached.diagnosticsData }).where(eq(miSnapshots.id, cached.id));
-            console.log(`[MIv3] Successfully repaired cached snapshot ${cached.id} with new executive summary.`);
-          }
-        }
-
-        if (jobId && cached.jobId !== jobId) {
-          const { id: _omitId, createdAt: _omitCreatedAt, ...cloneable } = cached as any;
-          const [stamped] = await db.insert(miSnapshots).values({
-            ...cloneable,
-            jobId,
-          }).returning();
-          console.log(`[MIv3] Cache hit reused snapshot ${cached.id} → cloned as ${stamped.id} stamped with jobId=${jobId}`);
-          return buildResultFromSnapshot(stamped);
-        }
-        console.log(`[MIv3] Returning cached snapshot ${cached.id}`);
-        return buildResultFromSnapshot(cached);
-      }
-      cacheInvalidationReason = cacheResult.invalidationReason;
-    }
-
     const totalPosts = competitors.reduce((s, c) => s + (c.posts?.length || 0), 0);
     const totalComments = competitors.reduce((s, c) => s + (c.comments?.length || 0), 0);
 
     // Load reviews early to include in evidence freshness and data sufficiency checks
     const allReviews: Array<{ competitorId: string; reviews: any[] }> = [];
+    const allowedReviewIds = evidenceManifest?.includedReviewIds ? (evidenceManifest.includedReviewIds as string[]) : undefined;
     for (const comp of competitors) {
-      const reviews = await getStoredReviewsForMIv3(comp.id, accountId);
+      const reviews = await getStoredReviewsForMIv3(comp.id, accountId, allowedReviewIds);
+      (comp as any).reviews = reviews;
       if (reviews.length > 0) {
         allReviews.push({ competitorId: comp.id, reviews });
       }
     }
+
+    const competitorCoverageRegistry = buildCompetitorCoverageRegistry(allCompetitors, allReviews);
 
     // Seal #11 / Task #29 / F6.1 — read-through persistence keyed by
     // (jobId, "mi-v3"). On crash-restart the recomputed budget is replaced
@@ -1174,10 +1353,8 @@ export class MarketIntelligenceV3 {
       }
 
       const sourceAvail = computeSourceAvailability({
-        profileLink: competitors[0]?.profileLink || null,
-        websiteUrl: competitors[0]?.websiteUrl || null,
-        blogUrl: competitors[0]?.blogUrl || null,
-        postsCollected: allPosts.length,
+                websiteUrl: competitors[0]?.websiteUrl || null,
+                postsCollected: allPosts.length,
         tiktokPostCount: totalTikTokPosts,
         reviewCount: totalReviews,
       });
@@ -1226,7 +1403,7 @@ export class MarketIntelligenceV3 {
           commentCandidates.push(...rows);
         }
         const ownerHandles = competitors
-          .map(c => c.profileLink ? extractHandleFromUrl(c.profileLink) : "")
+          .map(c => c.name || "")
           .filter(Boolean);
 
         // Pain Registry lineage (tag-only): approved pains' evidenceUids let
@@ -1432,15 +1609,53 @@ export class MarketIntelligenceV3 {
     });
     console.log(`[MIv3] LINEAGE_GENERATED | entries=${miLineage.length} | originType=competitor | opportunities=${opportunitySignals.length} | threats=${threatSignals.length} | narrativeObj=${narObjections.length}`);
 
+    const structuredCompetitorData = competitors.map(c => {
+      const cu = c.competitorUnderstanding || null;
+      return {
+        id: c.id,
+        name: c.name,
+        websiteUrl: c.websiteUrl || null,
+        businessType: c.businessType,
+        commercialFacts: cu ? {
+          competitorUnderstandingSnapshotId: cu.snapshotId || cu.competitorUnderstandingAuthorityId || null,
+          offeringScope: cu.offeringScope || cu.category || cu.businessType || "UNKNOWN",
+          buyerScope: cu.buyerScope || cu.buyerSegment || "UNKNOWN",
+          capabilities: cu.capabilities || [],
+          capabilityBoundaries: cu.boundaries || cu.capabilityBoundaries || [],
+          positioning: cu.positioning || [],
+          offers: cu.offers || [],
+          pricingAndMonetization: cu.pricing || cu.offers || [],
+          trialPreviewConditions: (cu.offers || []).filter((o: any) =>
+            /\b(preview|trial|free|sample|draft)\b/i.test(typeof o === "string" ? o : (o?.statement || o?.offer || o?.text || ""))
+          ),
+          deliveryRevisionTerms: [
+            ...(cu.capabilities || []),
+            ...(cu.offers || []),
+          ].filter((item: any) =>
+            /\b(deliver|hour|day|revision|edit|download|mp3|refund|guarantee)\b/i.test(
+              typeof item === "string" ? item : (item?.statement || item?.capability || item?.offer || item?.text || "")
+            )
+          ),
+          proof: cu.proof || [],
+          sourceIds: [
+            cu.snapshotId,
+            cu.websiteSnapshotId,
+            ...(Array.isArray(cu.parentAuthorityIds) ? cu.parentAuthorityIds : []),
+          ].filter(Boolean),
+          unresolvedUnknowns: cu.evidenceGaps || cu.unresolvedUnknowns || [],
+        } : null,
+      };
+    });
+
     const snapshotPayload: any = {
-      id: require('crypto').randomUUID(),
+      id: randomUUID(),
       accountId,
       campaignId,
       jobId,
       competitorHash,
       competitorContentHash,
       version: (previousSnapshot?.version || 0) + 1,
-      competitorData: JSON.stringify(competitors.map(c => ({ id: c.id, name: c.name }))),
+      competitorData: JSON.stringify(structuredCompetitorData),
       signalData: JSON.stringify(signalResults),
       intentData: JSON.stringify(intents),
       trajectoryData: JSON.stringify(trajectory),
@@ -1498,6 +1713,7 @@ export class MarketIntelligenceV3 {
           avgRating: reviewsIntelligence.avgRating,
           reliabilityGuard: reviewsIntelligence.reliabilityGuard,
         } : null,
+        competitorCoverageRegistry,
       }),
       objectionMapData: JSON.stringify(narrativeObjectionMap),
       signalLineage: JSON.stringify(miLineage),
@@ -1572,6 +1788,8 @@ export class MarketIntelligenceV3 {
       competitionIntensityLevel: deriveCompetitionIntensityLevel(trajectory.competitionIntensityScore),
       audienceIntentSignals,
     };
+    (output as any).competitorData = structuredCompetitorData;
+    (output as any).competitorCoverageRegistry = competitorCoverageRegistry;
 
     const guard = await import("./confidence-engine").then(m => m.evaluateSignalStabilityGuard(signalResults, contentPrimaryMode));
 
@@ -1609,6 +1827,11 @@ export class MarketIntelligenceV3 {
 export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
   const signalData = parseJsonSafe(snapshot.signalData, []);
   const intentData = parseJsonSafe(snapshot.intentData, []);
+  const competitorData = parseJsonSafe(snapshot.competitorData, []);
+  const diagnosticsParsed = parseJsonSafe(snapshot.diagnosticsData, null);
+  const competitorCoverageRegistry = Array.isArray(diagnosticsParsed?.competitorCoverageRegistry)
+    ? diagnosticsParsed.competitorCoverageRegistry
+    : [];
   const trajectoryData = parseJsonSafe(snapshot.trajectoryData, {
     marketHeatingIndex: 0,
     narrativeConvergenceScore: 0,
@@ -1674,6 +1897,8 @@ export function buildResultFromSnapshot(snapshot: any): MIv3DiagnosticResult {
     competitionIntensityLevel: deriveCompetitionIntensityLevel(trajectoryData.competitionIntensityScore || 0),
     audienceIntentSignals: [],
   };
+  (output as any).competitorData = competitorData;
+  (output as any).competitorCoverageRegistry = competitorCoverageRegistry;
 
   return {
     output,

@@ -236,6 +236,7 @@ export interface TrustTransferDesign {
 export interface PersuasionRoute {
   routeName: string;
   persuasionMode: string;
+  lockedAxisSummary?: string;
   primaryInfluenceDrivers: string[];
   /** T005: structured objection — { tag:{category,awarenessStage}, objection:{canonical,frequency,evidence,confidence} }.
    *  Strings are accepted for legacy downstream compat. */
@@ -286,6 +287,8 @@ export interface PersuasionRoute {
   primaryCorePainId?: string;
   segmentIds?: string[];
   funnelSnapshotId?: string;
+  semanticJudgeVerdict?: any;
+  repairLogs?: any[];
 }
 
 export interface DataReliabilityDiagnostics {
@@ -320,4 +323,6 @@ export interface PersuasionResult {
   engineVersion: number;
   autoCorrection?: AutoCorrection;
   strategyAcceptability?: import("../shared/strategy-acceptability").StrategyAcceptability;
+  semanticJudgeVerdict?: any;
+  repairLogs?: any[];
 }

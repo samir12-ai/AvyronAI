@@ -41,48 +41,23 @@ export function registerMechanismEngineRoutes(app: Express) {
         return res.status(400).json({ error: "differentiationSnapshotId is required" });
       }
 
-      let [diffSnapshot] = await db.select().from(differentiationSnapshots)
+      const [diffSnapshot] = await db.select().from(differentiationSnapshots)
         .where(and(eq(differentiationSnapshots.id, differentiationSnapshotId), eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
         .limit(1);
 
       if (!diffSnapshot) {
-        console.warn(`[MechanismEngine] Requested differentiationSnapshotId=${differentiationSnapshotId} not found — falling back to latest for campaign=${campaignId}`);
-        const [fallback] = await db.select().from(differentiationSnapshots)
-          .where(and(
-            eq(differentiationSnapshots.campaignId, campaignId),
-            eq(differentiationSnapshots.accountId, accountId),
-            inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
-          ))
-          .orderBy(desc(differentiationSnapshots.createdAt))
-          .limit(1);
-        if (!fallback) {
-          return res.status(400).json({
-            error: "MISSING_DEPENDENCY",
-            message: "Differentiation snapshot not found or campaign mismatch",
-          });
-        }
-        diffSnapshot = fallback;
+        return res.status(400).json({
+          error: "MISSING_DEPENDENCY",
+          message: "Differentiation snapshot not found or campaign mismatch",
+        });
       }
 
-      let activeDiffSnapshot = diffSnapshot;
+      const activeDiffSnapshot = diffSnapshot;
       if (activeDiffSnapshot.engineVersion !== DIFF_ENGINE_VERSION) {
-        const [latestDiff] = await db.select().from(differentiationSnapshots)
-          .where(and(
-            eq(differentiationSnapshots.campaignId, campaignId),
-            eq(differentiationSnapshots.accountId, accountId),
-            inArray(differentiationSnapshots.status, ["COMPLETE", "LOW_CONFIDENCE"]),
-            eq(differentiationSnapshots.engineVersion, DIFF_ENGINE_VERSION),
-          ))
-          .orderBy(desc(differentiationSnapshots.createdAt))
-          .limit(1);
-        if (latestDiff) {
-          activeDiffSnapshot = latestDiff;
-        } else {
-          return res.status(400).json({
-            error: "VERSION_MISMATCH",
-            message: `Differentiation snapshot version mismatch — please re-run Differentiation Engine first`,
-          });
-        }
+        return res.status(400).json({
+          error: "VERSION_MISMATCH",
+          message: `Differentiation snapshot version mismatch — please re-run Differentiation Engine first`,
+        });
       }
 
       const positioningSnapshotId = activeDiffSnapshot.positioningSnapshotId;
@@ -161,6 +136,7 @@ export function registerMechanismEngineRoutes(app: Express) {
           const rootInput = await assembleStrategyRootInput({
             campaignId,
             accountId,
+            jobId: __jobId,
             miSnapshotId: miSnapshotId || "",
             audienceSnapshotId: audienceSnapshotId || "",
             positioningSnapshotId,

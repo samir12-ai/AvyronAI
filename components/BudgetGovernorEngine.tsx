@@ -54,8 +54,18 @@ interface DataSource {
 interface BudgetGovernorData {
   exists: boolean;
   id?: string;
+  mode?: "recommendation_only" | string;
   status?: string;
   statusMessage?: string | null;
+  currency?: string;
+  totalMonthlyBudget?: number | null;
+  allocations?: Array<{
+    channel: string;
+    sharePercentage: number;
+    allocatedAmount: number;
+    rationale: string;
+  }>;
+  overallRationale?: string;
   decision?: { action: "test" | "scale" | "hold" | "halt"; reasoning: string };
   testBudgetRange?: BudgetRange;
   scaleBudgetRange?: BudgetRange;
@@ -118,8 +128,13 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
         setData({
           exists: true,
           id: s.id,
-          status: s.status,
+          mode: r.mode || 'recommendation_only',
+          status: r.status || s.status,
           statusMessage: s.statusMessage,
+          currency: r.currency || 'USD',
+          totalMonthlyBudget: r.totalMonthlyBudget,
+          allocations: r.allocations || [],
+          overallRationale: r.overallRationale,
           decision: r.decision,
           testBudgetRange: r.testBudgetRange,
           scaleBudgetRange: r.scaleBudgetRange,
@@ -223,7 +238,8 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
     );
   }
 
-  const hasData = data?.exists && data.decision;
+  const isRecommendationMode = data?.mode === 'recommendation_only' || (data?.allocations && data.allocations.length > 0) || (data?.status && ['COMPLETE', 'BUDGET_NOT_PROVIDED', 'ZERO_BUDGET', 'MISSING_CHANNELS', 'FAILED'].includes(data.status));
+  const hasData = data?.exists && (isRecommendationMode || !!data.decision);
   const decisionAction = data?.decision?.action || 'hold';
   const decisionCfg = DECISION_CONFIG[decisionAction] || DECISION_CONFIG.hold;
   const confidencePercent = data?.confidenceScore ? Math.round(data.confidenceScore * 100) : 0;
@@ -236,7 +252,9 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <Ionicons name="wallet" size={20} color="#fff" />
-            <Text style={styles.headerTitle}>Budget Governor V3</Text>
+            <Text style={styles.headerTitle}>
+              {isRecommendationMode ? 'Budget Recommender' : 'Budget Governor V3'}
+            </Text>
           </View>
           {data?.engineVersion && (
             <View style={styles.versionBadge}>
@@ -245,20 +263,41 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
           )}
         </View>
         {hasData && (
-          <View style={styles.headerMeta}>
-            <View style={styles.headerMetaItem}>
-              <Text style={styles.headerMetaLabel}>Decision</Text>
-              <Text style={styles.headerMetaValue}>{decisionCfg.label}</Text>
+          isRecommendationMode ? (
+            <View style={styles.headerMeta}>
+              <View style={styles.headerMetaItem}>
+                <Text style={styles.headerMetaLabel}>Status</Text>
+                <Text style={styles.headerMetaValue}>{data?.status || 'COMPLETE'}</Text>
+              </View>
+              <View style={styles.headerMetaItem}>
+                <Text style={styles.headerMetaLabel}>Monthly Budget</Text>
+                <Text style={styles.headerMetaValue}>
+                  {data?.totalMonthlyBudget != null
+                    ? `${data.currency || 'USD'} ${data.totalMonthlyBudget.toLocaleString()}`
+                    : 'Not Set'}
+                </Text>
+              </View>
+              <View style={styles.headerMetaItem}>
+                <Text style={styles.headerMetaLabel}>Channels</Text>
+                <Text style={styles.headerMetaValue}>{data?.allocations?.length ?? 0}</Text>
+              </View>
             </View>
-            <View style={styles.headerMetaItem}>
-              <Text style={styles.headerMetaLabel}>Confidence</Text>
-              <Text style={styles.headerMetaValue}>{confidencePercent}%</Text>
+          ) : (
+            <View style={styles.headerMeta}>
+              <View style={styles.headerMetaItem}>
+                <Text style={styles.headerMetaLabel}>Decision</Text>
+                <Text style={styles.headerMetaValue}>{decisionCfg.label}</Text>
+              </View>
+              <View style={styles.headerMetaItem}>
+                <Text style={styles.headerMetaLabel}>Confidence</Text>
+                <Text style={styles.headerMetaValue}>{confidencePercent}%</Text>
+              </View>
+              <View style={styles.headerMetaItem}>
+                <Text style={styles.headerMetaLabel}>Risk</Text>
+                <Text style={styles.headerMetaValue}>{riskPercent}%</Text>
+              </View>
             </View>
-            <View style={styles.headerMetaItem}>
-              <Text style={styles.headerMetaLabel}>Risk</Text>
-              <Text style={styles.headerMetaValue}>{riskPercent}%</Text>
-            </View>
-          </View>
+          )
         )}
       </LinearGradient>
 
@@ -271,9 +310,9 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
       {!hasData && !analyzing && (
         <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
           <Ionicons name="wallet-outline" size={40} color={colors.textMuted} />
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Budget Analysis</Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>No Budget Recommendation</Text>
           <Text style={[styles.emptySubtitle, { color: colors.textMuted }]}>
-            Run the Budget Governor to get test/scale budget recommendations, expansion permissions, and risk assessments.
+            Run the Budget Recommender to generate platform allocations and rationales based on your monthly marketing budget.
           </Text>
         </View>
       )}
@@ -292,18 +331,128 @@ export default function BudgetGovernorEngine({ isActive }: { isActive?: boolean 
           {analyzing ? (
             <>
               <ActivityIndicator size="small" color="#fff" />
-              <Text style={styles.analyzeBtnText}>Analyzing Budget...</Text>
+              <Text style={styles.analyzeBtnText}>Calculating Recommendation...</Text>
             </>
           ) : (
             <>
               <Ionicons name="wallet" size={16} color="#fff" />
-              <Text style={styles.analyzeBtnText}>{hasData ? 'Re-analyze Budget' : 'Analyze Budget'}</Text>
+              <Text style={styles.analyzeBtnText}>
+                {hasData ? 'Re-generate Recommendation' : 'Generate Recommendation'}
+              </Text>
             </>
           )}
         </LinearGradient>
       </Pressable>
 
-      {hasData && (
+      {hasData && isRecommendationMode && (
+        <View style={{ gap: 12, marginBottom: 12 }}>
+          {/* Overall Rationale */}
+          {data?.overallRationale ? (
+            <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder, padding: 14 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <Ionicons name="bulb-outline" size={16} color="#F59E0B" />
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Recommendation Rationale</Text>
+              </View>
+              <Text style={{ fontSize: 13, lineHeight: 18, color: colors.textSecondary }}>
+                {data.overallRationale}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Allocation Table */}
+          <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+            <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: colors.cardBorder }}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Platform Budget Distribution</Text>
+              <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2 }}>
+                Intelligent distribution across selected channels based on market fit and strategic priority.
+              </Text>
+            </View>
+
+            {data?.allocations && data.allocations.length > 0 ? (
+              <View>
+                {/* Table Header */}
+                <View style={{
+                  flexDirection: 'row',
+                  backgroundColor: colors.background,
+                  paddingVertical: 10,
+                  paddingHorizontal: 12,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.cardBorder,
+                }}>
+                  <Text style={{ flex: 2, fontSize: 11, fontWeight: '700', color: colors.textMuted }}>PLATFORM</Text>
+                  <Text style={{ flex: 1, fontSize: 11, fontWeight: '700', color: colors.textMuted, textAlign: 'center' }}>SHARE</Text>
+                  <Text style={{ flex: 1.5, fontSize: 11, fontWeight: '700', color: colors.textMuted, textAlign: 'right' }}>MONTHLY</Text>
+                  <Text style={{ flex: 3, fontSize: 11, fontWeight: '700', color: colors.textMuted, paddingLeft: 10 }}>WHY</Text>
+                </View>
+
+                {/* Table Rows */}
+                {data.allocations.map((alloc, i) => (
+                  <View
+                    key={i}
+                    style={{
+                      flexDirection: 'row',
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      borderBottomWidth: i < (data.allocations?.length ?? 0) - 1 ? 1 : 0,
+                      borderBottomColor: colors.cardBorder,
+                      backgroundColor: i % 2 === 0 ? 'transparent' : (colorScheme === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'),
+                    }}
+                  >
+                    <Text style={{ flex: 2, fontSize: 12, fontWeight: '600', color: colors.text }}>
+                      {alloc.channel}
+                    </Text>
+                    <Text style={{ flex: 1, fontSize: 12, fontWeight: '600', color: '#F59E0B', textAlign: 'center' }}>
+                      {alloc.sharePercentage.toFixed(1)}%
+                    </Text>
+                    <Text style={{ flex: 1.5, fontSize: 12, fontWeight: '600', color: colors.text, textAlign: 'right' }}>
+                      {data.currency || 'USD'} {alloc.allocatedAmount.toLocaleString()}
+                    </Text>
+                    <Text style={{ flex: 3, fontSize: 11, color: colors.textSecondary, paddingLeft: 10, lineHeight: 16 }}>
+                      {alloc.rationale}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <View style={{ padding: 16, alignItems: 'center' }}>
+                <Text style={{ fontSize: 13, color: colors.textMuted, textAlign: 'center' }}>
+                  {data?.status === 'BUDGET_NOT_PROVIDED'
+                    ? 'No monthly budget has been specified. Enter a budget in Settings to generate platform allocations.'
+                    : data?.status === 'ZERO_BUDGET'
+                    ? 'Monthly budget is set to 0. Recommended organic/unpaid distribution.'
+                    : data?.status === 'MISSING_CHANNELS'
+                    ? 'No channels have been selected yet. Run Channel Selection first.'
+                    : 'No channel allocations available.'}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Mandatory Disclaimer */}
+          <View style={{
+            padding: 12,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: colorScheme === 'dark' ? '#1E3A5F' : '#BAE6FD',
+            backgroundColor: colorScheme === 'dark' ? '#0F1D32' : '#F0F9FF',
+            flexDirection: 'row',
+            gap: 10,
+            alignItems: 'flex-start',
+          }}>
+            <Ionicons name="information-circle" size={18} color="#0284C7" style={{ marginTop: 1 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: colorScheme === 'dark' ? '#7DD3FC' : '#0369A1', marginBottom: 2 }}>
+                Recommended allocation only — no money is spent automatically.
+              </Text>
+              <Text style={{ fontSize: 11, color: colorScheme === 'dark' ? '#94A3B8' : '#64748B', lineHeight: 15 }}>
+                Avyron provides strategic budget recommendations and does not execute trades, place ads, or directly spend funds on external platforms.
+              </Text>
+            </View>
+          </View>
+        </View>
+      )}
+
+      {hasData && !isRecommendationMode && (
         <>
           {data.killFlag && (
             <View style={[styles.killFlagBox, { backgroundColor: '#EF444415', borderColor: '#EF444430' }]}>

@@ -1632,198 +1632,98 @@ function setupErrorHandler(app: express.Application) {
   server.listen(
     {
       port,
-      host: "127.0.0.1",
+      host: host || "0.0.0.0",
     },
     () => {
       log(`express server serving on http://${host}:${port}`);
-      startAutonomousWorker();
-      startPublishWorker();
-      // P-1 — per-post revisit scheduler (24h/72h/7d append-only performance
-      // snapshots). Lives outside autonomous-worker on purpose: revisits must
-      // run regardless of autopilot state. REVISIT_SCHEDULER_DISABLED=true to disable.
-      startRevisitScheduler();
-      
-      // Watchtower Phase 2 - Continuous Monitoring Scheduler
-      startWatchtowerScheduler();
+      const isInspectionMode = process.env.INSPECTION_MODE === "1" || process.env.DISABLE_BACKGROUND_WORKERS === "1";
+      if (isInspectionMode) {
+        console.warn("\n================================================================================");
+        console.warn("⚠️  [Server] INSPECTION_MODE=1: All background workers, schedulers, scrapers,");
+        console.warn("   and auto-mutations are DISABLED. Safe for read-only local inspection.");
+        console.warn("================================================================================\n");
+      } else {
+        startAutonomousWorker();
+        startPublishWorker();
+        // P-1 — per-post revisit scheduler (24h/72h/7d append-only performance
+        // snapshots). Lives outside autonomous-worker on purpose: revisits must
+        // run regardless of autopilot state. REVISIT_SCHEDULER_DISABLED=true to disable.
+        startRevisitScheduler();
+        
+        // Watchtower Phase 2 - Continuous Monitoring Scheduler
+        startWatchtowerScheduler();
 
-      startSnapshotCleanupWorker();
-      // Task #171 — stranded-run recovery: marks orchestrator jobs stuck in
-      // RUNNING past the staleness threshold as TIMED_OUT (boot sweep +
-      // 10-minute interval) so zombie rows never shadow completed runs.
-      startStrandedRunSweeper();
-      // Seal #13 / Track #1 — operational continuity heartbeat. Hourly
-      // tick + idempotent runBoss invocation per campaign. First tick
-      // 60s post-listen so other workers are up first. Disabled by
-      // CONTINUITY_SCHEDULER_DISABLED=true (used by tests).
-      startContinuityScheduler();
-      // Seal #14 / Track #2 — continuity supervisor (the watcher of the
-      // watchers). Detects scheduler heartbeat-stale + per-chain lag
-      // across the 10-chain operational registry.
-      startContinuitySupervisor();
-      log(`[Server] Continuity layer up — replicaId=${getReplicaId()}`);
+        startSnapshotCleanupWorker();
+        // Task #171 — stranded-run recovery: marks orchestrator jobs stuck in
+        // RUNNING past the staleness threshold as TIMED_OUT (boot sweep +
+        // 10-minute interval) so zombie rows never shadow completed runs.
+        startStrandedRunSweeper();
+        // Seal #13 / Track #1 — operational continuity heartbeat. Hourly
+        // tick + idempotent runBoss invocation per campaign. First tick
+        // 60s post-listen so other workers are up first. Disabled by
+        // CONTINUITY_SCHEDULER_DISABLED=true (used by tests).
+        startContinuityScheduler();
+        // Seal #14 / Track #2 — continuity supervisor (the watcher of the
+        // watchers). Detects scheduler heartbeat-stale + per-chain lag
+        // across the 10-chain operational registry.
+        startContinuitySupervisor();
+        log(`[Server] Continuity layer up — replicaId=${getReplicaId()}`);
 
-      // Task #91 / Phase 4-C — Parity gate hourly scheduler. Disabled
-      // when PARITY_GATE_DISABLED=1 (tests / incident response) or when
-      // the global continuity scheduler is disabled. The candidate
-      // orchestrator factory is registered lazily so this boot path
-      // does NOT require the heavy orchestrator module to load early.
-      try {
-        const parityMod = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
-        // The candidate factory deliberately defers requiring the
-        // orchestrator until first replay tick. The factory must return
-        // a fresh closure per call (no shared mutable state).
-        // Shadow burn-in default: the candidate factory throws a
-        // documented "not yet wired" error so every replay records as
-        // HARNESS_ERROR and the gate STAYS RED until Phase 4-B finishes
-        // extracting modules and registers a real candidate. This is the
-        // safe default — the gate can never go green by accident.
-        // Code-review #7 finding #1: the throwing stub is the SAFE
-        // default until Phase 4-B llm-injection plumbing wires a real
-        // candidate. We make the deferred state EXPLICIT in three ways:
-        //   (a) Set PARITY_CANDIDATE_DEFERRED=1 so computeParityHealth()
-        //       emits a `candidate_orchestrator_not_wired_phase4b_pending`
-        //       blocker — gate cannot accidentally go green.
-        //   (b) Log a loud boot warning so the operator sees the state.
-        //   (c) Operators who DO wire a real candidate must call
-        //       setParityCandidateFactory(real) AND clear
-        //       PARITY_CANDIDATE_DEFERRED in the same change.
-        if (!process.env.PARITY_CANDIDATE_DEFERRED) {
-          process.env.PARITY_CANDIDATE_DEFERRED = "1";
-        }
-        parityMod.setParityCandidateFactory(() => ({
-          async run() {
-            throw new Error(
-              "PARITY_CANDIDATE_NOT_WIRED: no candidate orchestrator registered " +
-              "(Task #91 / Phase 4-C shadow default). Phase 4-B extraction must " +
-              "call setParityCandidateFactory(...) before the parity gate can pass.",
+        // Task #91 / Phase 4-C — Parity gate hourly scheduler. Disabled
+        // when PARITY_GATE_DISABLED=1 (tests / incident response) or when
+        // the global continuity scheduler is disabled. The candidate
+        // orchestrator factory is registered lazily so this boot path
+        // does NOT require the heavy orchestrator module to load early.
+        try {
+          const parityMod = require("./orchestrator/replay/parity") as typeof import("./orchestrator/replay/parity");
+          if (!process.env.PARITY_CANDIDATE_DEFERRED) {
+            process.env.PARITY_CANDIDATE_DEFERRED = "1";
+          }
+          parityMod.setParityCandidateFactory(() => ({
+            async run() {
+              throw new Error(
+                "PARITY_CANDIDATE_NOT_WIRED: no candidate orchestrator registered " +
+                "(Task #91 / Phase 4-C shadow default). Phase 4-B extraction must " +
+                "call setParityCandidateFactory(...) before the parity gate can pass.",
+              );
+            },
+          }));
+          if (process.env.PARITY_CANDIDATE_DEFERRED === "1") {
+            console.warn(
+              "[Server] PARITY_CANDIDATE_DEFERRED=1 — parity scheduler will run " +
+                "but every tick records HARNESS_ERROR until Phase 4-B wires a real " +
+                "candidate orchestrator. Parity gate runs as a regression observer only (Task #93 / P4-E).",
             );
-          },
-        }));
-        if (process.env.PARITY_CANDIDATE_DEFERRED === "1") {
-          console.warn(
-            "[Server] PARITY_CANDIDATE_DEFERRED=1 — parity scheduler will run " +
-              "but every tick records HARNESS_ERROR until Phase 4-B wires a real " +
-              "candidate orchestrator. Parity gate runs as a regression observer only (Task #93 / P4-E).",
-          );
+          }
+          const pathCoverageMod = require("./orchestrator/replay/parity/path-coverage") as typeof import("./orchestrator/replay/parity/path-coverage");
+          const syntheticCaptureMod = require("./orchestrator/replay/parity/synthetic-capture") as typeof import("./orchestrator/replay/parity/synthetic-capture");
+          pathCoverageMod.setSyntheticFillerCaptureHandler(syntheticCaptureMod.captureSyntheticFiller);
+          parityMod.startParityScheduler();
+        } catch (err) {
+          console.error("[Server] Parity scheduler start failed:", err);
         }
-        // Wire the synthetic-filler capture handler so uncovered
-        // path-shapes auto-generate a `source='synthetic_filler'`
-        // cassette (cloned from the most recent production seed).
-        const pathCoverageMod = require("./orchestrator/replay/parity/path-coverage") as typeof import("./orchestrator/replay/parity/path-coverage");
-        const syntheticCaptureMod = require("./orchestrator/replay/parity/synthetic-capture") as typeof import("./orchestrator/replay/parity/synthetic-capture");
-        pathCoverageMod.setSyntheticFillerCaptureHandler(syntheticCaptureMod.captureSyntheticFiller);
-        parityMod.startParityScheduler();
-      } catch (err) {
-        console.error("[Server] Parity scheduler start failed:", err);
-      }
 
-      invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
+        invalidateStaleSnapshots().catch(err => console.error("[MIv3] Startup snapshot invalidation error:", err));
 
-      // boot is fast; subsequent ticks every 24h. cascadeDeleteAccount is
-      // transactional, so a failed reap rolls back and retries next tick.
-      // Track #3 / Seal #15 — store every timer handle so SIGTERM clears
-      // them. The previous code created the inner setInterval inside an
-      // anonymous setTimeout closure with no handle stored, so the reaper
-      // and meta-token health interval kept ticking after gracefulShutdown
-      // cleared the workers above (zombie schedulers).
-      const REAPER_INTERVAL_MS = 24 * 60 * 60 * 1000;
-      tombstoneReaperBootTimer = setTimeout(() => {
-        runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
-        tombstoneReaperTimer = setInterval(() => {
+        const REAPER_INTERVAL_MS = 24 * 60 * 60 * 1000;
+        tombstoneReaperBootTimer = setTimeout(() => {
           runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
-        }, REAPER_INTERVAL_MS);
-      }, 60_000);
+          tombstoneReaperTimer = setInterval(() => {
+            runTombstoneReaper().catch(err => logger.error({ component: "reaper", err: String(err) }, "reaper tick failed"));
+          }, REAPER_INTERVAL_MS);
+        }, 60_000);
 
-      metaHealthBootTimer = setTimeout(() => {
-        runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));
-      }, 30000);
+        metaHealthBootTimer = setTimeout(() => {
+          runAllHealthChecks().catch(err => console.error("[MetaHealth] Initial health check error:", err));
+        }, 30000);
 
-      const HEALTH_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-      metaHealthIntervalTimer = setInterval(() => {
-        runAllHealthChecks().catch(err => console.error("[MetaHealth] Scheduled health check error:", err));
-      }, HEALTH_CHECK_INTERVAL_MS);
+        const HEALTH_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+        metaHealthIntervalTimer = setInterval(() => {
+          runAllHealthChecks().catch(err => console.error("[MetaHealth] Scheduled health check error:", err));
+        }, HEALTH_CHECK_INTERVAL_MS);
 
-      // ─── Phase 4 (2026-04-30) — User-channel 48h scheduler ──────────────
-      // Hourly tick across ALL active campaigns (autopilot or not). Gates on
-      // needsUserChannelScrape (24-48h hash-spread per profile) before calling
-      // scrapeUserChannels. Strict invariant: scraper only writes to
-      // user_channel_snapshots; never mutates DNA, never triggers strategy.
-      const USER_SCRAPE_TICK_MS = 60 * 60 * 1000;
-      userScrapeTimer = setInterval(() => {
-        (async () => {
-          try {
-            const { needsUserChannelScrape, scrapeUserChannels } = await import("./user-channel-scraper");
-            const { db: dbRef } = await import("./db");
-            const { campaignSelections } = await import("@shared/schema");
-            const sels = await dbRef.select().from(campaignSelections);
-            for (const s of sels) {
-              if (!s.selectedCampaignId) continue;
-              try {
-                if (await needsUserChannelScrape(s.accountId, s.selectedCampaignId)) {
-                  console.log(`[Scheduler:user48h] scraping ${s.accountId}/${s.selectedCampaignId}`);
-                  await scrapeUserChannels(s.accountId, s.selectedCampaignId);
-                }
-              } catch (e: any) {
-                console.warn(`[Scheduler:user48h] ${s.accountId}/${s.selectedCampaignId} — ${e?.message || e}`);
-              }
-            }
-          } catch (e) {
-            console.error("[Scheduler:user48h] tick error:", e);
-          }
-        })();
-      }, USER_SCRAPE_TICK_MS);
-
-      // ─── Phase 4 (2026-04-30) — Competitor weekly scheduler ─────────────
-      // Hourly tick across ALL active campaigns. Enqueues a fetch job (via
-      // startFetchJob) when the most-recent ci_competitor_metrics_snapshot.last_fetch_at
-      // is older than 7 days. The fetch-orchestrator already dedupes
-      // RUNNING/QUEUED jobs and per-account creation locks. Strict invariant:
-      // never mutates DNA, never triggers strategy.
-      const COMPETITOR_FETCH_TICK_MS = 60 * 60 * 1000;
-      const COMPETITOR_FETCH_STALE_MS = 7 * 24 * 60 * 60 * 1000;
-      competitorFetchTimer = setInterval(() => {
-        (async () => {
-          try {
-            const { db: dbRef } = await import("./db");
-            const { campaignSelections, miFetchJobs } = await import("@shared/schema");
-            const { startFetchJob } = await import("./market-intelligence-v3/fetch-orchestrator");
-            const drizzle = await import("drizzle-orm");
-            const sels = await dbRef.select().from(campaignSelections);
-            const cutoff = new Date(Date.now() - COMPETITOR_FETCH_STALE_MS);
-            for (const s of sels) {
-              if (!s.selectedCampaignId) continue;
-              try {
-                // mi_fetch_jobs is the campaign-keyed source of truth for the
-                // competitor lane. We use the most recent completedAt with
-                // status=DONE as the staleness anchor.
-                const [latest] = await dbRef
-                  .select({ completedAt: miFetchJobs.completedAt })
-                  .from(miFetchJobs)
-                  .where(drizzle.and(
-                    drizzle.eq(miFetchJobs.accountId, s.accountId),
-                    drizzle.eq(miFetchJobs.campaignId, s.selectedCampaignId),
-                    drizzle.eq(miFetchJobs.status, "DONE"),
-                  ))
-                  .orderBy(drizzle.desc(miFetchJobs.completedAt))
-                  .limit(1);
-                const last = latest?.completedAt;
-                if (!last || last < cutoff) {
-                  const jobId = await startFetchJob(s.accountId, s.selectedCampaignId);
-                  console.log(`[Scheduler:competitorWeekly] enqueued ${jobId} for ${s.accountId}/${s.selectedCampaignId} (last=${last ? last.toISOString() : "never"})`);
-                }
-              } catch (e: any) {
-                const msg = e?.message || String(e);
-                // "No active competitors" / "already in progress" are normal — log quietly.
-                if (!/No active competitors|already in progress|Reusing/i.test(msg)) {
-                  console.warn(`[Scheduler:competitorWeekly] ${s.accountId}/${s.selectedCampaignId} — ${msg}`);
-                }
-              }
-            }
-          } catch (e) {
-            console.error("[Scheduler:competitorWeekly] tick error:", e);
-          }
-        })();
-      }, COMPETITOR_FETCH_TICK_MS);
+        // Unified Acquisition Consolidation: duplicate inline userScrapeTimer & competitorFetchTimer retired.
+      }
     },
   );
 

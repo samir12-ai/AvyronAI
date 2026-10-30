@@ -40,6 +40,7 @@ export interface EnrichmentDnaInput {
   coreProblemSolved?: string;
   uniqueMechanism?: string;
   strategicAdvantage?: string;
+  validatedCapabilities?: string[];
 }
 
 export interface DnaEnrichmentCandidate {
@@ -94,30 +95,33 @@ function marshalAelEvidence(ael: AnalyticalPackage | null): {
   lines: string[];
   validIds: Set<string>;
 } {
-  const lines: string[] = [];
   const validIds = new Set<string>();
-  if (!ael) return { lines, validIds };
+  const outLines: string[] = [];
+  if (!ael) return { lines: outLines, validIds };
 
   ael.root_causes?.forEach((rc, i) => {
     const id = `RC${i + 1}`;
     validIds.add(id);
-    lines.push(`[${id}] surface "${rc.surfaceSignal}" → deep cause: ${rc.deepCause} (${rc.confidenceLevel})`);
+    outLines.push(`[${id}] surface "${rc.surfaceSignal}" → deep cause: ${rc.deepCause} (${rc.confidenceLevel})`);
   });
   ael.causal_chains?.forEach((cc, i) => {
     const id = `CC${i + 1}`;
     validIds.add(id);
-    lines.push(`[${id}] ${cc.pain} → ${cc.cause} → ${cc.impact} → ${cc.behavior} (conversion: ${cc.conversionEffect})`);
+    outLines.push(`[${id}] ${cc.pain} → ${cc.cause} → ${cc.impact} → ${cc.behavior} (conversion: ${cc.conversionEffect})`);
   });
   ael.buying_barriers?.forEach((bb, i) => {
     const id = `BB${i + 1}`;
     validIds.add(id);
-    lines.push(`[${id}] [${bb.severity}] ${bb.barrier} — root cause: ${bb.rootCause}`);
+    outLines.push(`[${id}] [${bb.severity}] ${bb.barrier} — root cause: ${bb.rootCause}`);
   });
-  return { lines, validIds };
+  return { lines: outLines, validIds };
 }
 
 function describeDna(dna: EnrichmentDnaInput | null): string {
   if (!dna) return "(no product context available)";
+  const caps = Array.isArray(dna.validatedCapabilities) && dna.validatedCapabilities.length > 0
+    ? `Validated Product Capabilities (ONLY permitted capabilities):\n${dna.validatedCapabilities.map((c) => `  - "${c}"`).join("\n")}`
+    : "";
   const parts = [
     dna.name ? `Name: ${dna.name}` : "",
     dna.businessType ? `Type: ${dna.businessType}` : "",
@@ -125,6 +129,7 @@ function describeDna(dna: EnrichmentDnaInput | null): string {
     dna.coreProblemSolved ? `Core problem solved: ${dna.coreProblemSolved}` : "",
     dna.uniqueMechanism ? `Current unique mechanism: ${dna.uniqueMechanism}` : "",
     dna.strategicAdvantage ? `Current strategic advantage: ${dna.strategicAdvantage}` : "",
+    caps,
   ].filter((p) => p.length > 0);
   return parts.length > 0 ? parts.join("\n") : "(product context present but empty of differentiators)";
 }
@@ -143,9 +148,9 @@ function buildEnrichmentPrompt(input: {
       ? input.competitorComplaints.slice(0, 8).map((c) => `- ${c}`).join("\n")
       : "(no competitor complaint signals available)";
 
-  return `You are a strategy analyst extracting a PROPRIETARY DIFFERENTIATOR for a product.
+  return `You are a strategy analyst extracting a GROUNDED STRATEGIC DIFFERENTIATOR for a product.
 
-WHY: an interchangeability judge just REJECTED this product's ${kindLabel} as generic — it could be pasted unchanged onto a competitor. Judge reason:
+WHY: an interchangeability judge just REJECTED this product's ${kindLabel}. Judge reason:
 """
 ${input.rejectionReason}
 """
@@ -160,10 +165,13 @@ TOP COMPETITOR COMPLAINT SIGNALS (gaps competitors demonstrably have):
 ${complaintBlock}
 
 YOUR TASK:
-Propose 1-2 candidate differentiators/mechanisms this product could truthfully own, each grounded in a gap competitors demonstrably have. Rules:
+Propose 1-2 candidate differentiators/mechanisms this product could truthfully own by combining its VALIDATED PRODUCT CAPABILITIES above to address a gap in the AEL evidence. Rules:
 - Each candidate MUST cite at least one existing AEL evidence ID from the list above (e.g. RC2, CC2, BB1) in "groundingRefs". Do NOT invent IDs that are not listed.
-- Each differentiator must be SPECIFIC enough that a competitor could NOT truthfully repeat it — tie it to the cited gap.
-- Do NOT restate generic benefits ("save money", "easy to use", "proven system"). Name the concrete mechanism or capability.
+- CRITICAL: Every candidate differentiator MUST be 100% supported by the Validated Product Capabilities / Current Product Identity listed above. NEVER invert an AEL barrier or customer complaint into an unverified product capability (for example, do NOT claim editing/revising outputs, full user control over details, guarantees, or features that are not explicitly listed in the Validated Product Capabilities above).
+- Frame each differentiator around the exact verified capabilities listed above (e.g. story-driven creation, free trial preview before paying upon gifting, downloadable multimedia assets) and how they resolve the cited AEL buyer barrier.
+- Do NOT restate generic benefits ("save money", "easy to use", "proven system"). Name the concrete verified capability and workflow.
+- CRITICAL: DO NOT invent proprietary technology, patented materials, trademarked fabric names (e.g. 'ThermoWeave™'), laboratory certifications, or technical specifications that are not present in the Product Identity.
+- Material attributes cannot be semantically upgraded without evidence (e.g., 'comfort' does not imply 'breathable', 'modesty' does not imply 'opaque').
 - Keep each differentiator to one sentence.
 
 Return ONLY valid JSON, no commentary:

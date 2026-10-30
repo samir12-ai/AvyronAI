@@ -280,7 +280,7 @@ export async function pruneOldSnapshots(
   accountId: string
 ): Promise<number> {
   try {
-    const { eq, and, desc } = await import("drizzle-orm");
+    const { eq, and, desc, inArray } = await import("drizzle-orm");
     const all = await db
       .select({ id: table.id, createdAt: table.createdAt })
       .from(table)
@@ -289,7 +289,73 @@ export async function pruneOldSnapshots(
 
     if (all.length <= maxRetained) return 0;
 
-    const toDelete = all.slice(maxRetained);
+    // Collect snapshot IDs referenced by non-superseded (ACTIVE, REVIEW_REQUIRED) roots
+    const protectedIds = new Set<string>();
+    try {
+      const { strategyRoots, rootBundles, differentiationSnapshots, positioningSnapshots } = await import("@shared/schema");
+      const activeBundles = await db
+        .select({ sourceSnapshot: rootBundles.sourceSnapshot })
+        .from(rootBundles)
+        .where(and(eq(rootBundles.campaignId, campaignId), eq(rootBundles.accountId, accountId), eq(rootBundles.status, "active")));
+      for (const b of activeBundles) {
+        try {
+          const src = typeof b.sourceSnapshot === "string" ? JSON.parse(b.sourceSnapshot) : b.sourceSnapshot;
+          const sel = src?.selectedSnapshotIds || {};
+          for (const val of Object.values(sel)) {
+            if (typeof val === "string" && val) protectedIds.add(val);
+          }
+        } catch {}
+      }
+      const recentDiffs = await db
+        .select({ id: differentiationSnapshots.id, miSnapshotId: differentiationSnapshots.miSnapshotId, audienceSnapshotId: differentiationSnapshots.audienceSnapshotId })
+        .from(differentiationSnapshots)
+        .where(and(eq(differentiationSnapshots.campaignId, campaignId), eq(differentiationSnapshots.accountId, accountId)))
+        .orderBy(desc(differentiationSnapshots.createdAt))
+        .limit(5);
+      for (const d of recentDiffs) {
+        if (d.id) protectedIds.add(d.id);
+        if (d.miSnapshotId) protectedIds.add(d.miSnapshotId);
+        if (d.audienceSnapshotId) protectedIds.add(d.audienceSnapshotId);
+      }
+      const recentPos = await db
+        .select({ id: positioningSnapshots.id, miSnapshotId: positioningSnapshots.miSnapshotId, audienceSnapshotId: positioningSnapshots.audienceSnapshotId })
+        .from(positioningSnapshots)
+        .where(and(eq(positioningSnapshots.campaignId, campaignId), eq(positioningSnapshots.accountId, accountId)))
+        .orderBy(desc(positioningSnapshots.createdAt))
+        .limit(5);
+      for (const p of recentPos) {
+        if (p.id) protectedIds.add(p.id);
+        if (p.miSnapshotId) protectedIds.add(p.miSnapshotId);
+        if (p.audienceSnapshotId) protectedIds.add(p.audienceSnapshotId);
+      }
+      const activeOrReviewRoots = await db
+        .select({
+          miSnapshotId: strategyRoots.miSnapshotId,
+          audienceSnapshotId: strategyRoots.audienceSnapshotId,
+          positioningSnapshotId: strategyRoots.positioningSnapshotId,
+          differentiationSnapshotId: strategyRoots.differentiationSnapshotId,
+          mechanismSnapshotId: strategyRoots.mechanismSnapshotId,
+        })
+        .from(strategyRoots)
+        .where(and(
+          eq(strategyRoots.campaignId, campaignId),
+          eq(strategyRoots.accountId, accountId),
+          inArray(strategyRoots.status, ["ACTIVE", "REVIEW_REQUIRED"]),
+        ));
+
+      for (const r of activeOrReviewRoots) {
+        if (r.miSnapshotId) protectedIds.add(r.miSnapshotId);
+        if (r.audienceSnapshotId) protectedIds.add(r.audienceSnapshotId);
+        if (r.positioningSnapshotId) protectedIds.add(r.positioningSnapshotId);
+        if (r.differentiationSnapshotId) protectedIds.add(r.differentiationSnapshotId);
+        if (r.mechanismSnapshotId) protectedIds.add(r.mechanismSnapshotId);
+      }
+    } catch {
+      // Table or schema query non-blocking
+    }
+
+    const candidateRows = all.slice(maxRetained);
+    const toDelete = candidateRows.filter((r: any) => !protectedIds.has(r.id));
     const idsToDelete = toDelete.map((r: any) => r.id);
 
     let deleted = 0;
@@ -299,7 +365,7 @@ export async function pruneOldSnapshots(
     }
 
     if (deleted > 0) {
-      console.log(`[SnapshotPruning] Pruned ${deleted} old snapshot(s) for campaign ${campaignId}`);
+      console.log(`[SnapshotPruning] Pruned ${deleted} old snapshot(s) for campaign ${campaignId} (${protectedIds.size} protected by active/review roots)`);
     }
     return deleted;
   } catch (error: any) {

@@ -46,7 +46,7 @@ const MIN_COMMENTS_TARGET = 50;
 const DEFAULT_TIME_WINDOW_DAYS = 60;
 const EXPANDED_TIME_WINDOW_DAYS = 120;
 const MAX_RETRIES = 3;
-const MAX_PAGES_PER_COMPETITOR = 12;
+const MAX_PAGES_PER_COMPETITOR = 30;
 const MAX_REQUESTS_PER_JOB = 120;
 const MAX_RUNTIME_MS = 20 * 60 * 1000;
 const MAX_CONCURRENT_COMPETITORS_PER_JOB = 1;
@@ -75,7 +75,7 @@ type StopReason = "MAX_PAGES_REACHED" | "MAX_REQUESTS_REACHED" | "MAX_RUNTIME_RE
 
 type StageStatus = "PENDING" | "RUNNING" | "COMPLETE" | "FAILED" | "SKIPPED" | "SKIPPED_FETCH_COOLDOWN" | "CACHED_ANALYSIS" | "BLOCKED_INSUFFICIENT_DATA";
 
-type CompetitorFetchStatus = "FETCH_SUCCESS" | "FETCH_FAILED" | "RATE_LIMITED" | "NO_POSTS_FOUND" | "SKIPPED_DUE_TO_BUDGET" | "SKIPPED_DUE_TO_RUNTIME" | "SKIPPED_DUE_TO_PAGES_CEILING" | "COOLDOWN_ACTIVE" | "BLOCKED_BY_PLATFORM" | "PENDING";
+type CompetitorFetchStatus = "FETCH_SUCCESS" | "FETCH_FAILED" | "RATE_LIMITED" | "NO_POSTS_FOUND" | "SKIPPED_DUE_TO_BUDGET" | "SKIPPED_DUE_TO_RUNTIME" | "SKIPPED_DUE_TO_PAGES_CEILING" | "COOLDOWN_ACTIVE" | "BLOCKED_BY_PLATFORM" | "UNSUPPORTED_SOURCE" | "PENDING";
 
 interface CompetitorStage {
   competitorId: string;
@@ -326,7 +326,8 @@ export async function getRunningJobCountForAccount(accountId: string): Promise<n
 
 async function _createAndStartJob(accountId: string, campaignId: string, lockKey: string, targetCompetitorIds?: string[]): Promise<string> {
   let competitors = await db.select().from(ciCompetitors)
-    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
+    .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)))
+    .orderBy(sql`COALESCE(${ciCompetitors.lastCheckedAt}, '1970-01-01'::timestamp) ASC`, ciCompetitors.createdAt);
 
   if (targetCompetitorIds && targetCompetitorIds.length > 0) {
     competitors = competitors.filter(c => targetCompetitorIds.includes(c.id));
@@ -337,7 +338,7 @@ async function _createAndStartJob(accountId: string, campaignId: string, lockKey
   }
 
   const competitorInputs: CompetitorInput[] = competitors.map(c => ({
-    id: c.id, name: c.name, platform: c.platform, profileLink: c.profileLink,
+    id: c.id, name: c.name, 
     businessType: c.businessType, postingFrequency: c.postingFrequency,
     contentTypeRatio: c.contentTypeRatio, engagementRatio: c.engagementRatio,
     ctaPatterns: c.ctaPatterns, discountFrequency: c.discountFrequency,
@@ -561,9 +562,9 @@ async function scrapeWebAndBlogForCompetitor(comp: any, accountId: string): Prom
     }
 
     const blogFailedRecently = comp.blogEnrichmentStatus === "FAILED" && comp.blogScrapedAt && (Date.now() - new Date(comp.blogScrapedAt).getTime()) < 24 * 60 * 60 * 1000;
-    if (comp.blogUrl && !blogFailedRecently && (isWebDataStale(comp.blogScrapedAt) || comp.blogEnrichmentStatus === "NONE" || comp.blogEnrichmentStatus === "FAILED")) {
-      console.log(`[FetchOrch] Blog scrape starting for ${comp.name}: ${comp.blogUrl}`);
-      const blogResult = await scrapeBlog(comp.id, comp.name, comp.blogUrl, accountId);
+    if (false) {
+      
+      
 
       await db.insert(competitorWebData).values({
         accountId,
@@ -605,8 +606,14 @@ async function executeFetchJob(
   jobId: string,
   accountId: string,
   campaignId: string,
-  competitors: CiCompetitorRow[],
+  rawCompetitors: CiCompetitorRow[],
 ): Promise<void> {
+  // Fair scheduling: always process never-checked or oldest-checked competitors first
+  const competitors = [...rawCompetitors].sort((a, b) => {
+    const tA = a.lastCheckedAt ? new Date(a.lastCheckedAt).getTime() : 0;
+    const tB = b.lastCheckedAt ? new Date(b.lastCheckedAt).getTime() : 0;
+    return tA - tB;
+  });
   const startTime = Date.now();
   const stages: Record<string, CompetitorStage> = {};
   const limitReasons: FetchLimitReason[] = [];
@@ -713,7 +720,7 @@ async function executeFetchJob(
       let fetchResult: FetchResult | null = null;
       const compHash = computeCompetitorHash([{
         id: comp.id, name: comp.name, platform: comp.platform,
-        profileLink: comp.profileLink, businessType: comp.businessType,
+        businessType: comp.businessType,
         posts: [], comments: [],
       }]);
       let proxyCtx = acquireStickySession(accountId, campaignId, compHash);
@@ -864,7 +871,7 @@ async function executeFetchJob(
             const comments = await getStoredCommentsForMIv3(comp.id, accountId);
             const competitorInput: CompetitorInput = {
               id: comp.id, name: comp.name, platform: comp.platform,
-              profileLink: comp.profileLink, businessType: comp.businessType,
+              businessType: comp.businessType,
               postingFrequency: comp.postingFrequency, contentTypeRatio: comp.contentTypeRatio,
               engagementRatio: comp.engagementRatio, ctaPatterns: comp.ctaPatterns,
               discountFrequency: comp.discountFrequency, hookStyles: comp.hookStyles,
@@ -892,6 +899,23 @@ async function executeFetchJob(
           details: `${fetchResult.message} | existingCoverage: ${fetchResult.postsCollected}p/${fetchResult.commentsCollected}c | thresholdsMet: ${coverageMeetsThresholds}`,
         });
         await scrapeWebAndBlogForCompetitor(comp, accountId);
+        await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
+        continue;
+      }
+
+      if (fetchResult.status === "UNSUPPORTED_SOURCE") {
+        stage.POSTS_FETCH = "SKIPPED";
+        stage.COMMENTS_FETCH = "SKIPPED";
+        stage.CTA_ANALYSIS = "SKIPPED";
+        stage.SIGNAL_COMPUTE = "SKIPPED";
+        stage.fetchStatus = "UNSUPPORTED_SOURCE";
+        limitReasons.push({
+          competitorId: comp.id,
+          competitorName: comp.name,
+          stage: "POSTS_FETCH",
+          reason: "UNSUPPORTED_SOURCE" as any,
+          details: fetchResult.message,
+        });
         await updateJobStages(jobId, stages, limitReasons, totalPosts, totalComments);
         continue;
       }
@@ -998,7 +1022,7 @@ async function executeFetchJob(
 
         const competitorInput: CompetitorInput = {
           id: comp.id, name: comp.name, platform: comp.platform,
-          profileLink: comp.profileLink, businessType: comp.businessType,
+          businessType: comp.businessType,
           postingFrequency: comp.postingFrequency, contentTypeRatio: comp.contentTypeRatio,
           engagementRatio: comp.engagementRatio, ctaPatterns: comp.ctaPatterns,
           discountFrequency: comp.discountFrequency, hookStyles: comp.hookStyles,
@@ -1288,7 +1312,7 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     const posts = await getStoredPostsForMIv3(c.id, accountId);
     const comments = await getStoredCommentsForMIv3(c.id, accountId);
     competitorInputs.push({
-      id: c.id, name: c.name, platform: c.platform, profileLink: c.profileLink,
+      id: c.id, name: c.name, 
       businessType: c.businessType, postingFrequency: c.postingFrequency,
       contentTypeRatio: c.contentTypeRatio, engagementRatio: c.engagementRatio,
       ctaPatterns: c.ctaPatterns, discountFrequency: c.discountFrequency,
@@ -1537,9 +1561,9 @@ async function persistSnapshotAfterFetch(accountId: string, campaignId: string, 
     }
 
     const aggregatedAvail = buildSourceAvail({
-      profileLink: competitors.some(c => c.profileLink) ? "any" : null,
+      
       websiteUrl: competitors.some(c => c.websiteUrl) ? "any" : null,
-      blogUrl: competitors.some(c => c.blogUrl) ? "any" : null,
+      
       postsCollected: totalPosts,
       websiteEnrichmentStatus: competitors.some(c => c.websiteEnrichmentStatus === "COMPLETE") ? "COMPLETE" : "NONE",
       blogEnrichmentStatus: competitors.some(c => c.blogEnrichmentStatus === "COMPLETE") ? "COMPLETE" : "NONE",
@@ -2319,9 +2343,18 @@ async function recoverStuckDeepPass(): Promise<void> {
 }
 
 export function startQueueProcessor(): void {
+  if (process.env.INSPECTION_MODE === "1") {
+    console.log("[QueueProcessor] Disabled by INSPECTION_MODE=1");
+    return;
+  }
   if (queueProcessorHandle) return;
   queueProcessorHandle = setInterval(processJobQueue, QUEUE_PROCESSOR_INTERVAL_MS);
   console.log(`[QueueProcessor] Started — interval=${QUEUE_PROCESSOR_INTERVAL_MS}ms, globalMax=${GLOBAL_MAX_CONCURRENT_JOBS}, perAccountBudget=${PER_ACCOUNT_JOB_BUDGET_PER_HOUR}/hr`);
+
+  if (process.env.DISABLE_BACKGROUND_WORKERS === "1") {
+    console.log("[QueueProcessor] Interactive queue active; boot auto-recovery timers skipped (DISABLE_BACKGROUND_WORKERS=1)");
+    return;
+  }
 
   setTimeout(async () => {
     try {

@@ -1463,7 +1463,7 @@ async function runSharedPoolRefresh(): Promise<void> {
       const { eq: eqOp, and: andOp, sql: sqlOp } = await import("drizzle-orm");
 
       const tiktokCompetitors = await workerDb.execute(
-        sqlOp`SELECT id, account_id, campaign_id, name FROM ci_competitors WHERE tiktok_url IS NOT NULL AND tiktok_url != '' AND is_active = true LIMIT 20`
+        sqlOp`SELECT c.id, c.account_id, c.campaign_id, c.name FROM ci_competitors c JOIN competitor_sources cs ON c.id = cs.competitor_id WHERE cs.platform = 'TIKTOK' AND cs.status IN ('VERIFIED', 'ACTIVE') AND c.is_active = true LIMIT 20`
       );
 
       let tiktokScraped = 0;
@@ -1497,21 +1497,18 @@ async function runSharedPoolRefresh(): Promise<void> {
       const { sql: sqlOp } = await import("drizzle-orm");
 
       const reviewCompetitors = await workerDb.execute(
-        sqlOp`SELECT id, account_id, campaign_id, name FROM ci_competitors WHERE google_maps_url IS NOT NULL AND google_maps_url != '' AND is_active = true LIMIT 20`
+        sqlOp`SELECT c.id, c.account_id, c.campaign_id, c.name FROM ci_competitors c JOIN competitor_sources cs ON c.id = cs.competitor_id WHERE cs.platform IN ('GOOGLE_MAPS', 'REVIEWS') AND cs.status IN ('VERIFIED', 'ACTIVE') AND c.is_active = true LIMIT 20`
       );
 
       let reviewsScraped = 0;
       for (const comp of (reviewCompetitors as any).rows || reviewCompetitors || []) {
         if (reviewsScraped >= 5) break;
         try {
-          const reviewsRoute = await import("./competitive-intelligence/reviews-tiktok-routes");
-          if (typeof (reviewsRoute as any).scrapeReviewsForCompetitor === "function") {
-            const result = await (reviewsRoute as any).scrapeReviewsForCompetitor(comp.id, comp.account_id, comp.campaign_id);
+          const { scrapeReviewsForCompetitor } = await import("./competitive-intelligence/reviews-scraper");
+          if (typeof scrapeReviewsForCompetitor === "function") {
+            const result = await scrapeReviewsForCompetitor(comp.id, comp.account_id, comp.campaign_id);
             console.log(`[CI Worker] Reviews scrape: competitor=${comp.name} | result=${JSON.stringify(result).slice(0, 200)}`);
             reviewsScraped++;
-          } else {
-            console.log(`[CI Worker] Reviews scrape: scrapeReviewsForCompetitor not exported — skipping`);
-            break;
           }
         } catch (revErr) {
           console.error(`[CI Worker] Reviews scrape error for ${comp.name}: ${(revErr as Error).message}`);

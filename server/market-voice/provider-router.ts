@@ -8,6 +8,8 @@ import {
   generateDiscoveryResultId,
 } from "@shared/contracts/market-voice";
 import { runActorAndGetItems, isApifyAcquisitionConfigured } from "../acquisition/apify-client";
+import { resolveMarketLocalization } from "../shared/market-localization";
+import { resolveAcquisitionCapability } from "../competitive-intelligence/provider-registry";
 
 export interface IntentExecutionContext {
   accountId: string;
@@ -187,6 +189,10 @@ export async function executeSearchIntentByPlatform(
 }
 
 function getProviderNameForPlatform(platform: SearchIntentPlatform): string {
+  const cap = resolveAcquisitionCapability(platform);
+  if (cap && cap.actorId) {
+    return cap.actorId;
+  }
   switch (platform) {
     case "GOOGLE_SEARCH": return "apify~google-search-scraper";
     case "REDDIT": return "reddit_public_api";
@@ -194,7 +200,7 @@ function getProviderNameForPlatform(platform: SearchIntentPlatform): string {
     case "WEB_FORUMS": return "apify~google-search-scraper";
     case "INSTAGRAM": return "apify~instagram-scraper";
     case "TIKTOK": return "apify~clockworks-tiktok-scraper";
-    default: return "unknown";
+    default: return cap?.platform?.toLowerCase() || "unknown";
   }
 }
 
@@ -224,7 +230,11 @@ async function executeGoogleSearch(
   };
 
   if (ctx.targetGeography) {
-    inputPayload.countryCode = ctx.targetGeography.toLowerCase();
+    const loc = resolveMarketLocalization(ctx.targetGeography, ctx.languageHint);
+    inputPayload.countryCode = loc.countryCode.toLowerCase();
+    if (loc.searchLanguage) {
+      inputPayload.languageCode = loc.searchLanguage.toLowerCase();
+    }
   }
 
   const run = await runActorAndGetItems({
@@ -416,13 +426,23 @@ export async function executeWebForumsSearch(
   const approvedQuery = ctx.query;
   const providerQuery = `${ctx.query} (inurl:forum OR inurl:thread OR inurl:discussion OR inurl:questions) -site:facebook.com -site:instagram.com -site:tiktok.com -site:youtube.com -site:pinterest.com`;
 
+  const inputPayload: Record<string, any> = {
+    queries: providerQuery,
+    maxPagesPerQuery: 1,
+    resultsPerPage: limit,
+  };
+
+  if (ctx.targetGeography) {
+    const loc = resolveMarketLocalization(ctx.targetGeography, ctx.languageHint);
+    inputPayload.countryCode = loc.countryCode.toLowerCase();
+    if (loc.searchLanguage) {
+      inputPayload.languageCode = loc.searchLanguage.toLowerCase();
+    }
+  }
+
   const run = await runActorAndGetItems({
     actorId,
-    input: {
-      queries: providerQuery,
-      maxPagesPerQuery: 1,
-      resultsPerPage: limit,
-    },
+    input: inputPayload,
     budgetMs: ctx.budgetMs || 60000,
     label: `MarketVoice-Forums-${ctx.searchIntentId}`,
   });

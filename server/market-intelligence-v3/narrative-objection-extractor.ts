@@ -86,10 +86,8 @@ const NARRATIVE_OBJECTION_PATTERNS: PatternDef[] = [
   {
     category: "anti_pattern",
     patterns: [
-      /stop (wasting|paying|spending|throwing|chasing|posting|doing)/i,
-      /quit (wasting|paying|spending|posting)/i,
-      /done (wasting|paying|spending)/i,
-      /enough (wasting|spending|paying)/i,
+      /stop (?:wasting|throwing away|burning) (?:money|budget|cash|spend)/i,
+      /(?:stop|quit|done|enough) (?:wasting|paying|spending) (?:money|budget|cash|for nothing|without results)/i,
     ],
     objectionLabel: "Current solutions waste money without results",
   },
@@ -398,6 +396,7 @@ export function extractNarrativeObjections(competitors: CompetitorInput[]): Narr
       competitorSources: Array.from(data.competitorNames),
       patternCategory: data.patternCategory,
       signalType,
+      signalOrigin: "competitor",
     });
   }
 

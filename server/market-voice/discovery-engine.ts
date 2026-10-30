@@ -130,6 +130,7 @@ export async function executeMarketVoiceDiscoveryJob(
 
   const watchdog = new BudgetWatchdog(options.budgetConfig);
   const telemetry: IntentExecutionTelemetry[] = [];
+  const seenUrlsInJob = new Set<string>();
 
   let successfulIntents = 0;
   let failedIntents = 0;
@@ -137,125 +138,136 @@ export async function executeMarketVoiceDiscoveryJob(
   let totalResultsPersisted = 0;
   let budgetLimitReached = false;
 
-  for (const intent of intents) {
-    const isBudgetAvailable = watchdog.canExecuteIntent();
+  const CONCURRENCY = 4;
+  for (let i = 0; i < intents.length; i += CONCURRENCY) {
+    const chunk = intents.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      chunk.map(async (intent) => {
+        const isBudgetAvailable = watchdog.canExecuteIntent();
 
-    if (!isBudgetAvailable) {
-      budgetLimitReached = true;
-      await db
-        .update(marketVoiceSearchIntents)
-        .set({ status: "BUDGET_EXHAUSTED", resultsCount: 0 })
-        .where(eq(marketVoiceSearchIntents.id, intent.id));
+        if (!isBudgetAvailable) {
+          budgetLimitReached = true;
+          await db
+            .update(marketVoiceSearchIntents)
+            .set({ status: "BUDGET_EXHAUSTED", resultsCount: 0 })
+            .where(eq(marketVoiceSearchIntents.id, intent.id));
 
-      telemetry.push({
-        searchIntentId: intent.id,
-        targetPlatform: intent.targetPlatform as any,
-        query: intent.query,
-        status: "BUDGET_EXHAUSTED",
-        provider: "budget_watchdog",
-        requestedResultLimit: 0,
-        resultsReceived: 0,
-        resultsPersisted: 0,
-        runtimeMs: 0,
-        retryCount: 0,
-        budgetRemaining: 0,
-        error: "Job-level budget exhausted before executing intent",
-      });
-      continue;
-    }
-
-    watchdog.recordCall();
-    const resultLimit = Math.min(watchdog.config.maxResultsPerIntent, watchdog.getRemainingResultsBudget());
-
-    const execResult = await executeSearchIntentByPlatform({
-      accountId: job.accountId,
-      campaignId: job.campaignId,
-      campaignOfferingId: job.campaignOfferingId,
-      discoveryJobId: job.id,
-      searchIntentId: intent.id,
-      query: intent.query,
-      targetPlatform: intent.targetPlatform as any,
-      marketScope: intent.marketScope as any,
-      targetGeography: intent.targetGeography,
-      languageHint: intent.languageHint,
-      limit: resultLimit,
-      budgetMs: watchdog.config.timeoutMsPerCall,
-    });
-
-    let persistedForIntent = 0;
-    const seenUrlsInIntent = new Set<string>();
-
-    if (execResult.results.length > 0) {
-      for (const item of execResult.results) {
-        const canonicalUrl = normalizeCanonicalUrl(item.canonicalUrl || item.url);
-        if (seenUrlsInIntent.has(canonicalUrl)) {
-          // Structural deduplication within the same search intent
-          continue;
+          telemetry.push({
+            searchIntentId: intent.id,
+            targetPlatform: intent.targetPlatform as any,
+            query: intent.query,
+            status: "BUDGET_EXHAUSTED",
+            provider: "budget_watchdog",
+            requestedResultLimit: 0,
+            resultsReceived: 0,
+            resultsPersisted: 0,
+            runtimeMs: 0,
+            retryCount: 0,
+            budgetRemaining: 0,
+            error: "Job-level budget exhausted before executing intent",
+          });
+          return;
         }
-        seenUrlsInIntent.add(canonicalUrl);
 
-        const resultId = generateDiscoveryResultId(intent.id, canonicalUrl);
+        watchdog.recordCall();
+        const resultLimit = Math.min(watchdog.config.maxResultsPerIntent, watchdog.getRemainingResultsBudget());
 
-        // Transactional write per discovery result with strict foreign key lineage
-        await db.insert(marketVoiceDiscoveryResults).values({
-          id: resultId,
-          searchIntentId: intent.id,
-          discoveryJobId: job.id,
+        const execResult = await executeSearchIntentByPlatform({
           accountId: job.accountId,
           campaignId: job.campaignId,
           campaignOfferingId: job.campaignOfferingId,
-          url: item.url,
-          canonicalUrl,
-          title: item.title || null,
-          snippet: item.snippet || null,
-          sourcePlatform: item.sourcePlatform,
-          discoveredType: item.discoveredType || "WEB_PAGE",
-          verificationStatus: "DISCOVERED",
-          fetchJobId: job.id,
-          providerRunId: execResult.providerRunId || null,
-          metadata: item.metadata || {},
-        }).onConflictDoNothing();
+          discoveryJobId: job.id,
+          searchIntentId: intent.id,
+          query: intent.query,
+          targetPlatform: intent.targetPlatform as any,
+          marketScope: intent.marketScope as any,
+          targetGeography: intent.targetGeography,
+          languageHint: intent.languageHint,
+          limit: resultLimit,
+          budgetMs: watchdog.config.timeoutMsPerCall,
+        });
 
-        persistedForIntent++;
-      }
+        let persistedForIntent = 0;
+        const seenUrlsInIntent = new Set<string>();
 
-      watchdog.recordResults(persistedForIntent);
-      totalResultsPersisted += persistedForIntent;
-    }
+        if (execResult.results.length > 0) {
+          for (const item of execResult.results) {
+            const canonicalUrl = normalizeCanonicalUrl(item.canonicalUrl || item.url);
+            if (seenUrlsInIntent.has(canonicalUrl) || seenUrlsInJob.has(canonicalUrl)) {
+              // Structural deduplication within the same search intent and across intents in the same job
+              continue;
+            }
+            seenUrlsInIntent.add(canonicalUrl);
+            seenUrlsInJob.add(canonicalUrl);
 
-    if (execResult.status === "COMPLETED" || execResult.status === "NO_RESULTS") {
-      successfulIntents++;
-    } else if (execResult.status === "PROVIDER_UNAVAILABLE") {
-      unavailableIntents++;
-    } else {
-      failedIntents++;
-    }
+            const resultId = generateDiscoveryResultId(intent.id, canonicalUrl);
 
-    await db
-      .update(marketVoiceSearchIntents)
-      .set({
-        status: execResult.status,
-        resultsCount: persistedForIntent,
+            // Transactional write per discovery result with strict foreign key lineage
+            await db.insert(marketVoiceDiscoveryResults).values({
+              id: resultId,
+              searchIntentId: intent.id,
+              discoveryJobId: job.id,
+              accountId: job.accountId,
+              campaignId: job.campaignId,
+              campaignOfferingId: job.campaignOfferingId,
+              url: item.url,
+              canonicalUrl,
+              title: item.title || null,
+              snippet: item.snippet || null,
+              sourcePlatform: item.sourcePlatform,
+              discoveredType: item.discoveredType || "WEB_PAGE",
+              verificationStatus: "DISCOVERED",
+              fetchJobId: job.id,
+              providerRunId: execResult.providerRunId || null,
+              metadata: item.metadata || {},
+            }).onConflictDoNothing();
+
+            persistedForIntent++;
+          }
+
+          watchdog.recordResults(persistedForIntent);
+          totalResultsPersisted += persistedForIntent;
+        }
+
+        if (execResult.status === "COMPLETED" || execResult.status === "NO_RESULTS") {
+          successfulIntents++;
+        } else if (execResult.status === "PROVIDER_UNAVAILABLE") {
+          unavailableIntents++;
+        } else {
+          failedIntents++;
+        }
+
+        try {
+          await db
+            .update(marketVoiceSearchIntents)
+            .set({
+              status: execResult.status,
+              resultsCount: persistedForIntent,
+            })
+            .where(eq(marketVoiceSearchIntents.id, intent.id));
+        } catch (updateErr: any) {
+          console.warn(`[MarketVoiceDiscovery] INTENT_STATUS_UPDATE_FAILED | intent=${intent.id} | error=${updateErr?.message || updateErr}`);
+        }
+
+        telemetry.push({
+          searchIntentId: intent.id,
+          targetPlatform: intent.targetPlatform as any,
+          approvedQuery: execResult.approvedQuery || intent.query,
+          providerQuery: execResult.providerQuery || intent.query,
+          query: intent.query,
+          status: execResult.status,
+          provider: execResult.provider,
+          providerRunId: execResult.providerRunId,
+          requestedResultLimit: resultLimit,
+          resultsReceived: execResult.results.length,
+          resultsPersisted: persistedForIntent,
+          runtimeMs: execResult.runtimeMs,
+          retryCount: execResult.retryCount,
+          budgetRemaining: watchdog.getRemainingResultsBudget(),
+          error: execResult.error,
+        });
       })
-      .where(eq(marketVoiceSearchIntents.id, intent.id));
-
-    telemetry.push({
-      searchIntentId: intent.id,
-      targetPlatform: intent.targetPlatform as any,
-      approvedQuery: execResult.approvedQuery || intent.query,
-      providerQuery: execResult.providerQuery || intent.query,
-      query: intent.query,
-      status: execResult.status,
-      provider: execResult.provider,
-      providerRunId: execResult.providerRunId,
-      requestedResultLimit: resultLimit,
-      resultsReceived: execResult.results.length,
-      resultsPersisted: persistedForIntent,
-      runtimeMs: execResult.runtimeMs,
-      retryCount: execResult.retryCount,
-      budgetRemaining: watchdog.getRemainingResultsBudget(),
-      error: execResult.error,
-    });
+    );
   }
 
   let finalJobStatus: DiscoveryJobStatus;

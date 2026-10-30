@@ -51,7 +51,8 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   const startTime = Date.now();
 
   const budgetResult = input.results.get("budget_governor");
-  const budgetActionValue = budgetResult?.output?.decision?.action ?? null;
+  const isRecommendationOnly = budgetResult?.output?.mode === "recommendation_only";
+  const budgetActionValue = budgetResult?.output?.decision?.action ?? (isRecommendationOnly ? "test" : null);
 
   const structuralChecks: StructuralCheck[] = [];
 
@@ -74,7 +75,10 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   structuralChecks.push(checkFunnelStructuralCompleteness(input.results, input.config.currentJobId ?? null));
   structuralChecks.push(checkValidationResult(input.results));
   structuralChecks.push(checkSignalGroundingMassFailure(input.results));
-  structuralChecks.push(checkOfferInputSufficient(input.results, input.config.currentJobId ?? null));
+  structuralChecks.push(checkOfferInputSufficient(input.results, input.config.currentJobId ?? null, {
+    accountId: input.config.accountId,
+    campaignId: input.config.campaignId,
+  }));
   structuralChecks.push(checkOfferAudienceMisalignment(input.results));
   structuralChecks.push(checkZeroObjectionCoverage(input.results));
   structuralChecks.push(checkChannelConfidenceMinimum(input.results));
@@ -119,7 +123,14 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
   // scale-action violation of the trusted-floor / real-floor rows is a hard
   // block via the LOW_SIGNAL_TRUST code), and so re-runs after repair re-use
   // the same code path instead of the legacy single-threshold ad-hoc rule.
-  const hallucinationCheck = checkHallucinationExposure(input.signalComposition, budgetActionValue);
+  const hasAuthorityViolations = (input.integrityReport?.failureReasons || []).some(
+    (r) => r.toLowerCase().includes("authority") || r.toLowerCase().includes("capability") || r.toLowerCase().includes("leakage"),
+  );
+  const authorityBoundariesPassed = !hasAuthorityViolations && input.integrityReport?.overallStatus !== "FAIL";
+  const hallucinationCheck = checkHallucinationExposure(input.signalComposition, budgetActionValue, {
+    authorityBoundariesPassed,
+    hasUnsupportedFactualClaims: !authorityBoundariesPassed,
+  });
   structuralChecks.push(hallucinationCheck);
 
   const contradictions = detectContradictions(
@@ -357,6 +368,10 @@ export function evaluateSystemControl(input: SystemControlInput, options?: { sha
           const postHallucinationCheck = checkHallucinationExposure(
             input.signalComposition,
             postRepairBudgetActionValue,
+            {
+              authorityBoundariesPassed,
+              hasUnsupportedFactualClaims: !authorityBoundariesPassed,
+            },
           );
           const postIdx = structuralChecks.findIndex(c => c.check === "hallucination_exposure");
           if (postIdx >= 0) structuralChecks[postIdx] = postHallucinationCheck;

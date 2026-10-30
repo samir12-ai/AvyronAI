@@ -202,13 +202,13 @@ interface Competitor {
   id: string;
   name: string;
   platform: string;
-  profileLink: string;
+  websiteUrl: string;
   businessType: string;
   primaryObjective: string;
   websiteUrl: string | null;
-  blogUrl: string | null;
-  tiktokUrl: string | null;
-  googleMapsUrl: string | null;
+  websiteUrl: string | null;
+  websiteUrl: string | null;
+  websiteUrl: string | null;
   websiteEnrichmentStatus: string | null;
   postingFrequency: number | null;
   contentTypeRatio: string | null;
@@ -251,11 +251,11 @@ export default function CompetitiveIntelligence() {
   const [localExecutiveSummary, setLocalExecutiveSummary] = useState<any>(null);
 
   const emptyComp = {
-    name: '', profileLink: '', businessType: '', primaryObjective: '',
+    name: '', websiteUrl: '', businessType: '', primaryObjective: '',
     platform: 'instagram', postingFrequency: '', contentTypeRatio: '',
     engagementRatio: '', ctaPatterns: '', discountFrequency: '',
     hookStyles: '', messagingTone: '', socialProofPresence: '',
-    websiteUrl: '', blogUrl: '', tiktokUrl: '', googleMapsUrl: '',
+    websiteUrl: '', websiteUrl: '', websiteUrl: '', websiteUrl: '',
   };
 
   const [newComp, setNewComp] = useState(emptyComp);
@@ -422,7 +422,7 @@ export default function CompetitiveIntelligence() {
     setEditingCompetitorId(comp.id);
     setNewComp({
       name: comp.name || '',
-      profileLink: comp.profileLink || '',
+      websiteUrl: comp.websiteUrl || '',
       businessType: comp.businessType || '',
       primaryObjective: comp.primaryObjective || '',
       platform: comp.platform || 'instagram',
@@ -435,9 +435,9 @@ export default function CompetitiveIntelligence() {
       messagingTone: comp.messagingTone || '',
       socialProofPresence: comp.socialProofPresence || '',
       websiteUrl: comp.websiteUrl || '',
-      blogUrl: comp.blogUrl || '',
-      tiktokUrl: comp.tiktokUrl || '',
-      googleMapsUrl: comp.googleMapsUrl || '',
+      websiteUrl: comp.websiteUrl || '',
+      websiteUrl: comp.websiteUrl || '',
+      websiteUrl: comp.websiteUrl || '',
     });
     setShowAddCompetitor(true);
   }, []);
@@ -696,7 +696,7 @@ export default function CompetitiveIntelligence() {
                   {(dc?.postsCollected || 0) > 0
                     ? `${comp.platform} • ${comp.businessType || 'Unknown type'} • ${dc?.postsCollected || 0} posts • ${dc?.commentsCollected || 0} comments`
                     : `${comp.platform} • ${comp.businessType || 'Unknown type'} • No data collected`}
-                  {(comp.websiteUrl || comp.blogUrl) ? ` • ${[comp.websiteUrl ? 'Web' : '', comp.blogUrl ? 'Blog' : ''].filter(Boolean).join('+')}` : ''}
+                  {(comp.websiteUrl || comp.websiteUrl) ? ` • ${[comp.websiteUrl ? 'Web' : '', comp.websiteUrl ? 'Blog' : ''].filter(Boolean).join('+')}` : ''}
                 </Text>
               </View>
               <View style={s.compRight}>
@@ -785,10 +785,10 @@ export default function CompetitiveIntelligence() {
                   </Pressable>
                 </View>
 
-                {comp.profileLink && (
+                {comp.websiteUrl && (
                   <View style={s.detailRow}>
                     <Text style={[s.detailLabel, { color: colors.textMuted }]}>Profile</Text>
-                    <Text style={[s.detailValue, { color: colors.text }]} numberOfLines={1}>{comp.profileLink}</Text>
+                    <Text style={[s.detailValue, { color: colors.text }]} numberOfLines={1}>{comp.websiteUrl}</Text>
                   </View>
                 )}
 
@@ -796,24 +796,24 @@ export default function CompetitiveIntelligence() {
                   <Text style={[s.detailLabel, { color: colors.textMuted }]}>Sources</Text>
                   <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      <Ionicons name="logo-instagram" size={12} color={comp.profileLink ? '#10B981' : colors.textMuted} />
-                      <Text style={{ fontSize: 11, color: comp.profileLink ? '#10B981' : colors.textMuted }}>IG</Text>
+                      <Ionicons name="logo-instagram" size={12} color={comp.websiteUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.websiteUrl ? '#10B981' : colors.textMuted }}>IG</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
                       <Ionicons name="globe-outline" size={12} color={comp.websiteUrl ? '#10B981' : colors.textMuted} />
                       <Text style={{ fontSize: 11, color: comp.websiteUrl ? '#10B981' : colors.textMuted }}>Web</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      <Ionicons name="document-text-outline" size={12} color={comp.blogUrl ? '#10B981' : colors.textMuted} />
-                      <Text style={{ fontSize: 11, color: comp.blogUrl ? '#10B981' : colors.textMuted }}>Blog</Text>
+                      <Ionicons name="document-text-outline" size={12} color={comp.websiteUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.websiteUrl ? '#10B981' : colors.textMuted }}>Blog</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      <Ionicons name="logo-tiktok" size={12} color={comp.tiktokUrl ? '#10B981' : colors.textMuted} />
-                      <Text style={{ fontSize: 11, color: comp.tiktokUrl ? '#10B981' : colors.textMuted }}>TikTok</Text>
+                      <Ionicons name="logo-tiktok" size={12} color={comp.websiteUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.websiteUrl ? '#10B981' : colors.textMuted }}>TikTok</Text>
                     </View>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
-                      <Ionicons name="map-outline" size={12} color={comp.googleMapsUrl ? '#10B981' : colors.textMuted} />
-                      <Text style={{ fontSize: 11, color: comp.googleMapsUrl ? '#10B981' : colors.textMuted }}>GMaps</Text>
+                      <Ionicons name="map-outline" size={12} color={comp.websiteUrl ? '#10B981' : colors.textMuted} />
+                      <Text style={{ fontSize: 11, color: comp.websiteUrl ? '#10B981' : colors.textMuted }}>GMaps</Text>
                     </View>
                     {comp.websiteEnrichmentStatus === 'COMPLETE' && (
                       <View style={{ backgroundColor: '#10B98120', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
@@ -1625,7 +1625,13 @@ export default function CompetitiveIntelligence() {
     );
   };
 
-  const getIndexInterpretation = (label: string, value: number): string => {
+  const getIndexInterpretation = (label: string, value: number | null | undefined, sampleCount?: number): string => {
+    if (value == null || isNaN(value)) {
+      return 'Insufficient sample data to calculate index.';
+    }
+    if (sampleCount !== undefined && sampleCount === 0) {
+      return 'Insufficient sample data to calculate index.';
+    }
     const pct = Math.round(value * 100);
     switch (label) {
       case 'Market Heating':
@@ -1824,20 +1830,26 @@ export default function CompetitiveIntelligence() {
                   { label: 'Offer Compression', value: trajectory.offerCompressionIndex, color: '#3B82F6' },
                   { label: 'Angle Saturation', value: trajectory.angleSaturationLevel, color: '#8B5CF6' },
                   { label: 'Revival Potential', value: trajectory.revivalPotential, color: '#10B981' },
-                ].map((idx, i) => (
-                  <View key={i} style={{ marginBottom: 10 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: idx.color }}>{((idx.value || 0) * 100).toFixed(0)}%</Text>
+                ].map((idx, i) => {
+                  const hasVal = idx.value != null && !isNaN(idx.value);
+                  const sampleCount = evidenceCoverage?.competitorsWithSufficientData;
+                  const displayPct = hasVal ? `${(idx.value * 100).toFixed(0)}%` : '—';
+                  const barWidth = hasVal ? `${Math.min(Math.max(idx.value * 100, 0), 100)}%` : '0%';
+                  return (
+                    <View key={i} style={{ marginBottom: 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: hasVal ? idx.color : colors.textMuted }}>{displayPct}</Text>
+                      </View>
+                      <View style={[s.qualityBar]}>
+                        <View style={[s.qualityFill, { width: barWidth, backgroundColor: hasVal ? idx.color : 'transparent' }]} />
+                      </View>
+                      <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
+                        → {getIndexInterpretation(idx.label, idx.value, sampleCount)}
+                      </Text>
                     </View>
-                    <View style={[s.qualityBar]}>
-                      <View style={[s.qualityFill, { width: `${(idx.value || 0) * 100}%`, backgroundColor: idx.color }]} />
-                    </View>
-                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
-                      → {getIndexInterpretation(idx.label, idx.value || 0)}
-                    </Text>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
 
@@ -2040,20 +2052,26 @@ export default function CompetitiveIntelligence() {
                   { label: 'Offer Compression', value: trajectory.offerCompressionIndex, color: '#3B82F6' },
                   { label: 'Angle Saturation', value: trajectory.angleSaturationLevel, color: '#8B5CF6' },
                   { label: 'Revival Potential', value: trajectory.revivalPotential, color: '#10B981' },
-                ].map((idx, i) => (
-                  <View key={i} style={{ marginBottom: 10 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: idx.color }}>{((idx.value || 0) * 100).toFixed(0)}%</Text>
+                ].map((idx, i) => {
+                  const hasVal = idx.value != null && !isNaN(idx.value);
+                  const sampleCount = output?.evidenceCoverage?.competitorsWithSufficientData;
+                  const displayPct = hasVal ? `${(idx.value * 100).toFixed(0)}%` : '—';
+                  const barWidth = hasVal ? `${Math.min(Math.max(idx.value * 100, 0), 100)}%` : '0%';
+                  return (
+                    <View key={i} style={{ marginBottom: 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <Text style={{ fontSize: 11, color: colors.textMuted }}>{idx.label}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: hasVal ? idx.color : colors.textMuted }}>{displayPct}</Text>
+                      </View>
+                      <View style={[s.qualityBar]}>
+                        <View style={[s.qualityFill, { width: barWidth, backgroundColor: hasVal ? idx.color : 'transparent' }]} />
+                      </View>
+                      <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
+                        → {getIndexInterpretation(idx.label, idx.value, sampleCount)}
+                      </Text>
                     </View>
-                    <View style={[s.qualityBar]}>
-                      <View style={[s.qualityFill, { width: `${(idx.value || 0) * 100}%`, backgroundColor: idx.color }]} />
-                    </View>
-                    <Text style={{ fontSize: 10, color: colors.textMuted, marginTop: 2 }}>
-                      → {getIndexInterpretation(idx.label, idx.value || 0)}
-                    </Text>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
@@ -2128,8 +2146,8 @@ export default function CompetitiveIntelligence() {
               <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Profile URL *</Text>
               <TextInput
                 style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.profileLink}
-                onChangeText={v => setNewComp(p => ({ ...p, profileLink: v }))}
+                value={newComp.websiteUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, websiteUrl: v }))}
                 placeholder="https://instagram.com/socialeyez"
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
@@ -2150,8 +2168,8 @@ export default function CompetitiveIntelligence() {
               <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Blog URL</Text>
               <TextInput
                 style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.blogUrl}
-                onChangeText={v => setNewComp(p => ({ ...p, blogUrl: v }))}
+                value={newComp.websiteUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, websiteUrl: v }))}
                 placeholder="https://competitor.com/blog"
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
@@ -2161,8 +2179,8 @@ export default function CompetitiveIntelligence() {
               <Text style={[s.fieldLabel, { color: colors.textMuted }]}>TikTok URL</Text>
               <TextInput
                 style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.tiktokUrl}
-                onChangeText={v => setNewComp(p => ({ ...p, tiktokUrl: v }))}
+                value={newComp.websiteUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, websiteUrl: v }))}
                 placeholder="https://tiktok.com/@competitor"
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
@@ -2172,8 +2190,8 @@ export default function CompetitiveIntelligence() {
               <Text style={[s.fieldLabel, { color: colors.textMuted }]}>Google Maps URL</Text>
               <TextInput
                 style={[s.input, { backgroundColor: isDark ? '#151A22' : '#F5F7FA', color: colors.text, borderColor: isDark ? '#1A2030' : '#E2E8E4' }]}
-                value={newComp.googleMapsUrl}
-                onChangeText={v => setNewComp(p => ({ ...p, googleMapsUrl: v }))}
+                value={newComp.websiteUrl}
+                onChangeText={v => setNewComp(p => ({ ...p, websiteUrl: v }))}
                 placeholder="https://maps.google.com/?cid=..."
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
@@ -2201,7 +2219,7 @@ export default function CompetitiveIntelligence() {
               {editingCompetitorId ? (
                 <Pressable
                   onPress={() => {
-                    if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                    if (!newComp.name || !newComp.businessType || !newComp.primaryObjective) {
                       Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
                       return;
                     }
@@ -2228,7 +2246,7 @@ export default function CompetitiveIntelligence() {
                 <>
                   <Pressable
                     onPress={() => {
-                      if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                      if (!newComp.name || !newComp.businessType || !newComp.primaryObjective) {
                         Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
                         return;
                       }
@@ -2260,7 +2278,7 @@ export default function CompetitiveIntelligence() {
 
                   <Pressable
                     onPress={() => {
-                      if (!newComp.name || !newComp.profileLink || !newComp.businessType || !newComp.primaryObjective) {
+                      if (!newComp.name || !newComp.businessType || !newComp.primaryObjective) {
                         Alert.alert('Required Fields', 'Name, Profile URL, Business Type, and Primary Objective are required');
                         return;
                       }

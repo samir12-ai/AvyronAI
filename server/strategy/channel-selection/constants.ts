@@ -199,11 +199,11 @@ export const AWARENESS_CHANNEL_MAP: Record<string, string[]> = {
 };
 
 export const PERSUASION_CHANNEL_COMPATIBILITY: Record<string, string[]> = {
-  education_first: ["content_platform", "social_organic", "email", "community"],
-  proof_driven: ["social_paid", "search_paid", "email", "referral"],
-  authority_led: ["social_organic", "content_platform", "partnerships", "community"],
-  scarcity_urgency: ["social_paid", "email", "direct"],
-  trust_building: ["email", "community", "referral", "content_platform"],
+  education_first: ["content_platform", "social_organic", "social_paid", "email", "community", "search_organic"],
+  proof_driven: ["social_paid", "social_organic", "search_paid", "email", "referral", "content_platform"],
+  authority_led: ["social_organic", "social_paid", "content_platform", "partnerships", "community", "email"],
+  scarcity_urgency: ["social_paid", "social_organic", "email", "direct", "search_paid"],
+  trust_building: ["social_organic", "social_paid", "email", "community", "referral", "content_platform", "search_organic", "partnerships"],
 };
 
 export const LAYER_NAMES = [

@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews, competitorPostClassifications, competitorSources } from "@shared/schema";
-import { eq, and, desc, sql, inArray } from "drizzle-orm";
+import { ciCompetitors, ciCompetitorPosts, ciCompetitorComments, ciCompetitorMetricsSnapshot, ciCompetitorReviews, competitorPostClassifications, competitorSources, ciSharedProfiles } from "@shared/schema";
+import { eq, and, or, desc, sql, inArray } from "drizzle-orm";
 import { scrapeCommentsForPosts, extractHandleFromUrl } from "./profile-scraper";
 import { scrapeInstagramForCompetitor } from "./instagram-provider";
 import { lookupSharedProfile, upsertSharedProfile, linkCompetitorToSharedProfile, reuseFromSharedPool } from "./shared-profile-store";
@@ -323,6 +323,8 @@ export interface FetchOptions {
   scrapeMode?: ScrapeMode;
   windowDays?: number;
   watermark?: Date | null;
+  sourceId?: string;
+  handle?: string;
 }
 
 const TARGET_POSTS_FAST = 12;
@@ -414,7 +416,7 @@ export interface FetchResult {
   postingFrequency: number | null;
   contentMix: string | null;
   fetchMethod: string;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "COOLDOWN" | "INSUFFICIENT_DATA";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "COOLDOWN" | "INSUFFICIENT_DATA" | "UNSUPPORTED_SOURCE";
   message: string;
   // Fix #1 — set ONLY on status "BLOCKED". Lets the fetch-orchestrator gate the
   // 24h platform-block stamp: only "GENUINE_BLOCK" (a verified auth/challenge/
@@ -526,7 +528,22 @@ async function _executeFetch(
     console.log(`[DataAcq] DEEP_PASS_CACHE_BYPASS: ${competitor.name} — skipping cache/cooldown checks for DEEP_PASS post expansion`);
   }
 
-  const normalizedHandle = extractHandleFromUrl(competitor.profileLink ?? "");
+  // Query canonical competitor_sources for this competitor
+  const { competitorSources } = await import("@shared/schema");
+  const compSources = await db.select().from(competitorSources)
+    .where(and(
+      eq(competitorSources.competitorId, competitorId),
+      eq(competitorSources.accountId, accountId)
+    ));
+  const igSources = compSources.filter(s => s.platform.toUpperCase() === "INSTAGRAM" && (s.status === "VERIFIED" || s.status === "ACTIVE"));
+  const igSource = fetchOptions?.sourceId
+    ? igSources.find(s => s.id === fetchOptions.sourceId) || igSources[0]
+    : igSources[0];
+  let normalizedHandle: string | null = fetchOptions?.handle || null;
+  if (!normalizedHandle && igSource) {
+    const m = igSource.canonicalUrl.match(/instagram\.com\/([a-zA-Z0-9_.-]+)/);
+    normalizedHandle = m ? m[1].replace(/\/+$/, "") : (igSource.externalAccountId || null);
+  }
 
   if (!forceRefresh && collectionMode !== "DEEP_PASS" && normalizedHandle) {
     const sharedLookup = await lookupSharedProfile("instagram", normalizedHandle, MIN_POSTS_THRESHOLD);
@@ -612,7 +629,7 @@ async function _executeFetch(
 
       if (elapsed < CACHE_REUSE_WINDOW_MS) {
         const livePostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-          .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+          .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
         const cachedPosts = Number(livePostCount[0]?.count || 0);
 
         if (cachedPosts >= MIN_POSTS_THRESHOLD) {
@@ -650,7 +667,7 @@ async function _executeFetch(
         const hoursLeft = Math.ceil((tierCooldownMs - elapsed) / (60 * 60 * 1000));
 
         const livePostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-          .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+          .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
         const liveCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
           .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
 
@@ -705,7 +722,7 @@ async function _executeFetch(
 
   if (collectionMode === "DEEP_PASS") {
     const storedPostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
     const existingStoredPostTotal = Number(storedPostCount[0]?.count || 0);
     if (existingStoredPostTotal >= TARGET_POSTS_DEEP) {
       console.log(`[DataAcq] DEEP_PASS_SKIP: ${competitor.name} already has ${existingStoredPostTotal} posts (>= ${TARGET_POSTS_DEEP}). Skipping additional post collection.`);
@@ -727,14 +744,96 @@ async function _executeFetch(
     }
   }
 
-  console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} (${competitor.profileLink}) | maxPosts=${maxPosts}`);
+  console.log(`[DataAcq] Starting ${collectionMode} fetch for ${competitor.name} | maxPosts=${maxPosts}`);
 
   checkAborted(signal, "executeFetch:beforeProfileScrape");
   // P-6.12: ALL competitor profile acquisition routes through the Instagram
   // provider (Apify actor). Bright Data no longer exists in this codebase.
   // (competitor.platform is instagram-only today; TikTok posts arrive via the
   // dedicated tiktok-scraper path, not _executeFetch.)
-  const scrapeResult = await scrapeInstagramForCompetitor(normalizedHandle || competitor.profileLink || "", maxPosts, accountId);
+  if (!igSource || !normalizedHandle) {
+    const webSource = compSources.find(s => s.platform.toUpperCase() === "WEBSITE" && (s.status === "VERIFIED" || s.status === "ACTIVE"));
+    if (webSource && webSource.canonicalUrl) {
+      console.log(`[DataAcq] Competitor ${competitor.name} (${competitorId}) has Website source (${webSource.canonicalUrl}). Running website crawler.`);
+      try {
+        const { runCompetitorWebsiteCrawler } = await import("./competitor-crawler");
+        const crawlRes = await runCompetitorWebsiteCrawler(accountId, competitor.campaignId || "", competitorId, webSource.canonicalUrl, 6);
+        const { competitorSources } = await import("@shared/schema");
+        if (crawlRes.status === "COMPLETE" && crawlRes.pagesCrawled.length > 0) {
+          await db.update(competitorSources).set({ lastFetchedAt: new Date(), updatedAt: new Date() }).where(eq(competitorSources.id, webSource.id));
+
+          // Ingestion Handshake: update competitor understanding snapshot only when crawl succeeded
+          try {
+            const { runCompetitorUnderstandingEngine } = await import("./competitor-understanding-engine");
+            await runCompetitorUnderstandingEngine(
+              accountId,
+              competitor.campaignId || "",
+              competitorId,
+              webSource.canonicalUrl,
+              competitor.name,
+              { snapshotId: crawlRes.snapshotId }
+            );
+          } catch (undErr: any) {
+            console.warn(`[DataAcq] Competitor understanding update warning for ${competitor.name}:`, undErr.message);
+          }
+        }
+        return {
+          competitorId,
+          postsCollected: 0,
+          commentsCollected: 0,
+          ctaCoverage: 0,
+          ctaTypes: [],
+          followers: null,
+          engagementRate: null,
+          postingFrequency: null,
+          contentMix: null,
+          fetchMethod: "WEBSITE_CRAWLER",
+          status: crawlRes.status === "COMPLETE" && crawlRes.pagesCrawled.length > 0 ? "SUCCESS" : "INSUFFICIENT_DATA",
+          message:
+            crawlRes.status === "COMPLETE" && crawlRes.pagesCrawled.length > 0
+              ? `Website source crawled successfully (${crawlRes.pagesCrawled.length} pages captured).`
+              : `Website crawl incomplete (${crawlRes.failureCode || "0 usable pages"}).`,
+        };
+      } catch (crawlErr: any) {
+        console.warn(`[DataAcq] Website crawl error for ${competitor.name}:`, crawlErr.message);
+        return {
+          competitorId,
+          postsCollected: 0,
+          commentsCollected: 0,
+          ctaCoverage: 0,
+          ctaTypes: [],
+          followers: null,
+          engagementRate: null,
+          postingFrequency: null,
+          contentMix: null,
+          fetchMethod: "WEBSITE_CRAWLER",
+          status: "INSUFFICIENT_DATA",
+          message: `Website crawl attempted: ${crawlErr.message}`,
+        };
+      }
+    }
+
+    console.log(`[DataAcq] UNSUPPORTED_SOURCE: Competitor ${competitor.name} (${competitorId}) has no verified Instagram or Website source. Skipping scrape.`);
+    const existingStored = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    const storedPosts = Number(existingStored[0]?.count || 0);
+    return {
+      competitorId,
+      postsCollected: storedPosts,
+      commentsCollected: 0,
+      ctaCoverage: 0,
+      ctaTypes: [],
+      followers: null,
+      engagementRate: null,
+      postingFrequency: null,
+      contentMix: null,
+      fetchMethod: "NONE",
+      status: "UNSUPPORTED_SOURCE",
+      message: "Competitor has no verified Instagram or Website source. Scraping not attempted.",
+    };
+  }
+
+  const scrapeResult = await scrapeInstagramForCompetitor(normalizedHandle, maxPosts, accountId);
   checkAborted(signal, "executeFetch:afterProfileScrape");
 
   if (!scrapeResult.success || scrapeResult.posts.length === 0) {
@@ -747,7 +846,7 @@ async function _executeFetch(
     // (GENUINE_BLOCK / TRANSIENT) returns status BLOCKED with blockClass, and
     // only GENUINE_BLOCK is allowed to stamp downstream.
     const existingStoredForEmpty = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+      .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
     const existingStoredEmptyCount = Number(existingStoredForEmpty[0]?.count || 0);
 
     if (scrapeResult.failureClass === "NONE") {
@@ -765,8 +864,10 @@ async function _executeFetch(
         followers: scrapeResult.followers, engagementRate: null, postingFrequency: null, contentMix: null,
         fetchMethod: scrapeResult.collectionMethodUsed,
         status: "INSUFFICIENT_DATA",
+        isConfirmedEmpty: scrapeResult.isConfirmedEmpty === true && existingStoredEmptyCount === 0,
+        isPartialCoverage: scrapeResult.isPartialCoverage === true || existingStoredEmptyCount > 0,
         message: `No fetchable recent posts (transport OK). ${existingStoredEmptyCount} post(s) already stored.`,
-      };
+      } as any;
     }
 
     console.log(`[DataAcq] Scrape blocked for ${competitor.name} | blockClass=${scrapeResult.failureClass}`);
@@ -782,7 +883,7 @@ async function _executeFetch(
   }
 
   const existingPostCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
   const existingPosts = Number(existingPostCount[0]?.count || 0);
 
   if (!isIncremental && existingPosts > 0 && scrapeResult.posts.length < existingPosts) {
@@ -834,7 +935,7 @@ async function _executeFetch(
     postId: ciCompetitorPosts.postId,
     shortcode: ciCompetitorPosts.shortcode,
   }).from(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
 
   const existingPostIds = new Set(existingStoredPosts.map(p => p.postId));
   const existingShortcodes = new Set(existingStoredPosts.filter(p => p.shortcode).map(p => p.shortcode!));
@@ -866,8 +967,10 @@ async function _executeFetch(
   let earlyStopReason: string | null = null;
 
   const postInserts: Parameters<typeof db.insert>[0] extends any ? any[] : never = [];
+  const postMetricUpdates: Array<{ postId: string; likes?: number | null; comments?: number | null; views?: number | null; sourceId?: string | null }> = [];
   const commentInserts: any[] = [];
   const newPostIds: string[] = [];
+  const resolvedSourceId = igSource?.id || fetchOptions?.sourceId || null;
 
   for (const post of postsToStore) {
     if (earlyStopReason) break;
@@ -877,6 +980,15 @@ async function _executeFetch(
 
     if (isDuplicate) {
       cachedPostsReused++;
+      if (post.likes != null || post.comments != null || post.views != null || resolvedSourceId) {
+        postMetricUpdates.push({
+          postId: post.postId,
+          likes: post.likes,
+          comments: post.comments,
+          views: post.views,
+          sourceId: resolvedSourceId,
+        });
+      }
       if (isIncremental) {
         consecutiveDuplicates++;
         if (consecutiveDuplicates >= CONSECUTIVE_DUPLICATE_THRESHOLD) {
@@ -911,6 +1023,8 @@ async function _executeFetch(
     postInserts.push({
       competitorId,
       accountId,
+      sourceId: resolvedSourceId,
+      platform: "instagram",
       postId: post.postId,
       permalink: post.permalink,
       mediaType: post.mediaType,
@@ -952,6 +1066,17 @@ async function _executeFetch(
     for (const postRow of postInserts) {
       await tx.insert(ciCompetitorPosts).values(postRow).onConflictDoNothing();
     }
+    for (const upd of postMetricUpdates) {
+      await tx
+        .update(ciCompetitorPosts)
+        .set({
+          ...(upd.likes != null ? { likes: upd.likes } : {}),
+          ...(upd.comments != null ? { comments: upd.comments } : {}),
+          ...(upd.views != null ? { views: upd.views } : {}),
+          ...(upd.sourceId ? { sourceId: upd.sourceId } : {}),
+        })
+        .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.postId, upd.postId)));
+    }
     for (const commentRow of commentInserts) {
       await tx.insert(ciCompetitorComments).values(commentRow).onConflictDoNothing();
     }
@@ -990,7 +1115,7 @@ async function _executeFetch(
   const contentMix = `Reels:${Math.round((reelCount / postsToStore.length) * 100)}%,Posts:${Math.round((imageCount / postsToStore.length) * 100)}%,Carousel:${Math.round((carouselCount / postsToStore.length) * 100)}%`;
 
   const verifyPosts = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)));
+    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId), eq(ciCompetitorPosts.platform, "instagram")));
   const verifyComments = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
     .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
 
@@ -1146,7 +1271,19 @@ async function _executeFetch(
 // real-only, from the Apify comment actor. Legacy synthetic-row cleanup
 // (cleanupSyntheticData & friends below) is retained to purge historical rows.
 
-export async function enrichCompetitorWithComments(competitorId: string, accountId: string, options?: { skipCooldown?: boolean }): Promise<{ commentsGenerated: number; status: string }> {
+export async function enrichCompetitorWithComments(
+  competitorId: string,
+  accountId: string,
+  options?: { skipCooldown?: boolean; forceRefresh?: boolean }
+): Promise<{
+  commentsGenerated: number;
+  status: string;
+  runId?: string | null;
+  datasetId?: string | null;
+  usageUsd?: number | null;
+  rawCount?: number;
+  acceptedCount?: number;
+}> {
   const [competitor] = await db.select().from(ciCompetitors)
     .where(and(eq(ciCompetitors.id, competitorId), eq(ciCompetitors.accountId, accountId)));
 
@@ -1154,27 +1291,29 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     return { commentsGenerated: 0, status: "COMPETITOR_NOT_FOUND" };
   }
 
-  if (!competitor.lastCheckedAt) {
+  if (!competitor.lastCheckedAt && !options?.forceRefresh) {
     console.log(`[DataAcq] DEEP_PASS_BLOCKED: ${competitor.name} has no FAST_PASS data (lastCheckedAt is null). Cannot enrich before FAST_PASS completes.`);
     return { commentsGenerated: 0, status: "FAST_PASS_INCOMPLETE" };
   }
 
-  if (!options?.skipCooldown && isSyntheticCooldownActive(competitor.lastSyntheticEnrichmentAt)) {
+  if (!options?.skipCooldown && !options?.forceRefresh && isSyntheticCooldownActive(competitor.lastSyntheticEnrichmentAt)) {
     const daysSince = ((Date.now() - new Date(competitor.lastSyntheticEnrichmentAt!).getTime()) / (1000 * 60 * 60 * 24)).toFixed(1);
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — cooldown active (${daysSince}d since last enrichment, cooldown=${SYNTHETIC_ENRICHMENT_COOLDOWN_DAYS}d). Skipping.`);
     return { commentsGenerated: 0, status: "COOLDOWN_ACTIVE" };
   }
 
+  const igCommentFilterSql = sql`${ciCompetitorComments.id} NOT LIKE 'comm_yt_%' AND ${ciCompetitorComments.id} NOT LIKE 'comm_tt_%' AND COALESCE(${ciCompetitorComments.filterStatus}, '') NOT LIKE 'QUARANTINED%'`;
+
   const realCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
-    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), eq(ciCompetitorComments.isSynthetic, false)));
+    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), eq(ciCompetitorComments.isSynthetic, false), igCommentFilterSql));
   const realComments = Number(realCommentCount[0]?.count || 0);
 
-  if (realComments >= MIN_COMMENTS_THRESHOLD) {
+  if (realComments >= MIN_COMMENTS_THRESHOLD && !options?.forceRefresh) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (>= ${MIN_COMMENTS_THRESHOLD} optimization target). Real data sufficient.`);
     return { commentsGenerated: realComments, status: "REAL_DATA_SUFFICIENT" };
   }
 
-  if (competitor.enrichmentStatus === "ENRICHED" && !options?.skipCooldown && realComments >= MIN_COMMENTS_THRESHOLD) {
+  if (competitor.enrichmentStatus === "ENRICHED" && !options?.skipCooldown && !options?.forceRefresh && realComments >= MIN_COMMENTS_THRESHOLD) {
     console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — already enriched (enrichmentStatus=ENRICHED) with sufficient real data. ALREADY_ENRICHED.`);
     return { commentsGenerated: 0, status: "ALREADY_ENRICHED" };
   }
@@ -1182,11 +1321,16 @@ export async function enrichCompetitorWithComments(competitorId: string, account
   console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} has ${realComments} real comments (optimization target: ${MIN_COMMENTS_THRESHOLD}). Comment text is optional enrichment — pipeline will not block.`);
 
   const existingCommentCount = await db.select({ count: sql<number>`count(*)` }).from(ciCompetitorComments)
-    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)));
+    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), igCommentFilterSql));
   const existingComments = Number(existingCommentCount[0]?.count || 0);
 
   const storedPosts = await db.select().from(ciCompetitorPosts)
-    .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
+    .where(and(
+      eq(ciCompetitorPosts.competitorId, competitorId),
+      eq(ciCompetitorPosts.accountId, accountId),
+      sql`LOWER(COALESCE(${ciCompetitorPosts.platform}, 'instagram')) = 'instagram'`,
+      sql`${ciCompetitorPosts.postId} NOT LIKE 'QUARANTINED_%'`
+    ))
     .orderBy(desc(ciCompetitorPosts.createdAt));
 
   if (storedPosts.length === 0) {
@@ -1202,14 +1346,22 @@ export async function enrichCompetitorWithComments(competitorId: string, account
       eq(ciCompetitorComments.competitorId, competitorId),
       eq(ciCompetitorComments.accountId, accountId),
       inArray(ciCompetitorComments.postId, postIds),
+      igCommentFilterSql,
     ));
   for (const row of postsWithComments) {
     existingPostIdsWithComments.add(row.postId);
   }
 
-  const postsNeedingComments = storedPosts
+  const resolveShortcode = (p: typeof storedPosts[number]) =>
+    p.shortcode ||
+    (p.permalink ? p.permalink.match(/\/(?:p|reel|reels|tv)\/([A-Za-z0-9_-]+)/)?.[1] || null : null);
+
+  const totalPostCommentMetadata = storedPosts.reduce((sum, p) => sum + Math.max(0, Number(p.comments || 0)), 0);
+
+  let postsNeedingComments = storedPosts
+    .filter(p => (p.platform || "instagram").toLowerCase() === "instagram")
     .filter(p => !existingPostIdsWithComments.has(p.postId))
-    .filter(p => p.shortcode && ((p.comments && p.comments > 0) || (p.caption && p.caption.length > 10)))
+    .filter(p => resolveShortcode(p) && (p.comments && p.comments > 0))
     .sort((a, b) => {
       const engA = (a.likes || 0) + (a.comments || 0);
       const engB = (b.likes || 0) + (b.comments || 0);
@@ -1220,36 +1372,57 @@ export async function enrichCompetitorWithComments(competitorId: string, account
     })
     .slice(0, MAX_COMMENT_POSTS_DEEP);
 
+  if (postsNeedingComments.length === 0 && options?.forceRefresh) {
+    postsNeedingComments = storedPosts
+      .filter(p => (p.platform || "instagram").toLowerCase() === "instagram")
+      .filter(p => resolveShortcode(p) && (p.comments && p.comments > 0))
+      .sort((a, b) => ((b.comments || 0) + (b.likes || 0)) - ((a.comments || 0) + (a.likes || 0)))
+      .slice(0, MAX_COMMENT_POSTS_DEEP);
+  }
+
   if (postsNeedingComments.length === 0) {
-    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — all posts already have comments or no eligible posts.`);
-    return { commentsGenerated: existingComments, status: "NO_ELIGIBLE_POSTS" };
+    const existingIgCommentRows = await db
+      .select({ id: ciCompetitorComments.id, actorRunId: ciCompetitorComments.actorRunId })
+      .from(ciCompetitorComments)
+      .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), igCommentFilterSql))
+      .orderBy(desc(ciCompetitorComments.createdAt));
+    const persistedIds = existingIgCommentRows.map(r => r.id);
+    const existingRunId = existingIgCommentRows.find(r => r.actorRunId)?.actorRunId ?? null;
+    const isConfirmedZeroComments = storedPosts.length > 0 && totalPostCommentMetadata === 0 && existingComments === 0;
+    console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — all posts already have comments or no eligible posts (storedPosts=${storedPosts.length}, totalPostCommentMetadata=${totalPostCommentMetadata}, existingComments=${existingComments}, isConfirmedEmpty=${isConfirmedZeroComments}).`);
+    return {
+      commentsGenerated: existingComments,
+      status: isConfirmedZeroComments ? "CONFIRMED_ZERO_COMMENTS_ON_POSTS" : "NO_ELIGIBLE_POSTS",
+      runId: existingRunId,
+      isConfirmedEmpty: isConfirmedZeroComments,
+      persistedIds,
+    } as any;
   }
 
   const batchId = `deeppass_real_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
   let realCommentsScraped = 0;
   let actorRunId: string | null = null;
+  let actorDatasetId: string | null = null;
+  let actorUsageUsd: number | null = null;
+  let rawItemsCount = 0;
   const commentInserts: any[] = [];
 
   console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — scraping REAL comments for ${postsNeedingComments.length} posts via Apify comment actor (existing: ${existingComments} comments, ${realComments} real)`);
 
   try {
-    // P-6.12: comments come EXCLUSIVELY from the Apify comment actor (one
-    // batched run per competitor). The old profile re-scrape for embedded
-    // comments is gone — the profile actor returns no comment threads, and
-    // the Bright Data per-post comment ladder no longer exists.
-    // NOTE: enrichCompetitorWithComments runs OUTSIDE the watchdog'd
-    // _executeFetch path (called by enrich-only flows that have no
-    // AbortSignal), so checkAborted is intentionally not invoked here.
     const commentsNeeded = Math.max(MIN_COMMENTS_THRESHOLD - existingComments, 50);
     const scrapeResult = await scrapeCommentsForPosts(
       postsNeedingComments.map(p => ({
         postId: p.postId,
-        shortcode: p.shortcode || "",
+        shortcode: resolveShortcode(p) || "",
         commentCount: p.comments ?? null,
       })),
       { maxTotalComments: commentsNeeded, maxPerPost: MAX_COMMENTS_PER_POST_DEEP },
     );
     actorRunId = scrapeResult.meta.runId;
+    actorDatasetId = scrapeResult.meta.datasetId;
+    actorUsageUsd = scrapeResult.meta.usageUsd ?? scrapeResult.meta.estimatedCostUsd ?? null;
+    rawItemsCount = scrapeResult.meta.itemsReceived ?? scrapeResult.results.reduce((s, r) => s + r.comments.length, 0);
 
     // Unified acquisition filter (P-6.12 Phase 7): dedup/spam/owner
     // classification with full accounting — rejects are never persisted,
@@ -1264,7 +1437,30 @@ export async function enrichCompetitorWithComments(competitorId: string, account
       if (r.commentId) existingCIds.add(r.commentId);
     }
 
-    const ownerHandle = extractHandleFromUrl(competitor.profileLink ?? "");
+    let ownerHandle = "";
+    if (competitor.sharedProfileId) {
+      const [sp] = await db.select({ normalizedHandle: ciSharedProfiles.normalizedHandle })
+        .from(ciSharedProfiles)
+        .where(eq(ciSharedProfiles.id, competitor.sharedProfileId))
+        .limit(1);
+      if (sp?.normalizedHandle) {
+        ownerHandle = sp.normalizedHandle;
+      }
+    }
+    if (!ownerHandle) {
+      const [src] = await db.select()
+        .from(competitorSources)
+        .where(and(
+          eq(competitorSources.competitorId, competitorId),
+          inArray(competitorSources.platform, ["INSTAGRAM", "TIKTOK", "instagram", "tiktok"])
+        ))
+        .limit(1);
+      if (src?.externalAccountId) {
+        ownerHandle = src.externalAccountId.replace(/^@/, "").toLowerCase();
+      } else if (src?.canonicalUrl) {
+        ownerHandle = extractHandleFromUrl(src.canonicalUrl);
+      }
+    }
     const allScraped = scrapeResult.results.flatMap(r => r.comments);
     const { accepted, stats } = filterComments(
       allScraped.map(c => ({
@@ -1343,7 +1539,26 @@ export async function enrichCompetitorWithComments(competitorId: string, account
 
   console.log(`[DataAcq] DEEP_PASS_ENRICH: ${competitor.name} — real=${realCommentsScraped}, existing=${existingComments}, total=${totalComments} | status=${status}`);
 
-  return { commentsGenerated: totalComments, status };
+  const finalIgCommentRows = await db
+    .select({ id: ciCompetitorComments.id })
+    .from(ciCompetitorComments)
+    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId), igCommentFilterSql))
+    .orderBy(desc(ciCompetitorComments.createdAt))
+    .limit(50);
+  const persistedIds = finalIgCommentRows.map(r => r.id);
+  const isConfirmedEmptyAfterScrape = totalComments === 0 && rawItemsCount > 0;
+
+  return {
+    commentsGenerated: totalComments,
+    status,
+    runId: actorRunId,
+    datasetId: actorDatasetId,
+    usageUsd: actorUsageUsd,
+    rawCount: rawItemsCount,
+    acceptedCount: realCommentsScraped,
+    isConfirmedEmpty: isConfirmedEmptyAfterScrape,
+    persistedIds,
+  } as any;
 }
 
 export async function getCompetitorDataCoverage(competitorId: string, accountId: string) {
@@ -1410,7 +1625,25 @@ export async function getCompetitorDataCoverage(competitorId: string, accountId:
   };
 }
 
-export async function getStoredPostsForMIv3(competitorId: string, accountId: string) {
+export async function getStoredPostsForMIv3(competitorId: string, accountId: string, allowedIds?: string[], sourceId?: string) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorPosts.competitorId, competitorId),
+    eq(ciCompetitorPosts.accountId, accountId),
+    eq(ciCompetitorPosts.platform, "instagram"),
+    sql`NOT EXISTS (
+      SELECT 1 FROM competitor_sources cs
+      WHERE cs.id = ${ciCompetitorPosts.sourceId}
+        AND (cs.status IN ('DISABLED', 'REJECTED') OR cs.activity_state = 'QUARANTINED_MISATTRIBUTED')
+    )`,
+  ];
+  if (sourceId) {
+    whereClauses.push(eq(ciCompetitorPosts.sourceId, sourceId));
+  }
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorPosts.id, allowedIds));
+  }
+
   const rows = await db.select({
     post: ciCompetitorPosts,
     classification: competitorPostClassifications,
@@ -1423,7 +1656,7 @@ export async function getStoredPostsForMIv3(competitorId: string, accountId: str
       eq(competitorPostClassifications.classifierVersion, "competitor-post-v2")
     )
   )
-  .where(and(eq(ciCompetitorPosts.competitorId, competitorId), eq(ciCompetitorPosts.accountId, accountId)))
+  .where(and(...whereClauses))
   .orderBy(desc(ciCompetitorPosts.createdAt))
   .limit(40);
 
@@ -1456,9 +1689,18 @@ export async function getStoredPostsForMIv3(competitorId: string, accountId: str
   });
 }
 
-export async function getStoredCommentsForMIv3(competitorId: string, accountId: string) {
+export async function getStoredCommentsForMIv3(competitorId: string, accountId: string, allowedIds?: string[]) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorComments.competitorId, competitorId),
+    eq(ciCompetitorComments.accountId, accountId),
+  ];
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorComments.id, allowedIds));
+  }
+
   const comments = await db.select().from(ciCompetitorComments)
-    .where(and(eq(ciCompetitorComments.competitorId, competitorId), eq(ciCompetitorComments.accountId, accountId)))
+    .where(and(...whereClauses))
     .orderBy(desc(ciCompetitorComments.createdAt))
     .limit(150);
 
@@ -1472,13 +1714,27 @@ export async function getStoredCommentsForMIv3(competitorId: string, accountId: 
   }));
 }
 
-export async function getStoredTikTokPostsForMIv3(competitorId: string, accountId: string) {
+export async function getStoredYouTubePostsForMIv3(competitorId: string, accountId: string, allowedIds?: string[], sourceId?: string) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorPosts.competitorId, competitorId),
+    eq(ciCompetitorPosts.accountId, accountId),
+    eq(ciCompetitorPosts.platform, "youtube"),
+    sql`NOT EXISTS (
+      SELECT 1 FROM competitor_sources cs
+      WHERE cs.id = ${ciCompetitorPosts.sourceId}
+        AND (cs.status IN ('DISABLED', 'REJECTED') OR cs.activity_state = 'QUARANTINED_MISATTRIBUTED')
+    )`,
+  ];
+  if (sourceId) {
+    whereClauses.push(eq(ciCompetitorPosts.sourceId, sourceId));
+  }
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorPosts.id, allowedIds));
+  }
+
   const posts = await db.select().from(ciCompetitorPosts)
-    .where(and(
-      eq(ciCompetitorPosts.competitorId, competitorId),
-      eq(ciCompetitorPosts.accountId, accountId),
-      eq(ciCompetitorPosts.platform, "tiktok"),
-    ))
+    .where(and(...whereClauses))
     .orderBy(desc(ciCompetitorPosts.createdAt))
     .limit(50);
 
@@ -1498,13 +1754,59 @@ export async function getStoredTikTokPostsForMIv3(competitorId: string, accountI
   }));
 }
 
-export async function getStoredTikTokCommentsForMIv3(competitorId: string, accountId: string) {
+export async function getStoredTikTokPostsForMIv3(competitorId: string, accountId: string, allowedIds?: string[], sourceId?: string) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorPosts.competitorId, competitorId),
+    eq(ciCompetitorPosts.accountId, accountId),
+    eq(ciCompetitorPosts.platform, "tiktok"),
+    sql`NOT EXISTS (
+      SELECT 1 FROM competitor_sources cs
+      WHERE cs.id = ${ciCompetitorPosts.sourceId}
+        AND (cs.status IN ('DISABLED', 'REJECTED') OR cs.activity_state = 'QUARANTINED_MISATTRIBUTED')
+    )`,
+  ];
+  if (sourceId) {
+    whereClauses.push(eq(ciCompetitorPosts.sourceId, sourceId));
+  }
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorPosts.id, allowedIds));
+  }
+
+  const posts = await db.select().from(ciCompetitorPosts)
+    .where(and(...whereClauses))
+    .orderBy(desc(ciCompetitorPosts.createdAt))
+    .limit(50);
+
+  return posts.map(p => ({
+    id: p.id,
+    postId: p.postId,
+    caption: p.caption || "",
+    hookText: p.hookText || null,
+    hookSource: (p as any).hookSource || null,
+    transcript: (p as any).transcript || null,
+    likes: p.likes || 0,
+    comments: p.comments || 0,
+    views: p.views || 0,
+    shares: 0,
+    hashtags: p.hashtags || "",
+    timestamp: p.timestamp?.toISOString() || new Date().toISOString(),
+  }));
+}
+
+export async function getStoredTikTokCommentsForMIv3(competitorId: string, accountId: string, allowedIds?: string[]) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorComments.competitorId, competitorId),
+    eq(ciCompetitorComments.accountId, accountId),
+    sql`${ciCompetitorComments.source} IN ('tiktok_scraped', 'tiktok_apify')`,
+  ];
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorComments.id, allowedIds));
+  }
+
   const comments = await db.select().from(ciCompetitorComments)
-    .where(and(
-      eq(ciCompetitorComments.competitorId, competitorId),
-      eq(ciCompetitorComments.accountId, accountId),
-      sql`${ciCompetitorComments.source} IN ('tiktok_scraped', 'tiktok_apify')`,
-    ))
+    .where(and(...whereClauses))
     .orderBy(desc(ciCompetitorComments.createdAt))
     .limit(200);
 
@@ -1524,13 +1826,19 @@ export async function getStoredTikTokCommentsForMIv3(competitorId: string, accou
  * so the customer-evidence validator can fail closed on owner/unknown
  * authors. Synthetic rows are excluded — never customer evidence.
  */
-export async function getStoredCommentsForCustomerEvidence(competitorId: string, accountId: string) {
+export async function getStoredCommentsForCustomerEvidence(competitorId: string, accountId: string, allowedIds?: string[]) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorComments.competitorId, competitorId),
+    eq(ciCompetitorComments.accountId, accountId),
+    eq(ciCompetitorComments.isSynthetic, false),
+  ];
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorComments.id, allowedIds));
+  }
+
   const comments = await db.select().from(ciCompetitorComments)
-    .where(and(
-      eq(ciCompetitorComments.competitorId, competitorId),
-      eq(ciCompetitorComments.accountId, accountId),
-      eq(ciCompetitorComments.isSynthetic, false),
-    ))
+    .where(and(...whereClauses))
     .orderBy(desc(ciCompetitorComments.createdAt))
     .limit(300);
 
@@ -1544,12 +1852,18 @@ export async function getStoredCommentsForCustomerEvidence(competitorId: string,
   }));
 }
 
-export async function getStoredReviewsForMIv3(competitorId: string, accountId: string) {
+export async function getStoredReviewsForMIv3(competitorId: string, accountId: string, allowedIds?: string[]) {
+  if (allowedIds !== undefined && allowedIds.length === 0) return [];
+  const whereClauses = [
+    eq(ciCompetitorReviews.competitorId, competitorId),
+    eq(ciCompetitorReviews.accountId, accountId),
+  ];
+  if (allowedIds && allowedIds.length > 0) {
+    whereClauses.push(inArray(ciCompetitorReviews.id, allowedIds));
+  }
+
   const reviews = await db.select().from(ciCompetitorReviews)
-    .where(and(
-      eq(ciCompetitorReviews.competitorId, competitorId),
-      eq(ciCompetitorReviews.accountId, accountId),
-    ))
+    .where(and(...whereClauses))
     .orderBy(desc(ciCompetitorReviews.createdAt))
     .limit(100);
 
@@ -1819,16 +2133,16 @@ export async function enrichCompetitorWithMultiSources(
       eq(competitorSources.competitorId, competitorId),
       eq(competitorSources.accountId, accountId),
       eq(competitorSources.campaignId, campaignId),
-      eq(competitorSources.status, "ACTIVE")
+      or(eq(competitorSources.status, "ACTIVE"), eq(competitorSources.status, "VERIFIED"))
     ));
 
-  // Filter target platforms (default: TIKTOK, YOUTUBE, REVIEWS)
+  // Filter target platforms (exclude INSTAGRAM and WEBSITE by default when called from fetch-orchestrator so the same source is never fetched twice in one job)
   const targetPlatforms = platforms 
     ? platforms.map(p => p.toUpperCase())
-    : ["TIKTOK", "YOUTUBE", "REVIEWS"];
+    : ["TIKTOK", "YOUTUBE", "REVIEWS", "TRUSTPILOT", "GOOGLE_REVIEWS", "GOOGLE_MAPS", "BLOG"];
 
   const eligibleSources = activeSources
-    .filter(s => targetPlatforms.includes(s.platform.toUpperCase()))
+    .filter(s => targetPlatforms.includes(s.platform.toUpperCase()) && s.activityState !== "UNSUPPORTED_PROVIDER")
     .slice(0, maxSources);
 
   const results: SourceFetchExecutionResult[] = [];
@@ -1839,19 +2153,38 @@ export async function enrichCompetitorWithMultiSources(
   let failed = 0;
 
   for (const src of eligibleSources) {
-    // Check freshness cache (72h cooldown) unless forceRefresh is set
-    if (!forceRefresh && src.lastFetchedAt) {
-      const elapsed = Date.now() - new Date(src.lastFetchedAt).getTime();
-      if (elapsed < 72 * 60 * 60 * 1000) {
-        results.push({
-          sourceId: src.id,
-          platform: src.platform,
-          status: "SKIPPED_FRESH_CACHE",
-          itemsCount: 0,
-          commentsCount: 0,
-          durationMs: 0,
-        });
-        continue;
+    // Check freshness cache (72h cooldown) AND failure backoff unless forceRefresh is set
+    if (!forceRefresh) {
+      if (src.lastFetchedAt) {
+        const elapsed = Date.now() - new Date(src.lastFetchedAt).getTime();
+        if (elapsed < 72 * 60 * 60 * 1000) {
+          results.push({
+            sourceId: src.id,
+            platform: src.platform,
+            status: "SKIPPED_FRESH_CACHE",
+            itemsCount: 0,
+            commentsCount: 0,
+            durationMs: 0,
+          });
+          continue;
+        }
+      }
+      const meta = (src.metadata || {}) as Record<string, any>;
+      if (meta.lastFailedAt) {
+        const failElapsed = Date.now() - new Date(meta.lastFailedAt).getTime();
+        const failures = Number(meta.consecutiveFailures || 1);
+        const backoffMs = Math.min(48, 6 * Math.pow(2, Math.max(0, failures - 1))) * 60 * 60 * 1000;
+        if (failElapsed < backoffMs) {
+          results.push({
+            sourceId: src.id,
+            platform: src.platform,
+            status: "SKIPPED_FRESH_CACHE",
+            itemsCount: 0,
+            commentsCount: 0,
+            durationMs: 0,
+          });
+          continue;
+        }
       }
     }
 
@@ -1868,7 +2201,16 @@ export async function enrichCompetitorWithMultiSources(
 
       if (res.status === "SUCCESS" || res.status === "SUCCESS_ZERO_CONTENT" || res.status === "FETCH_SUCCESS") {
         succeeded++;
-        if (src.platform.toUpperCase() === "REVIEWS") {
+        const meta = (src.metadata || {}) as Record<string, any>;
+        if (meta.consecutiveFailures) {
+          await db
+            .update(competitorSources)
+            .set({
+              metadata: { ...meta, consecutiveFailures: 0, lastFailedAt: null },
+            })
+            .where(eq(competitorSources.id, src.id));
+        }
+        if (["REVIEWS", "TRUSTPILOT", "GOOGLE_REVIEWS"].includes(src.platform.toUpperCase())) {
           totalReviews += res.commentsCount || res.itemsCount;
         } else {
           totalPosts += res.itemsCount;
@@ -1876,9 +2218,35 @@ export async function enrichCompetitorWithMultiSources(
         }
       } else {
         failed++;
+        const meta = (src.metadata || {}) as Record<string, any>;
+        await db
+          .update(competitorSources)
+          .set({
+            metadata: {
+              ...meta,
+              consecutiveFailures: Number(meta.consecutiveFailures || 0) + 1,
+              lastFailedAt: new Date().toISOString(),
+              lastError: res.error || res.status,
+            },
+          })
+          .where(eq(competitorSources.id, src.id));
       }
     } catch (fetchErr: any) {
       failed++;
+      const meta = (src.metadata || {}) as Record<string, any>;
+      try {
+        await db
+          .update(competitorSources)
+          .set({
+            metadata: {
+              ...meta,
+              consecutiveFailures: Number(meta.consecutiveFailures || 0) + 1,
+              lastFailedAt: new Date().toISOString(),
+              lastError: fetchErr.message,
+            },
+          })
+          .where(eq(competitorSources.id, src.id));
+      } catch {}
       results.push({
         sourceId: src.id,
         platform: src.platform,

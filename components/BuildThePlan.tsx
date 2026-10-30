@@ -113,7 +113,7 @@ function getConfidenceLabel(confidence: number): string {
 interface CICompetitor {
   id: string;
   name: string;
-  profileLink: string;
+  websiteUrl: string;
   platform: string;
   businessType: string;
   engagementRatio?: number | null;
@@ -353,7 +353,7 @@ export default function BuildThePlan({ onNavigateToCI, onNavigateToCalendar, onO
   const passGate = useCallback(async () => {
     setError('');
     const selected = ciCompetitors.filter(c => selectedCompetitorIds.has(c.id));
-    const validUrls = selected.map(c => c.profileLink).filter(u => u.trim().length > 0);
+    const validUrls = selected.map(c => c.websiteUrl || c.websiteUrl || "").filter(u => u.trim().length > 0);
     if (validUrls.length === 0) {
       setError('Select at least one competitor from your Competitor Intelligence');
       return;

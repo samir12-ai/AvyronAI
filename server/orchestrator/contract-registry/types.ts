@@ -293,6 +293,8 @@ export interface ProvenanceForTrust {
    * `INCOMPATIBLE_VERSION` regardless of freshness.
    */
   schemaVersion?: number | null;
+  /** True when hydrated by an official orchestrator resume of the same logical run. */
+  isOfficialResume?: boolean | null;
   /**
    * P5 isolation seal — the accountId / campaignId the snapshot was
    * originally produced for. When set on the provenance row AND a current

@@ -151,6 +151,7 @@ Reason in this exact order:
 HARD RULES:
 - Every "dimension" / "game" must be a NAMED, COMMERCIAL noun phrase a buyer or competitor could repeat. No "differentiation", "uniqueness", "value", "innovation", "AI-powered", "best-in-class" as standalone answers.
 - Every claim must cite [COMP#] / [PAIN#] / [DESIRE#] / [OBJ#] or product mechanism — abstract claims = rejected.
+- PRODUCT TRUTH BOUNDARY: "ourDimension" and "ourGame" MUST be strictly grounded in the provided Product unique mechanism and Product strategic advantage above. NEVER invent unverified guarantees, "guaranteed lifetime/perpetual access", "user-controlled revision/editing controls", or unverified SLAs not stated in the product mechanism.
 - Defensibility proof must say what competitor would have to give up to copy, not just "they can't."
 - If audience signals contradict the obvious game, name that contradiction — that's usually the opening.
 
@@ -238,7 +239,7 @@ export async function designCategoryGame(args: DesignerInput): Promise<CategoryG
       messages: [{ role: "user", content: buildJudgePrompt(designRaw, compNames) }],
       model: "gpt-4.1-mini",
       temperature: 0.1,
-      max_tokens: 400,
+      max_tokens: 800,
       accountId: args.accountId,
     });
     const judgeRaw = judgeResp.choices?.[0]?.message?.content?.trim() || "";
@@ -276,10 +277,33 @@ export async function designCategoryGame(args: DesignerInput): Promise<CategoryG
       const retryRaw = retryResp.choices?.[0]?.message?.content?.trim() || "";
       const v2 = safeJSON<any>(retryRaw);
       if (v2) {
-        final = v2;
-        console.log(`[CategoryGame] STEP_4_RETRY | accepted_v2 | ourDimension="${(v2.ourDimension || "").slice(0, 60)}"`);
-        judgeVerdict = "ACCEPTED";
-        judgeReason = `auto-corrected after retry; original issue: ${judgeReason}`;
+        try {
+          const rejudgeResp = await aiChat({
+            messages: [{ role: "user", content: buildJudgePrompt(retryRaw, compNames) }],
+            model: "gpt-4.1-mini",
+            temperature: 0.1,
+            max_tokens: 800,
+            accountId: args.accountId,
+          });
+          const rejudgeRaw = rejudgeResp.choices?.[0]?.message?.content?.trim() || "";
+          const rejudged = safeJSON<{ verdict: string; reason: string; fix?: string }>(rejudgeRaw);
+          if (rejudged?.verdict === "ACCEPTED") {
+            final = v2;
+            judgeVerdict = "ACCEPTED";
+            judgeReason = rejudged.reason || `accepted after retry; original issue: ${judgeReason}`;
+            console.log(`[CategoryGame] STEP_4_RETRY | accepted_v2 | ourDimension="${(v2.ourDimension || "").slice(0, 60)}"`);
+          } else {
+            final = v2;
+            judgeVerdict = "REJECTED";
+            judgeReason = rejudged?.reason ? `RETRY_REJECTED: ${rejudged.reason}` : `RETRY_REJECTED: unparseable re-judge output`;
+            console.warn(`[CategoryGame] STEP_4_RETRY | rejected_v2 | reason="${judgeReason}"`);
+          }
+        } catch (rejudgeErr: any) {
+          final = v2;
+          judgeVerdict = "REJECTED";
+          judgeReason = `RETRY_JUDGE_FAILED: ${rejudgeErr.message}`;
+          console.warn(`[CategoryGame] STEP_4_RETRY | rejudge_failed | ${rejudgeErr.message}`);
+        }
       }
     } catch (err: any) {
       console.warn(`[CategoryGame] RETRY_FAILED | ${err.message} — keeping v1`);

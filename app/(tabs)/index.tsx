@@ -42,6 +42,9 @@ interface DashboardOverviewData {
   businessPulse: {
     strategy: {
       version: number;
+      activePlanVersion?: number;
+      rootBundleVersion?: number;
+      totalPlanRevisions?: number;
       status: string;
       label: string;
     };
@@ -82,6 +85,9 @@ interface DashboardOverviewData {
   };
   strategyPlanCard: {
     version: number;
+    activePlanVersion?: number;
+    rootBundleVersion?: number;
+    totalPlanRevisions?: number;
     status: string;
     primaryDirection: string;
     activeLanesCount: number;
@@ -108,6 +114,19 @@ interface DashboardOverviewData {
     mainConcernOrInsight: string;
     status: string;
     isHealthy: boolean;
+    evaluatedCases?: Array<{
+      id: string;
+      caseNumber: number;
+      title: string;
+      outcomeType: string;
+      outcomeBadgeLabel: string;
+      outcomeColor: string;
+      channel: string;
+      headlineMetric: string;
+      headlineDelta: string;
+    }>;
+    evaluatedSummary?: string;
+    simulated?: boolean;
   };
   watchtowerCard: {
     confirmedCount: number;
@@ -129,6 +148,15 @@ interface DashboardOverviewData {
     summary: string;
     statusLabel: string;
     proposalId?: string;
+    signals?: Array<{
+      scenarioId: string;
+      eventId: string;
+      title: string;
+      lane: string;
+      status: 'READY_FOR_INVESTIGATION' | 'PATCH_READY' | 'APPLIED';
+      statusLabel: string;
+      appliedVersion: number | null;
+    }>;
   };
   reportsCard: {
     latestReport: {
@@ -185,7 +213,11 @@ function PulsingGreenDot() {
 
 function formatRelativeTime(dateStr?: string): string {
   if (!dateStr) return 'Just now';
-  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const normalized =
+    /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(dateStr) && !/(?:Z|[+-]\d{2}(?::?\d{2})?)$/i.test(dateStr)
+      ? `${dateStr.replace(' ', 'T')}Z`
+      : dateStr;
+  const diffMs = Date.now() - new Date(normalized).getTime();
   const mins = Math.floor(diffMs / 60000);
   if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;
@@ -278,6 +310,19 @@ export default function DashboardScreen() {
     fetchOverview();
     fetchNotifications();
     fetchSetupStatus();
+    const handleDemoChange = () => {
+      fetchOverview();
+      fetchNotifications();
+      fetchSetupStatus();
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('avyron-demo-state-changed', handleDemoChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('avyron-demo-state-changed', handleDemoChange);
+      }
+    };
   }, [fetchOverview, fetchNotifications, fetchSetupStatus]);
 
   const handleMarkNotificationRead = async (notif: NotificationItem) => {
@@ -377,7 +422,7 @@ export default function DashboardScreen() {
 
         <View style={styles.headerRight}>
           {/* Finish Setup Action Button when setup is incomplete */}
-          {(!setupStatus || !setupStatus.isComplete) && (
+          {((!setupStatus || !setupStatus.isComplete) && !(data?.businessPulse?.strategy?.status === 'ACTIVE' || data?.strategyPlanCard?.status === 'ACTIVE')) && (
             <Pressable
               style={styles.finishSetupHeaderBtn}
               onPress={() => router.push('/setup')}
@@ -434,7 +479,7 @@ export default function DashboardScreen() {
       </View>
 
       {/* 1.5 SETUP HERO BANNER (When setup is incomplete) */}
-      {(!setupStatus || !setupStatus.isComplete) && (
+      {((!setupStatus || !setupStatus.isComplete) && !(data?.businessPulse?.strategy?.status === 'ACTIVE' || data?.strategyPlanCard?.status === 'ACTIVE')) && (
         <View style={styles.setupHeroBanner}>
           <View style={styles.setupHeroContent}>
             <View style={styles.setupHeroIconBox}>
@@ -578,7 +623,9 @@ export default function DashboardScreen() {
                   </View>
                   <Text style={styles.cardTitle}>WHAT TO DO TODAY</Text>
                 </View>
-                <Feather name="more-horizontal" size={16} color="#64748B" />
+                <Pressable onPress={() => router.push('/(tabs)/what-to-do-today')} hitSlop={8}>
+                  <Feather name="more-horizontal" size={16} color="#64748B" />
+                </Pressable>
               </View>
 
               {data?.whatToDoTodayCard?.tasks && data.whatToDoTodayCard.tasks.length > 0 ? (
@@ -586,7 +633,11 @@ export default function DashboardScreen() {
                   <Text style={styles.cardSubhead}>{data.whatToDoTodayCard.count} Priority Actions Today</Text>
                   <View style={styles.taskList}>
                     {data.whatToDoTodayCard.tasks.map((task) => (
-                      <View key={task.id} style={styles.taskItem}>
+                      <Pressable
+                        key={task.id}
+                        style={styles.taskItem}
+                        onPress={() => router.push('/(tabs)/what-to-do-today')}
+                      >
                         <View style={[styles.taskNumBadge, { backgroundColor: task.priorityColor === 'red' ? '#EF4444' : (task.priorityColor === 'orange' ? '#F59E0B' : '#3B82F6') }]}>
                           <Text style={styles.taskNumText}>{task.order}</Text>
                         </View>
@@ -598,7 +649,7 @@ export default function DashboardScreen() {
                             </Text>
                           </View>
                         </View>
-                      </View>
+                      </Pressable>
                     ))}
                   </View>
                 </>
@@ -628,13 +679,17 @@ export default function DashboardScreen() {
                   </View>
                   <Text style={styles.cardTitle}>STRATEGY PLAN</Text>
                 </View>
-                <Feather name="more-horizontal" size={16} color="#64748B" />
+                <Pressable onPress={() => router.push('/(tabs)/strategy-plan')} hitSlop={8}>
+                  <Feather name="more-horizontal" size={16} color="#64748B" />
+                </Pressable>
               </View>
 
               {data?.strategyPlanCard?.status === 'ACTIVE' ? (
                 <>
                   <Text style={[styles.cardSubhead, { color: '#A78BFA' }]}>
-                    Current Strategy — v{data.strategyPlanCard.version}
+                    Current Strategy — Plan v{data.strategyPlanCard.activePlanVersion ?? data.strategyPlanCard.version}
+                    {data.strategyPlanCard.rootBundleVersion ? ` · Bundle v${data.strategyPlanCard.rootBundleVersion}` : ''}
+                    {data.strategyPlanCard.totalPlanRevisions ? ` (${data.strategyPlanCard.totalPlanRevisions} revisions)` : ''}
                   </Text>
                   <View style={styles.metaRowList}>
                     <View style={styles.metaRow}>
@@ -707,7 +762,9 @@ export default function DashboardScreen() {
                   </View>
                   <Text style={styles.cardTitle}>PERFORMANCE LOOP</Text>
                 </View>
-                <Feather name="more-horizontal" size={16} color="#64748B" />
+                <Pressable onPress={() => router.push('/(tabs)/performance')} hitSlop={8}>
+                  <Feather name="more-horizontal" size={16} color="#64748B" />
+                </Pressable>
               </View>
 
               <Text style={styles.cardSubhead}>Performance vs Plan</Text>
@@ -733,6 +790,38 @@ export default function DashboardScreen() {
                   </View>
                   <View style={styles.insightCard}>
                     <Text style={styles.insightText}>
+                      Main concern: {data.performanceCard.mainConcernOrInsight}
+                    </Text>
+                  </View>
+                </>
+              ) : data?.performanceCard?.evaluatedCases && data.performanceCard.evaluatedCases.length > 0 ? (
+                <>
+                  <Text style={{ fontSize: 11, color: '#C4B5FD', fontWeight: '700', marginBottom: 8 }}>
+                    {data.performanceCard.evaluatedSummary}
+                  </Text>
+                  <View style={{ gap: 8, marginBottom: 12 }}>
+                    {data.performanceCard.evaluatedCases.map((c) => (
+                      <Pressable
+                        key={c.id}
+                        style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}
+                        onPress={() => router.push('/(tabs)/performance')}
+                      >
+                        <View
+                          style={{ width: 8, height: 8, borderRadius: 4, marginTop: 5, backgroundColor: c.outcomeColor }}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#E2E8F0' }} numberOfLines={1}>
+                            {c.outcomeBadgeLabel} · {c.channel}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }} numberOfLines={1}>
+                            {c.headlineMetric}: {c.headlineDelta}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                  <View style={styles.insightCard}>
+                    <Text style={styles.insightText} numberOfLines={4}>
                       Main concern: {data.performanceCard.mainConcernOrInsight}
                     </Text>
                   </View>
@@ -765,7 +854,9 @@ export default function DashboardScreen() {
                   </View>
                   <Text style={styles.cardTitle}>WATCHTOWER / MARKET</Text>
                 </View>
-                <Feather name="more-horizontal" size={16} color="#64748B" />
+                <Pressable onPress={() => router.push('/(tabs)/watchtower')} hitSlop={8}>
+                  <Feather name="more-horizontal" size={16} color="#64748B" />
+                </Pressable>
               </View>
 
               <Text style={styles.cardSubhead}>Market Watch</Text>
@@ -777,7 +868,11 @@ export default function DashboardScreen() {
                   </Text>
                   <View style={styles.marketEventsList}>
                     {data.watchtowerCard.recentConfirmedEvents.map((ev) => (
-                      <View key={ev.id} style={styles.marketEventItem}>
+                      <Pressable
+                        key={ev.id}
+                        style={styles.marketEventItem}
+                        onPress={() => router.push('/(tabs)/watchtower')}
+                      >
                         <Feather name="volume-2" size={14} color="#F59E0B" style={styles.marketEventIcon} />
                         <View style={styles.marketEventContent}>
                           <Text style={styles.marketEventTitle}>{ev.title}</Text>
@@ -785,15 +880,15 @@ export default function DashboardScreen() {
                             <Text style={styles.marketEventDiff}>{ev.oldValue} → {ev.newValue}</Text>
                           )}
                         </View>
-                      </View>
+                      </Pressable>
                     ))}
                   </View>
                   {data.watchtowerCard.candidatesCount > 0 && (
-                    <View style={styles.underReviewPill}>
+                    <Pressable style={styles.underReviewPill} onPress={() => router.push('/(tabs)/watchtower')}>
                       <Text style={styles.underReviewText}>
                         {data.watchtowerCard.candidatesCount} change still under review
                       </Text>
-                    </View>
+                    </Pressable>
                   )}
                 </>
               ) : (
@@ -822,7 +917,9 @@ export default function DashboardScreen() {
                   </View>
                   <Text style={styles.cardTitle}>REASONING & EVIDENCE</Text>
                 </View>
-                <Feather name="more-horizontal" size={16} color="#64748B" />
+                <Pressable onPress={() => router.push('/(tabs)/reasoning-evidence')} hitSlop={8}>
+                  <Feather name="more-horizontal" size={16} color="#64748B" />
+                </Pressable>
               </View>
 
               <Text style={styles.cardSubhead}>Avyron Investigations</Text>
@@ -830,11 +927,43 @@ export default function DashboardScreen() {
               {data?.reasoningCard?.investigationState !== 'NO_ACTIVE_INVESTIGATION' ? (
                 <>
                   <Text style={styles.investigationActiveCount}>
-                    {data?.reasoningCard?.activeInvestigationsCount || 1} Active
+                    {data?.reasoningCard?.signals && data.reasoningCard.signals.length > 0
+                      ? `${data?.reasoningCard?.activeInvestigationsCount ?? 0} Pending · ${data.reasoningCard.signals.length} Strategic Signals`
+                      : `${data?.reasoningCard?.activeInvestigationsCount || 1} Active`}
                   </Text>
                   <View style={styles.reasoningBox}>
                     <Text style={styles.reasoningBoxText}>{data?.reasoningCard?.summary}</Text>
                   </View>
+                  {data?.reasoningCard?.signals && data.reasoningCard.signals.length > 0 && (
+                    <View style={{ gap: 8, marginBottom: 14 }}>
+                      {data.reasoningCard.signals.map((sig) => (
+                        <Pressable
+                          key={sig.scenarioId}
+                          style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}
+                          onPress={() => router.push(`/(tabs)/reasoning-evidence?tab=deep_reasoning` as any)}
+                        >
+                          <View
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: 4,
+                              marginTop: 5,
+                              backgroundColor:
+                                sig.status === 'APPLIED' ? '#10B981' : sig.status === 'PATCH_READY' ? '#F59E0B' : '#8B5CF6',
+                            }}
+                          />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: '#E2E8F0' }} numberOfLines={2}>
+                              {sig.title}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 1 }} numberOfLines={1}>
+                              {sig.statusLabel}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
                   <View style={styles.reasoningStatusRow}>
                     <Text style={styles.statusPrefix}>Status:</Text>
                     <View style={styles.deepReasoningTag}>
@@ -852,7 +981,7 @@ export default function DashboardScreen() {
 
               <Pressable
                 style={styles.secondaryCtaBtn}
-                onPress={() => router.push('/(tabs)/reasoning-evidence')}
+                onPress={() => router.push('/(tabs)/reasoning-evidence?tab=deep_reasoning' as any)}
               >
                 <Text style={styles.secondaryCtaText}>Review Investigation</Text>
                 <Feather name="arrow-right" size={16} color="#A78BFA" />
@@ -868,7 +997,9 @@ export default function DashboardScreen() {
                   </View>
                   <Text style={styles.cardTitle}>REPORTS</Text>
                 </View>
-                <Feather name="more-horizontal" size={16} color="#64748B" />
+                <Pressable onPress={() => router.push('/(tabs)/reports')} hitSlop={8}>
+                  <Feather name="more-horizontal" size={16} color="#64748B" />
+                </Pressable>
               </View>
 
               <Text style={styles.cardSubhead}>Latest Report</Text>

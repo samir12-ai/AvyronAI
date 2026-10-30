@@ -523,12 +523,52 @@ export default function OfferEngine({ isActive }: { isActive?: boolean }) {
         {(offer.objectionHandling && offer.objectionHandling.length > 0) ? (
           <>
             <Text style={[styles.structureLabel, { color: '#F97316', marginTop: 12 }]}>Objection Handling</Text>
-            {offer.objectionHandling.map((o, i) => (
-              <View key={i} style={styles.riskRow}>
-                <Ionicons name="chatbubble-ellipses" size={14} color="#8B5CF6" />
-                <Text style={[styles.riskText, { color: colors.textMuted }]}>{o}</Text>
-              </View>
-            ))}
+            {offer.objectionHandling.map((o, i) => {
+              let badgeColor = '#6B7280';
+              let badgeBg = '#37415140';
+              let badgeText = 'OBJECTION';
+              let bodyText = o;
+
+              if (/^\[ADDRESSED\]/i.test(o)) {
+                badgeColor = '#10B981';
+                badgeBg = '#064E3B40';
+                badgeText = 'ADDRESSED';
+                bodyText = o.replace(/^\[ADDRESSED\]\s*/i, '');
+              } else if (/^\[PARTIALLY_MITIGATED\]/i.test(o)) {
+                badgeColor = '#F59E0B';
+                badgeBg = '#78350F40';
+                badgeText = 'PARTIALLY MITIGATED';
+                bodyText = o.replace(/^\[PARTIALLY_MITIGATED\]\s*/i, '');
+              } else if (/^\[PROPOSED\]/i.test(o)) {
+                badgeColor = '#8B5CF6';
+                badgeBg = '#4C1D9540';
+                badgeText = 'PROPOSED';
+                bodyText = o.replace(/^\[PROPOSED\]\s*/i, '');
+              } else if (/^\[UNRESOLVED\]/i.test(o)) {
+                badgeColor = '#EF4444';
+                badgeBg = '#7F1D1D40';
+                badgeText = 'UNRESOLVED';
+                bodyText = o.replace(/^\[UNRESOLVED\]\s*/i, '');
+              }
+
+              return (
+                <View key={i} style={[styles.riskRow, { alignItems: 'flex-start', marginVertical: 4 }]}>
+                  <View style={{
+                    backgroundColor: badgeBg,
+                    borderColor: badgeColor,
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    marginRight: 8,
+                    marginTop: 1,
+                  }}>
+                    <Text style={{ color: badgeColor, fontSize: 10, fontWeight: '700' }}>{badgeText}</Text>
+                  </View>
+                  <Text style={[styles.riskText, { color: colors.text, flex: 1 }]}>{bodyText}</Text>
+                </View>
+              );
+            })}
           </>
         ) : offer.riskNotes.length > 0 && variant !== 'rejected' ? (
           <>

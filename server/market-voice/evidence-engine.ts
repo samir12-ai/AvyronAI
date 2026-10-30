@@ -20,6 +20,8 @@ import { fetchSourceContent } from "./source-fetcher";
 import {
   verifyAuthorshipRole,
   verifyCustomerVoiceEligibility,
+  verifyBatchAuthorshipRole,
+  verifyBatchCustomerVoiceEligibility,
   runFinalEvidenceJudge,
 } from "./evidence-verifier";
 
@@ -148,7 +150,7 @@ export async function executeMarketVoiceEvidencePhase(
 
   const competitorDomainMap = new Map<string, string>();
   for (const comp of activeCompetitors) {
-    const rawUrl = comp.websiteUrl || comp.profileLink || "";
+    const rawUrl = comp.websiteUrl || "";
     try {
       const u = new URL(rawUrl.startsWith("http") ? rawUrl : `https://${rawUrl}`);
       const domain = u.hostname.replace(/^www\./, "").toLowerCase();
@@ -170,94 +172,239 @@ export async function executeMarketVoiceEvidencePhase(
   const fetchFailureBreakdown: Record<string, number> = {};
   const evidenceItems: VerifiedEvidenceItemResult[] = [];
 
-  // Bounded worker pool execution for a single discovery result
-  const processResult = async (res: MarketVoiceDiscoveryResult) => {
-    try {
-      // A. Check if URL matches a verified competitor
-      let isCompetitor = false;
-      let matchedCompetitorId: string | null = null;
-      try {
-        const u = new URL(res.canonicalUrl.startsWith("http") ? res.canonicalUrl : `https://${res.canonicalUrl}`);
-        const domain = u.hostname.replace(/^www\./, "").toLowerCase();
-        if (competitorDomainMap.has(domain)) {
-          isCompetitor = true;
-          matchedCompetitorId = competitorDomainMap.get(domain)!;
-        }
-      } catch {
-        // Ignore
-      }
+  const processedUrlCache = new Map<
+    string,
+    { finalStatus: string; matchedCompetitorId: string | null; extractedCount: number }
+  >();
+  const LLM_PACKED_BATCH_SIZE = 25;
 
-      // B. Fetch real destination content
-      const fetchResult = await fetchSourceContent(res);
+  // Bounded worker pool execution for a chunk of discovery results with cross-URL item packing
+  const processChunkOfResults = async (chunk: MarketVoiceDiscoveryResult[]) => {
+    interface FetchedResultContext {
+      res: MarketVoiceDiscoveryResult;
+      isCompetitor: boolean;
+      matchedCompetitorId: string | null;
+      pageContext: { url: string; title: string; domain?: string; snippet?: string };
+      items: Array<{ origItem: any; packedItem: any }>;
+    }
 
-      if (fetchResult.fetchStatus !== "FETCHED" || fetchResult.contentItems.length === 0) {
-        const failReason = fetchResult.fetchStatus;
-        fetchFailureBreakdown[failReason] = (fetchFailureBreakdown[failReason] || 0) + 1;
-        
-        // Update discovery result status
+    const toFetch: MarketVoiceDiscoveryResult[] = [];
+    for (const res of chunk) {
+      const canonKey = (res.canonicalUrl || res.url || "").trim().toLowerCase();
+      const cachedUrlOutcome = canonKey ? processedUrlCache.get(canonKey) : undefined;
+      if (cachedUrlOutcome) {
         await db
           .update(marketVoiceDiscoveryResults)
           .set({
-            verificationStatus: "NO_CUSTOMER_VOICE",
-            extractedCount: 0,
+            verificationStatus: cachedUrlOutcome.finalStatus as any,
+            verifiedCompetitorId: cachedUrlOutcome.matchedCompetitorId,
+            extractedCount: cachedUrlOutcome.extractedCount,
           })
           .where(eq(marketVoiceDiscoveryResults.id, res.id));
-        return;
+        continue;
       }
+      toFetch.push(res);
+    }
 
-      fetchableResults++;
-      fetchedContentItemsCount += fetchResult.contentItems.length;
+    if (toFetch.length === 0) return;
 
-      let approvedForThisResult = 0;
+    const fetchedContexts: FetchedResultContext[] = [];
+    await Promise.all(
+      toFetch.map(async (res) => {
+        try {
+          let isCompetitor = false;
+          let matchedCompetitorId: string | null = null;
+          try {
+            const u = new URL(res.canonicalUrl.startsWith("http") ? res.canonicalUrl : `https://${res.canonicalUrl}`);
+            const domain = u.hostname.replace(/^www\./, "").toLowerCase();
+            if (competitorDomainMap.has(domain)) {
+              isCompetitor = true;
+              matchedCompetitorId = competitorDomainMap.get(domain)!;
+            }
+          } catch {
+            // Ignore
+          }
 
-      for (const item of fetchResult.contentItems) {
-        customerCandidatesCount++;
+          const fetchResult = await fetchSourceContent(res);
+          if (fetchResult.fetchStatus !== "FETCHED" || fetchResult.contentItems.length === 0) {
+            const failReason = fetchResult.fetchStatus;
+            fetchFailureBreakdown[failReason] = (fetchFailureBreakdown[failReason] || 0) + 1;
+            const canonKey = (res.canonicalUrl || res.url || "").trim().toLowerCase();
+            if (canonKey) {
+              processedUrlCache.set(canonKey, {
+                finalStatus: "NO_CUSTOMER_VOICE",
+                matchedCompetitorId,
+                extractedCount: 0,
+              });
+            }
+            await db
+              .update(marketVoiceDiscoveryResults)
+              .set({
+                verificationStatus: "NO_CUSTOMER_VOICE",
+                extractedCount: 0,
+              })
+              .where(eq(marketVoiceDiscoveryResults.id, res.id));
+            return;
+          }
 
-        // C. Authorship Verification
-        const authorship = await verifyAuthorshipRole(
-          item,
-          { url: res.canonicalUrl, title: fetchResult.pageTitle || res.title || "" },
-          { accountId }
-        );
+          fetchableResults++;
+          fetchedContentItemsCount += fetchResult.contentItems.length;
 
-        // D. Customer Voice Eligibility Verification
-        const eligibility = await verifyCustomerVoiceEligibility(
-          item,
-          authorship.authorRole,
-          { offeringName, category, targetMarket, productTruthFacts },
-          { accountId }
-        );
+          const pageTitle = fetchResult.pageTitle || res.title || "";
+          const pageContext = {
+            url: res.canonicalUrl,
+            title: pageTitle,
+            domain: res.domain || undefined,
+            snippet: res.snippet || undefined,
+          };
 
-        // E. Final Evidence Judge
-        const judge = runFinalEvidenceJudge(
-          item,
-          authorship,
-          eligibility,
-          { offeringName, category, targetMarket },
-          { isCompetitor, competitorId: matchedCompetitorId }
-        );
+          const items = fetchResult.contentItems.map((origItem, idx) => {
+            const packedItemId = `${res.id}::${origItem.itemId || idx}`;
+            return {
+              origItem,
+              packedItem: {
+                ...origItem,
+                itemId: packedItemId,
+                sourceUrl: origItem.sourceUrl || res.canonicalUrl,
+                metadata: {
+                  ...(origItem.metadata || {}),
+                  pageUrl: res.canonicalUrl,
+                  pageTitle,
+                  pageSnippet: res.snippet || undefined,
+                },
+              },
+            };
+          });
 
-        if (judge.verdict === "APPROVE" && judge.canonicalOwner === "market_voice_evidence") {
-          judgeApprovedCount++;
-          approvedForThisResult++;
+          fetchedContexts.push({
+            res,
+            isCompetitor,
+            matchedCompetitorId,
+            pageContext,
+            items,
+          });
+        } catch (err: any) {
+          console.warn(`[MarketVoiceEvidenceEngine] Error fetching result ${res.id}:`, err?.message);
+          await db
+            .update(marketVoiceDiscoveryResults)
+            .set({
+              verificationStatus: "NO_CUSTOMER_VOICE",
+              extractedCount: 0,
+            })
+            .where(eq(marketVoiceDiscoveryResults.id, res.id));
+          fetchFailureBreakdown["FETCH_FAILED"] = (fetchFailureBreakdown["FETCH_FAILED"] || 0) + 1;
+        }
+      })
+    );
 
-          // F. Canonical Evidence Persistence (Idempotent)
-          const evidenceId = generateMarketVoiceEvidenceId(
-            res.sourcePlatform,
-            item.itemId || res.canonicalUrl,
-            item.verbatimText
+    if (fetchedContexts.length === 0) return;
+
+    // Pack all extracted items across fetched URLs in this chunk into batches of up to 25 items
+    const allPackedItems = fetchedContexts.flatMap((ctx) => ctx.items.map((x) => x.packedItem));
+    const combinedAuthorshipMap = new Map<string, any>();
+    const defaultPageCtx = fetchedContexts[0].pageContext;
+
+    for (let i = 0; i < allPackedItems.length; i += LLM_PACKED_BATCH_SIZE) {
+      const slice = allPackedItems.slice(i, i + LLM_PACKED_BATCH_SIZE);
+      const batchMap = await verifyBatchAuthorshipRole(slice, defaultPageCtx, { accountId });
+      for (const [k, v] of batchMap.entries()) {
+        combinedAuthorshipMap.set(k, v);
+      }
+    }
+
+    const allEligibilityCandidates = allPackedItems.map((packedItem) => ({
+      item: packedItem,
+      authorRole: combinedAuthorshipMap.get(packedItem.itemId)?.authorRole || "UNKNOWN",
+    }));
+    const combinedEligibilityMap = new Map<string, any>();
+
+    for (let i = 0; i < allEligibilityCandidates.length; i += LLM_PACKED_BATCH_SIZE) {
+      const slice = allEligibilityCandidates.slice(i, i + LLM_PACKED_BATCH_SIZE);
+      const batchMap = await verifyBatchCustomerVoiceEligibility(
+        slice,
+        { offeringName, category, targetMarket, productTruthFacts },
+        defaultPageCtx,
+        { accountId }
+      );
+      for (const [k, v] of batchMap.entries()) {
+        combinedEligibilityMap.set(k, v);
+      }
+    }
+
+    // Finalize and persist per discovery result
+    for (const ctx of fetchedContexts) {
+      const { res, isCompetitor, matchedCompetitorId, items } = ctx;
+      try {
+        let approvedForThisResult = 0;
+        for (const { origItem: item, packedItem } of items) {
+          customerCandidatesCount++;
+
+          const authorship = combinedAuthorshipMap.get(packedItem.itemId) || {
+            authorRole: "UNKNOWN",
+            confidence: 0,
+            reasoning: "Missing authorship result",
+            isCustomerAuthored: false,
+          };
+
+          const eligibility = combinedEligibilityMap.get(packedItem.itemId) || {
+            eligibility: "NOT_CUSTOMER_VOICE",
+            isEligible: false,
+            reasoning: "Missing eligibility result",
+          };
+
+          const judge = runFinalEvidenceJudge(
+            item,
+            authorship,
+            eligibility,
+            { offeringName, category, targetMarket },
+            { isCompetitor, competitorId: matchedCompetitorId }
           );
 
-          // Check if already exists in market_voice_evidence
-          const [existing] = await db
-            .select()
-            .from(marketVoiceEvidence)
-            .where(eq(marketVoiceEvidence.id, evidenceId))
-            .limit(1);
+          if (judge.verdict === "APPROVE" && judge.canonicalOwner === "market_voice_evidence") {
+            judgeApprovedCount++;
+            approvedForThisResult++;
 
-          if (!existing) {
-            await db.insert(marketVoiceEvidence).values({
-              id: evidenceId,
+            const evidenceId = generateMarketVoiceEvidenceId(
+              res.sourcePlatform,
+              item.itemId || res.canonicalUrl,
+              item.verbatimText
+            );
+
+            const [existing] = await db
+              .select()
+              .from(marketVoiceEvidence)
+              .where(eq(marketVoiceEvidence.id, evidenceId))
+              .limit(1);
+
+            if (!existing) {
+              await db.insert(marketVoiceEvidence).values({
+                id: evidenceId,
+                discoveryResultId: res.id,
+                searchIntentId: res.searchIntentId,
+                discoveryJobId: res.discoveryJobId,
+                accountId,
+                campaignId,
+                campaignOfferingId: offeringId,
+                verbatimText: item.verbatimText,
+                sourceScope: judge.sourceScope,
+                marketScope: judge.marketScope,
+                platform: res.sourcePlatform,
+                externalUrl: item.sourceUrl || res.url,
+                externalId: item.itemId,
+                authorHash: item.authorIdentifier ? item.authorIdentifier.slice(0, 16) : null,
+                likesCount: item.likesCount || 0,
+                publishedAt: item.publishedAt || null,
+                geography: judge.geography,
+                language: judge.language,
+                semanticScope: judge.semanticScope,
+                transferability: judge.transferability,
+                eligibilityVerdict: judge.primaryEligibilityVerdict,
+              });
+              canonicalEvidencePersistedCount++;
+            }
+
+            evidenceItems.push({
+              evidenceId,
               discoveryResultId: res.id,
               searchIntentId: res.searchIntentId,
               discoveryJobId: res.discoveryJobId,
@@ -275,70 +422,55 @@ export async function executeMarketVoiceEvidencePhase(
               publishedAt: item.publishedAt || null,
               geography: judge.geography,
               language: judge.language,
+              judgeVerdict: "APPROVE",
+              judgeReason: judge.finalReason,
+              persisted: true,
             });
-            canonicalEvidencePersistedCount++;
-          }
-
-          evidenceItems.push({
-            evidenceId,
-            discoveryResultId: res.id,
-            searchIntentId: res.searchIntentId,
-            discoveryJobId: res.discoveryJobId,
-            accountId,
-            campaignId,
-            campaignOfferingId: offeringId,
-            verbatimText: item.verbatimText,
-            sourceScope: judge.sourceScope,
-            marketScope: judge.marketScope,
-            platform: res.sourcePlatform,
-            externalUrl: item.sourceUrl || res.url,
-            externalId: item.itemId,
-            authorHash: item.authorIdentifier ? item.authorIdentifier.slice(0, 16) : null,
-            likesCount: item.likesCount || 0,
-            publishedAt: item.publishedAt || null,
-            geography: judge.geography,
-            language: judge.language,
-            judgeVerdict: "APPROVE",
-            judgeReason: judge.finalReason,
-            persisted: true,
-          });
-        } else {
-          if (judge.verdict === "INSUFFICIENT_EVIDENCE") {
-            insufficientCount++;
           } else {
-            rejectedCount++;
+            if (judge.verdict === "INSUFFICIENT_EVIDENCE") {
+              insufficientCount++;
+            } else {
+              rejectedCount++;
+            }
+
+            const reason = judge.rejectionReason || "REJECTED";
+            rejectionBreakdown[reason] = (rejectionBreakdown[reason] || 0) + 1;
           }
-
-          const reason = judge.rejectionReason || "REJECTED";
-          rejectionBreakdown[reason] = (rejectionBreakdown[reason] || 0) + 1;
         }
+
+        const finalStatus = isCompetitor
+          ? "VERIFIED_COMPETITOR"
+          : approvedForThisResult > 0
+          ? "VERIFIED_CUSTOMER_SOURCE"
+          : "NO_CUSTOMER_VOICE";
+
+        const canonKey = (res.canonicalUrl || res.url || "").trim().toLowerCase();
+        if (canonKey) {
+          processedUrlCache.set(canonKey, {
+            finalStatus,
+            matchedCompetitorId,
+            extractedCount: approvedForThisResult,
+          });
+        }
+
+        await db
+          .update(marketVoiceDiscoveryResults)
+          .set({
+            verificationStatus: finalStatus,
+            verifiedCompetitorId: matchedCompetitorId,
+            extractedCount: approvedForThisResult,
+          })
+          .where(eq(marketVoiceDiscoveryResults.id, res.id));
+      } catch (err: any) {
+        console.warn(`[MarketVoiceEvidenceEngine] Error finalizing result ${res.id}:`, err?.message);
+        await db
+          .update(marketVoiceDiscoveryResults)
+          .set({
+            verificationStatus: "NO_CUSTOMER_VOICE",
+            extractedCount: 0,
+          })
+          .where(eq(marketVoiceDiscoveryResults.id, res.id));
       }
-
-      // Update discovery result status
-      const finalStatus = isCompetitor
-        ? "VERIFIED_COMPETITOR"
-        : approvedForThisResult > 0
-        ? "VERIFIED_CUSTOMER_SOURCE"
-        : "NO_CUSTOMER_VOICE";
-
-      await db
-        .update(marketVoiceDiscoveryResults)
-        .set({
-          verificationStatus: finalStatus,
-          verifiedCompetitorId: matchedCompetitorId,
-          extractedCount: approvedForThisResult,
-        })
-        .where(eq(marketVoiceDiscoveryResults.id, res.id));
-    } catch (err: any) {
-      console.warn(`[MarketVoiceEvidenceEngine] Error processing result ${res.id}:`, err?.message);
-      await db
-        .update(marketVoiceDiscoveryResults)
-        .set({
-          verificationStatus: "NO_CUSTOMER_VOICE",
-          extractedCount: 0,
-        })
-        .where(eq(marketVoiceDiscoveryResults.id, res.id));
-      fetchFailureBreakdown["FETCH_FAILED"] = (fetchFailureBreakdown["FETCH_FAILED"] || 0) + 1;
     }
   };
 
@@ -369,10 +501,10 @@ export async function executeMarketVoiceEvidencePhase(
     batchCount++;
     batchSizes.push(batch.length);
 
-    // Run in chunks with bounded concurrency
+    // Run in chunks with bounded concurrency and cross-URL item packing
     for (let i = 0; i < batch.length; i += concurrencyLimit) {
       const chunk = batch.slice(i, i + concurrencyLimit);
-      await Promise.all(chunk.map((r) => processResult(r)));
+      await processChunkOfResults(chunk);
     }
   }
 

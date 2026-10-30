@@ -10,11 +10,11 @@ import {
   Platform,
   TextInput,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useCampaign, type ProductAnchorInput } from '@/context/CampaignContext';
+import { useRouter } from 'expo-router';
+import { useCampaign, type ProductAnchorInput, type CampaignInfo } from '@/context/CampaignContext';
 
 const GOAL_TYPE_COLORS: Record<string, string> = {
   LEADS: '#10B981',
@@ -32,13 +32,26 @@ const GOAL_TYPE_ICONS: Record<string, string> = {
   TESTING: 'flask',
 };
 
+function formatBudgetDisplay(budget: any): string | null {
+  if (!budget) return null;
+  if (typeof budget === 'string') return budget;
+  if (typeof budget === 'object') {
+    if (budget.monthlyBudget != null && Number(budget.monthlyBudget) > 0) {
+      return `${budget.currency || 'USD'} ${Number(budget.monthlyBudget).toLocaleString()}/mo`;
+    }
+    if (budget.budgetMode === 'ZERO_BUDGET' || budget.monthlyBudget === 0) {
+      return 'Organic ($0)';
+    }
+  }
+  return null;
+}
+
 function CampaignBlocker() {
-  const { campaigns, selectCampaign, deleteCampaign, isLoading, refreshCampaigns } = useCampaign();
+  const { campaigns, selectCampaign, deleteCampaign, refreshCampaigns } = useCampaign();
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
 
   const handleSelect = async (campaign: any) => {
-    if (campaign.status === 'paused') return;
     setSelecting(true);
     try {
       await selectCampaign(campaign);
@@ -58,7 +71,7 @@ function CampaignBlocker() {
         </View>
         <Text style={styles.blockerTitle}>Select a Campaign to Continue</Text>
         <Text style={styles.blockerDescription}>
-          All analytics, strategy, and optimization are scoped to a single campaign for accuracy. Choose which campaign to analyze.
+          All analytics, strategy, and optimization are scoped to a single product campaign for accuracy. Choose which campaign to analyze or create a new one.
         </Text>
         <TouchableOpacity
           style={styles.blockerButton}
@@ -92,7 +105,6 @@ function CampaignWarningBanner() {
   if (!warning) return null;
 
   const handleSelect = async (campaign: any) => {
-    if (campaign.status === 'paused') return;
     setSelecting(true);
     try {
       await selectCampaign(campaign);
@@ -118,7 +130,7 @@ function CampaignWarningBanner() {
             setShowModal(true);
           }}
         >
-          <Text style={styles.warningButtonText}>Re-select</Text>
+          <Text style={styles.warningButtonText}>Switch</Text>
         </TouchableOpacity>
       </View>
       <CampaignListModal
@@ -134,13 +146,20 @@ function CampaignWarningBanner() {
 }
 
 function CampaignBar() {
-  const { selectedCampaign, campaigns, selectCampaign, deleteCampaign, clearSelection, refreshCampaigns } = useCampaign();
+  const router = useRouter();
+  const {
+    selectedCampaign,
+    campaigns,
+    selectCampaign,
+    deleteCampaign,
+    refreshCampaigns,
+    isSwitchingCampaign,
+  } = useCampaign();
   const [showModal, setShowModal] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const [showCreateInModal, setShowCreateInModal] = useState(false);
 
   const handleSelect = async (campaign: any) => {
-    if (campaign.status === 'paused') return;
     setSelecting(true);
     try {
       await selectCampaign(campaign);
@@ -173,7 +192,7 @@ function CampaignBar() {
             </View>
             <View style={styles.barInfo}>
               <Text style={[styles.barName, { color: '#8B5CF6' }]}>Select or Create Campaign</Text>
-              <Text style={[styles.barPlatform, { marginTop: 1 }]}>Tap to get started</Text>
+              <Text style={[styles.barPlatform, { marginTop: 1 }]}>Tap to choose or launch a product campaign</Text>
             </View>
           </View>
           <Ionicons name="chevron-down" size={16} color="#8B5CF6" />
@@ -191,22 +210,66 @@ function CampaignBar() {
     );
   }
 
-  const goalColor = GOAL_TYPE_COLORS[selectedCampaign.campaignGoalType] || '#6B7280';
-  const goalIcon = GOAL_TYPE_ICONS[selectedCampaign.campaignGoalType] || 'help-circle';
+  const goalColor = GOAL_TYPE_COLORS[selectedCampaign.campaignGoalType] || '#8B5CF6';
+  const goalIcon = GOAL_TYPE_ICONS[selectedCampaign.campaignGoalType] || 'layers-outline';
+  const marketLabel = selectedCampaign.targetMarket || selectedCampaign.campaignLocation || null;
+  const productLabel = selectedCampaign.productName || null;
+  const planBadge = selectedCampaign.activePlan
+    ? `Plan v${selectedCampaign.activePlan.version} · ${selectedCampaign.activePlan.status}`
+    : selectedCampaign.setupStatus === 'IN_SETUP'
+      ? 'IN SETUP'
+      : null;
+  const statusUpper = (selectedCampaign.campaignStatus || 'active').toUpperCase();
+  const isPaused = statusUpper === 'PAUSED';
+  const budgetText = formatBudgetDisplay(selectedCampaign.budget);
 
   return (
     <>
       <TouchableOpacity
         style={styles.campaignBar}
         onPress={openModal}
-        activeOpacity={0.7}
+        activeOpacity={0.75}
+        testID="campaign-selector-button"
       >
         <View style={styles.barLeft}>
-          <View style={[styles.goalDot, { backgroundColor: goalColor }]} />
+          <View style={[styles.goalDot, { backgroundColor: isPaused ? '#F59E0B' : '#10B981' }]} />
           <View style={styles.barInfo}>
-            <Text style={styles.barName} numberOfLines={1}>
-              {selectedCampaign.selectedCampaignName}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Text style={styles.barName} numberOfLines={1}>
+                {selectedCampaign.selectedCampaignName}
+              </Text>
+              {productLabel && (
+                <View style={styles.productPill}>
+                  <Ionicons name="cube-outline" size={10} color="#C4B5FD" />
+                  <Text style={styles.productPillText} numberOfLines={1}>
+                    {productLabel}
+                  </Text>
+                </View>
+              )}
+              <View
+                style={[
+                  styles.statusBadge,
+                  isPaused
+                    ? { backgroundColor: '#78350F40', borderColor: '#F59E0B50' }
+                    : { backgroundColor: '#064E3B40', borderColor: '#10B98150' },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusBadgeText,
+                    { color: isPaused ? '#FBBF24' : '#34D399' },
+                  ]}
+                >
+                  {statusUpper}
+                </Text>
+              </View>
+              {planBadge && (
+                <View style={styles.planPill}>
+                  <Ionicons name="ribbon-outline" size={10} color="#60A5FA" />
+                  <Text style={styles.planPillText}>{planBadge}</Text>
+                </View>
+              )}
+            </View>
             <View style={styles.barMeta}>
               <View style={[styles.goalBadge, { backgroundColor: goalColor + '20' }]}>
                 <Ionicons name={goalIcon as any} size={10} color={goalColor} />
@@ -214,29 +277,35 @@ function CampaignBar() {
                   {selectedCampaign.campaignGoalType}
                 </Text>
               </View>
-              {selectedCampaign.campaignLocation ? (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                  <Ionicons name="location-outline" size={10} color="#6B7280" />
-                  <Text style={styles.barPlatform}>{selectedCampaign.campaignLocation}</Text>
+              {marketLabel ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  <Ionicons name="location-outline" size={11} color="#9CA3AF" />
+                  <Text style={styles.barPlatform}>{marketLabel}</Text>
                 </View>
               ) : null}
+              {budgetText ? (
+                <Text style={styles.barPlatform}>• {budgetText}</Text>
+              ) : null}
               <Text style={styles.barPlatform}>
-                {selectedCampaign.selectedPlatform?.toUpperCase()}
+                • {campaigns.length} campaign{campaigns.length !== 1 ? 's' : ''} in workspace
               </Text>
             </View>
           </View>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {isSwitchingCampaign && <ActivityIndicator size="small" color="#8B5CF6" />}
           <TouchableOpacity
-            onPress={() => { setShowModal(true); setShowCreateInModal(true); }}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.6}
+            style={styles.createCampaignChip}
+            onPress={() => router.push('/setup?mode=new' as any)}
+            testID="header-create-campaign-btn"
           >
-            <View style={styles.plusButton}>
-              <Ionicons name="add" size={16} color="#10B981" />
-            </View>
+            <Ionicons name="add-circle-outline" size={14} color="#A78BFA" />
+            <Text style={styles.createCampaignChipText}>Create Campaign</Text>
           </TouchableOpacity>
-          <Ionicons name="chevron-down" size={16} color="#6B7280" />
+          <View style={styles.switchBtnChip}>
+            <Text style={styles.switchBtnChipText}>Switch</Text>
+            <Ionicons name="chevron-down" size={13} color="#D1D5DB" />
+          </View>
         </View>
       </TouchableOpacity>
 
@@ -289,9 +358,6 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
     if (!objective) { setError('Select an objective'); return; }
     if (!location.trim()) { setError('Location is required'); return; }
 
-    // Product identity is optional, but partial input is rejected: either all
-    // four required fields are present or the whole anchor is left blank (so the
-    // run degrades to business-level doctrine rather than a half-formed anchor).
     const anchorTouched = !!(paName.trim() || paType.trim() || paKeyAttrs.trim() || paCoreProblem.trim() || paDiffFeature.trim());
     let productAnchor: ProductAnchorInput | undefined;
     if (anchorTouched) {
@@ -328,7 +394,7 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
             style={formStyles.input}
             value={name}
             onChangeText={setName}
-            placeholder="e.g. Summer Brand Launch"
+            placeholder="e.g. Corporate Gifting Songs — UAE"
             placeholderTextColor="#4B5563"
             autoFocus
             testID="campaign-name-input"
@@ -356,12 +422,12 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
         </View>
 
         <View style={formStyles.field}>
-          <Text style={formStyles.label}>Location *</Text>
+          <Text style={formStyles.label}>Target Market / Location *</Text>
           <TextInput
             style={formStyles.input}
             value={location}
             onChangeText={setLocation}
-            placeholder="e.g. Dubai, UAE"
+            placeholder="e.g. United Arab Emirates"
             placeholderTextColor="#4B5563"
             testID="campaign-location-input"
           />
@@ -392,31 +458,31 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
 
         <View style={formStyles.field}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 6 }}>
-            <Text style={{ color: '#8B5CF6', fontSize: 13, fontWeight: '600', flex: 1 }}>Product Identity (optional)</Text>
+            <Text style={{ color: '#8B5CF6', fontSize: 13, fontWeight: '600', flex: 1 }}>Product Identity</Text>
           </View>
 
           <View style={{ marginTop: 10, gap: 12 }}>
             <Text style={{ color: '#6B7280', fontSize: 11, lineHeight: 15 }}>
-              Pin the specific product this campaign promotes so the AI reasons at product level, not generic category level. Leave blank to reason at business level.
+              Pin the specific product or service this campaign promotes so Avyron reasons at the product level.
             </Text>
             <View>
-              <Text style={formStyles.label}>Product Name</Text>
+              <Text style={formStyles.label}>Product / Service Name</Text>
               <TextInput
                 style={formStyles.input}
                 value={paName}
                 onChangeText={setPaName}
-                placeholder="e.g. AcmeFlow Pro"
+                placeholder="e.g. Corporate Team Anthem Packages"
                 placeholderTextColor="#4B5563"
                 testID="pa-name-input"
               />
             </View>
             <View>
-              <Text style={formStyles.label}>Product Type</Text>
+              <Text style={formStyles.label}>Product / Service Type</Text>
               <TextInput
                 style={formStyles.input}
                 value={paType}
                 onChangeText={setPaType}
-                placeholder="e.g. Project management SaaS"
+                placeholder="e.g. B2B Service / Digital Product"
                 placeholderTextColor="#4B5563"
                 testID="pa-type-input"
               />
@@ -427,7 +493,7 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
                 style={formStyles.input}
                 value={paKeyAttrs}
                 onChangeText={setPaKeyAttrs}
-                placeholder="e.g. real-time sync, offline mode"
+                placeholder="e.g. bulk licensing, custom lyrics, 48h delivery"
                 placeholderTextColor="#4B5563"
                 testID="pa-attributes-input"
               />
@@ -438,7 +504,7 @@ function NewCampaignForm({ onCreated, onCancel }: { onCreated: () => void; onCan
                 style={[formStyles.input, { height: 64, textAlignVertical: 'top' }]}
                 value={paCoreProblem}
                 onChangeText={setPaCoreProblem}
-                placeholder="What specific problem does it solve?"
+                placeholder="What specific problem does this offering solve?"
                 placeholderTextColor="#4B5563"
                 multiline
                 testID="pa-problem-input"
@@ -513,7 +579,7 @@ function CampaignListModal({
   initialCreate,
 }: {
   visible: boolean;
-  campaigns: any[];
+  campaigns: CampaignInfo[];
   onSelect: (c: any) => void;
   onDelete: (campaignId: string) => void;
   onClose: () => void;
@@ -521,7 +587,11 @@ function CampaignListModal({
   currentId?: string;
   initialCreate?: boolean;
 }) {
+  const router = useRouter();
+  const { entitlement, toggleCampaignStatus } = useCampaign();
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible && initialCreate) {
@@ -529,8 +599,10 @@ function CampaignListModal({
     }
     if (!visible) {
       setShowCreateForm(false);
+      setStatusError(null);
     }
   }, [visible, initialCreate]);
+
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmDeleteName, setConfirmDeleteName] = useState('');
   const [deleting, setDeleting] = useState(false);
@@ -538,6 +610,7 @@ function CampaignListModal({
   const handleClose = () => {
     setShowCreateForm(false);
     setConfirmDeleteId(null);
+    setStatusError(null);
     onClose();
   };
 
@@ -557,13 +630,41 @@ function CampaignListModal({
     }
   };
 
+  const handleTogglePause = async (item: CampaignInfo) => {
+    setStatusError(null);
+    setTogglingId(item.id);
+    try {
+      const nextStatus = item.status === 'paused' ? 'active' : 'paused';
+      await toggleCampaignStatus(item.id, nextStatus);
+    } catch (err: any) {
+      setStatusError(err.message || 'Could not update campaign status');
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>{showCreateForm ? 'New Campaign' : 'Select Campaign'}</Text>
-            <TouchableOpacity onPress={handleClose} style={styles.modalClose}>
+            <View>
+              <Text style={styles.modalTitle}>{showCreateForm ? 'Quick Create Campaign' : 'Workspace Campaigns'}</Text>
+              {!showCreateForm && entitlement && (
+                <Text style={styles.entitlementSubtitle}>
+                  Package:{' '}
+                  <Text style={{ color: '#A78BFA', fontWeight: '700' }}>
+                    {String((entitlement as any).packageTier || entitlement.tier || 'starter').toUpperCase()}
+                  </Text>{' '}
+                  • {(entitlement as any).currentActiveCampaigns ?? entitlement.activeCampaignCount ?? 0} /{' '}
+                  {entitlement.maxActiveCampaigns ?? 1} active campaigns
+                  {((entitlement as any).monthlyPriceUsd ?? entitlement.proposedPriceUsdMonthly ?? 0) > 0
+                    ? ` ($${(entitlement as any).monthlyPriceUsd ?? entitlement.proposedPriceUsdMonthly}/mo)`
+                    : ' (Isolated Test Entitlement)'}
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity onPress={handleClose} style={styles.modalClose} testID="close-campaign-modal">
               <Ionicons name="close" size={22} color="#9CA3AF" />
             </TouchableOpacity>
           </View>
@@ -573,19 +674,34 @@ function CampaignListModal({
           ) : (
             <>
               <Text style={styles.modalSubtitle}>
-                All data and AI analysis will be scoped to the selected campaign
+                Each campaign targets a specific product or service with its own market, strategy, evidence, and usage ledger.
               </Text>
 
-              <TouchableOpacity
-                style={formStyles.newCampaignButton}
-                onPress={() => setShowCreateForm(true)}
-                testID="new-campaign-button"
-              >
-                <View style={formStyles.newCampaignIcon}>
-                  <Ionicons name="add" size={18} color="#8B5CF6" />
+              <View style={{ flexDirection: 'row', gap: 10, marginHorizontal: 16, marginBottom: 12 }}>
+                <TouchableOpacity
+                  style={[formStyles.newCampaignButton, { flex: 1, marginHorizontal: 0, marginBottom: 0 }]}
+                  onPress={() => {
+                    handleClose();
+                    router.push('/setup?mode=new' as any);
+                  }}
+                  testID="launch-product-campaign-wizard-button"
+                >
+                  <View style={formStyles.newCampaignIcon}>
+                    <Ionicons name="sparkles" size={16} color="#8B5CF6" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={formStyles.newCampaignText}>+ Create Campaign (Product Setup)</Text>
+                    <Text style={{ fontSize: 11, color: '#9CA3AF' }}>Reuses verified company info & discovers product competitors</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
+
+              {statusError && (
+                <View style={[formStyles.errorBox, { marginHorizontal: 16 }]}>
+                  <Ionicons name="alert-circle" size={14} color="#EF4444" />
+                  <Text style={formStyles.errorText}>{statusError}</Text>
                 </View>
-                <Text style={formStyles.newCampaignText}>New Campaign</Text>
-              </TouchableOpacity>
+              )}
 
               {selecting && (
                 <View style={styles.selectingOverlay}>
@@ -598,10 +714,17 @@ function CampaignListModal({
                 keyExtractor={(item) => item.id}
                 scrollEnabled={!!campaigns.length}
                 renderItem={({ item }) => {
-                  const goalColor = GOAL_TYPE_COLORS[item.goalType] || '#6B7280';
-                  const goalIcon = GOAL_TYPE_ICONS[item.goalType] || 'help-circle';
+                  const goalColor = GOAL_TYPE_COLORS[item.goalType] || '#8B5CF6';
+                  const goalIcon = GOAL_TYPE_ICONS[item.goalType] || 'layers-outline';
                   const isSelected = item.id === currentId;
                   const isPaused = item.status === 'paused';
+                  const market = item.targetMarket || item.location || 'Market Unset';
+                  const budgetStr = formatBudgetDisplay(item.budget);
+                  const activePlanLabel = item.activePlan
+                    ? `Plan v${item.activePlan.version} · ${item.activePlan.status}`
+                    : item.setupStatus === 'IN_SETUP'
+                      ? `Setup (${item.setupStep || 'In Progress'})`
+                      : 'No Plan Yet';
 
                   return (
                     <View
@@ -610,47 +733,98 @@ function CampaignListModal({
                         isSelected && styles.campaignItemSelected,
                         isPaused && styles.campaignItemPaused,
                       ]}
+                      testID={`campaign-list-item-${item.id}`}
                     >
                       <TouchableOpacity
                         style={styles.campaignItemLeft}
                         onPress={() => onSelect(item)}
-                        disabled={isPaused || selecting}
+                        disabled={selecting}
                         activeOpacity={0.7}
+                        testID={`campaign-row-${item.id}`}
                       >
                         <View style={[styles.campaignGoalIcon, { backgroundColor: goalColor + '20' }]}>
-                          <Ionicons name={goalIcon as any} size={16} color={isPaused ? '#6B7280' : goalColor} />
+                          <Ionicons name={goalIcon as any} size={16} color={isPaused ? '#9CA3AF' : goalColor} />
                         </View>
                         <View style={styles.campaignItemInfo}>
-                          <Text
-                            style={[styles.campaignItemName, isPaused && styles.textPaused]}
-                            numberOfLines={1}
-                          >
-                            {item.name}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text
+                              style={[styles.campaignItemName, isPaused && styles.textPaused]}
+                              numberOfLines={1}
+                            >
+                              {item.name}
+                            </Text>
+                            {item.productName && (
+                              <View style={styles.productPill}>
+                                <Text style={styles.productPillText}>
+                                  {item.productName}
+                                  {item.productType ? ` (${item.productType})` : ''}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+
                           <View style={styles.campaignItemMeta}>
                             <View style={[styles.goalBadge, { backgroundColor: isPaused ? '#374151' : goalColor + '20' }]}>
-                              <Text style={[styles.goalBadgeText, { color: isPaused ? '#6B7280' : goalColor }]}>
+                              <Text style={[styles.goalBadgeText, { color: isPaused ? '#9CA3AF' : goalColor }]}>
                                 {item.goalType}
                               </Text>
                             </View>
-                            {item.location && (
-                              <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 6 }}>
-                                <Ionicons name="location-outline" size={11} color="#9CA3AF" style={{ marginRight: 2 }} />
-                                <Text style={styles.campaignBudget}>{item.location}</Text>
-                              </View>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                              <Ionicons name="location-outline" size={11} color="#9CA3AF" />
+                              <Text style={styles.campaignBudget}>{market}</Text>
+                            </View>
+                            {budgetStr && (
+                              <Text style={styles.campaignBudget}>• {budgetStr}</Text>
                             )}
-                            {item.budget && (
-                              <Text style={styles.campaignBudget}>{item.budget}</Text>
-                            )}
-                            {isPaused && (
-                              <View style={styles.pausedBadge}>
-                                <Text style={styles.pausedBadgeText}>PAUSED</Text>
-                              </View>
-                            )}
+                            <View style={styles.planPill}>
+                              <Text style={styles.planPillText}>{activePlanLabel}</Text>
+                            </View>
+                            <View
+                              style={[
+                                styles.pausedBadge,
+                                !isPaused && { backgroundColor: '#064E3B60' },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.pausedBadgeText,
+                                  !isPaused && { color: '#34D399' },
+                                ]}
+                              >
+                                {(item.status || 'active').toUpperCase()}
+                              </Text>
+                            </View>
                           </View>
                         </View>
                       </TouchableOpacity>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        {item.setupStatus === 'IN_SETUP' && (
+                          <TouchableOpacity
+                            style={styles.resumeSetupBtn}
+                            onPress={() => {
+                              handleClose();
+                              router.push(`/setup?campaignId=${item.id}` as any);
+                            }}
+                          >
+                            <Text style={styles.resumeSetupBtnText}>Resume</Text>
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                          onPress={() => handleTogglePause(item)}
+                          disabled={togglingId === item.id}
+                          style={styles.pauseToggleBtn}
+                          testID={`toggle-status-${item.id}`}
+                        >
+                          {togglingId === item.id ? (
+                            <ActivityIndicator size="small" color="#9CA3AF" />
+                          ) : (
+                            <Ionicons
+                              name={isPaused ? 'play-outline' : 'pause-outline'}
+                              size={15}
+                              color={isPaused ? '#10B981' : '#F59E0B'}
+                            />
+                          )}
+                        </TouchableOpacity>
                         {isSelected && (
                           <Ionicons name="checkmark-circle" size={20} color="#8B5CF6" />
                         )}
@@ -676,7 +850,7 @@ function CampaignListModal({
               {confirmDeleteId && (
                 <View style={formStyles.confirmDeleteBar}>
                   <Text style={formStyles.confirmDeleteText} numberOfLines={2}>
-                    Delete "{confirmDeleteName}"? This removes all metrics.
+                    Delete "{confirmDeleteName}"? This removes all metrics for this campaign.
                   </Text>
                   <View style={formStyles.confirmDeleteActions}>
                     <TouchableOpacity
@@ -702,7 +876,7 @@ function CampaignListModal({
 
               <View style={styles.modalFooter}>
                 <Text style={styles.footerNote}>
-                  {`${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''} available`}
+                  {`${campaigns.length} campaign${campaigns.length !== 1 ? 's' : ''} in workspace • Active strategies are isolated per campaign`}
                 </Text>
               </View>
             </>
@@ -813,26 +987,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  plusButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#10B98115',
-    borderWidth: 1,
-    borderColor: '#10B98140',
-    justifyContent: 'center' as const,
-    alignItems: 'center' as const,
-  },
   campaignBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#151A22',
+    backgroundColor: '#111621',
     borderWidth: 1,
-    borderColor: '#1F2937',
+    borderColor: '#1E293B',
     borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
     marginHorizontal: 16,
     marginTop: 8,
     marginBottom: 4,
@@ -853,19 +1017,92 @@ const styles = StyleSheet.create({
   },
   barName: {
     fontSize: 13,
-    fontWeight: '600',
-    color: '#E5E7EB',
+    fontWeight: '700',
+    color: '#F8FAFC',
   },
   barMeta: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 8,
-    marginTop: 2,
+    marginTop: 3,
   },
   barPlatform: {
-    fontSize: 10,
-    color: '#6B7280',
+    fontSize: 11,
+    color: '#94A3B8',
     fontWeight: '500',
+  },
+  productPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#4C1D9540',
+    borderWidth: 1,
+    borderColor: '#7C3AED50',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+  },
+  productPillText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#DDD6FE',
+  },
+  statusBadge: {
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  statusBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  planPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#1E3A8A35',
+    borderWidth: 1,
+    borderColor: '#3B82F640',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  planPillText: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#93C5FD',
+  },
+  createCampaignChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#4C1D9530',
+    borderWidth: 1,
+    borderColor: '#8B5CF650',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 7,
+  },
+  createCampaignChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#C4B5FD',
+  },
+  switchBtnChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 7,
+  },
+  switchBtnChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#E5E7EB',
   },
   goalBadge: {
     flexDirection: 'row',
@@ -882,14 +1119,14 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: '#151A22',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '80%',
+    maxHeight: '85%',
     paddingBottom: Platform.OS === 'ios' ? 34 : 20,
   },
   modalHeader: {
@@ -898,21 +1135,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 4,
+    paddingBottom: 6,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: '#fff',
   },
+  entitlementSubtitle: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 2,
+  },
   modalClose: {
     padding: 4,
   },
   modalSubtitle: {
     fontSize: 12,
-    color: '#6B7280',
+    color: '#9CA3AF',
     paddingHorizontal: 20,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   selectingOverlay: {
     position: 'absolute',
@@ -939,12 +1181,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   campaignItemSelected: {
-    backgroundColor: '#8B5CF610',
+    backgroundColor: '#8B5CF615',
     borderWidth: 1,
-    borderColor: '#8B5CF630',
+    borderColor: '#8B5CF640',
   },
   campaignItemPaused: {
-    opacity: 0.5,
+    opacity: 0.75,
   },
   campaignItemLeft: {
     flexDirection: 'row',
@@ -964,21 +1206,22 @@ const styles = StyleSheet.create({
   },
   campaignItemName: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#E5E7EB',
+    fontWeight: '700',
+    color: '#F8FAFC',
   },
   textPaused: {
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   campaignItemMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 5,
   },
   campaignBudget: {
     fontSize: 11,
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   pausedBadge: {
     backgroundColor: '#374151',
@@ -988,20 +1231,39 @@ const styles = StyleSheet.create({
   },
   pausedBadgeText: {
     fontSize: 9,
-    color: '#9CA3AF',
-    fontWeight: '600',
+    color: '#D1D5DB',
+    fontWeight: '700',
+  },
+  resumeSetupBtn: {
+    backgroundColor: '#4C1D95',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  resumeSetupBtnText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#E9D5FF',
+  },
+  pauseToggleBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    backgroundColor: '#1F2937',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   deleteButton: {
     width: 30,
     height: 30,
     borderRadius: 8,
-    backgroundColor: '#EF444410',
+    backgroundColor: '#EF444415',
     justifyContent: 'center',
     alignItems: 'center',
   },
   separator: {
     height: 1,
-    backgroundColor: '#1F293720',
+    backgroundColor: '#1F293740',
     marginHorizontal: 4,
   },
   modalFooter: {
@@ -1109,23 +1371,6 @@ const formStyles = StyleSheet.create({
     color: '#6B7280',
     fontSize: 14,
   },
-  clearButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#F59E0B40',
-    backgroundColor: '#F59E0B12',
-  },
-  clearButtonText: {
-    color: '#F59E0B',
-    fontSize: 14,
-    fontWeight: '600',
-  },
   newCampaignButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1136,22 +1381,22 @@ const formStyles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#8B5CF630',
+    borderColor: '#8B5CF640',
     borderStyle: 'dashed',
-    backgroundColor: '#8B5CF608',
+    backgroundColor: '#8B5CF612',
   },
   newCampaignIcon: {
     width: 32,
     height: 32,
     borderRadius: 8,
-    backgroundColor: '#8B5CF620',
+    backgroundColor: '#8B5CF625',
     justifyContent: 'center',
     alignItems: 'center',
   },
   newCampaignText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#8B5CF6',
+    fontWeight: '700',
+    color: '#C4B5FD',
   },
   confirmDeleteBar: {
     flexDirection: 'row',

@@ -109,11 +109,20 @@ export async function resolveCurrentBusinessUnderstanding(
     return null;
   }
 
+  // Defective or invalidated snapshots are strictly ineligible for current resolution
+  if (buSnapshot.status === "INVALIDATED" || buSnapshot.status !== "COMPLETE") {
+    return null;
+  }
+
   const payload = typeof buSnapshot.businessUnderstanding === "string"
     ? JSON.parse(buSnapshot.businessUnderstanding)
     : buSnapshot.businessUnderstanding;
 
-  if ((payload as any).status && (payload as any).status !== "COMPLETE") {
+  if (
+    ((payload as any).status && (payload as any).status !== "COMPLETE") ||
+    (payload as any).isEligible === false ||
+    (payload as any).invalidatedReason
+  ) {
     return null;
   }
 

@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AudiencePositioningViewModel } from '@/types/audience-positioning';
+import { ProductTruthBadge } from './ProductTruthBadge';
 
 interface Props {
   planData: any;
@@ -51,6 +52,36 @@ export default function DifferentiationSectionView({ planData, intelligenceData 
     return [];
   }, [sections, intelligenceData, umbrellaPosition]);
 
+  // Evaluation truth status logic
+  const truthStatus = brandSpine?.truthStatus;
+  let statusText = 'Algorithmically Evaluated';
+  let statusColor = '#3B82F6';
+  if (truthStatus === 'PROPOSED') {
+    statusText = 'Algorithmically Evaluated (Proposed)';
+    statusColor = '#F59E0B';
+  } else if (truthStatus === 'UNCERTAIN') {
+    statusText = 'Algorithmically Evaluated (Uncertain)';
+    statusColor = '#F59E0B';
+  } else if (truthStatus === 'UNVERIFIED') {
+    statusText = 'Algorithmically Evaluated (Unverified)';
+    statusColor = '#EF4444';
+  } else if (truthStatus === 'VERIFIED') {
+    statusText = 'Algorithmically Evaluated (Verified)';
+    statusColor = '#10B981';
+  }
+
+  const commercialSynthesis = intelligenceData?.commercialAudienceSynthesis;
+  const unresolvedReqs = React.useMemo(() => {
+    if (!commercialSynthesis?.offeringFitBreakdown) return [];
+    const reqs: string[] = [];
+    commercialSynthesis.offeringFitBreakdown.forEach((fit) => {
+      if (fit.unresolvedRequirements && fit.unresolvedRequirements.length > 0) {
+        reqs.push(...fit.unresolvedRequirements);
+      }
+    });
+    return Array.from(new Set(reqs));
+  }, [commercialSynthesis]);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       {/* ── 1. CORE DIFFERENTIATION HERO ── */}
@@ -60,13 +91,18 @@ export default function DifferentiationSectionView({ planData, intelligenceData 
             <Feather name="zap" size={12} color="#A78BFA" style={{ marginRight: 5 }} />
             <Text style={styles.badgePrimaryText}>CORE DIFFERENTIATION</Text>
           </View>
-          <View style={styles.statusPill}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusText}>Algorithmically Verified</Text>
+          <View style={[styles.statusPill, { borderColor: `${statusColor}40`, backgroundColor: `${statusColor}15` }]}>
+            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
           </View>
         </View>
 
         <Text style={styles.heroTitle}>{umbrellaPosition}</Text>
+        <ProductTruthBadge
+          status={brandSpine?.truthStatus}
+          label={brandSpine?.truthLabel}
+          claimText={differentiationStatement}
+        />
         <Text style={styles.heroDescription}>
           "{differentiationStatement}"
         </Text>
@@ -77,10 +113,42 @@ export default function DifferentiationSectionView({ planData, intelligenceData 
               <Feather name="git-commit" size={13} color="#A78BFA" style={{ marginRight: 6 }} />
               <Text style={styles.contrastLabel}>STRATEGIC CONTRAST AXIS</Text>
             </View>
+            <ProductTruthBadge
+              status={brandSpine?.contrastAxisGrounded?.status}
+              label={brandSpine?.contrastAxisGrounded?.label}
+              claimText={contrastAxis}
+              compact
+            />
             <Text style={styles.contrastText}>{contrastAxis}</Text>
           </View>
         ) : null}
+
+        {commercialSynthesis?.selectedVariantName ? (
+          <View style={styles.variantBadgeRow}>
+            <Feather name="package" size={12} color="#A78BFA" style={{ marginRight: 6 }} />
+            <Text style={styles.variantBadgeLabel}>Target Offering Variant:</Text>
+            <Text style={styles.variantBadgeValue}>
+              {commercialSynthesis.selectedVariantName}
+              {commercialSynthesis.selectedVariantPricing?.amount != null
+                ? ` · ${commercialSynthesis.selectedVariantPricing.currency || '$'}${commercialSynthesis.selectedVariantPricing.amount}`
+                : ''}
+            </Text>
+          </View>
+        ) : null}
+
+        {unresolvedReqs.length > 0 ? (
+          <View style={styles.unresolvedBox}>
+            <View style={styles.unresolvedHeader}>
+              <Feather name="alert-circle" size={12} color="#F59E0B" style={{ marginRight: 6 }} />
+              <Text style={styles.unresolvedLabel}>UNRESOLVED CAPABILITY REQUIREMENTS</Text>
+            </View>
+            {unresolvedReqs.map((req, idx) => (
+              <Text key={idx} style={styles.unresolvedText}>• {req}</Text>
+            ))}
+          </View>
+        ) : null}
       </View>
+
 
       {/* ── 2. WHY BUYERS CHOOSE US (PILLARS) ── */}
       <View style={styles.sectionCard}>
@@ -102,14 +170,25 @@ export default function DifferentiationSectionView({ planData, intelligenceData 
                   </View>
                   <Text style={styles.pillarTitle}>{pillar.name || pillar.title || `Pillar ${idx + 1}`}</Text>
                 </View>
+                <ProductTruthBadge
+                  status={pillar.truthStatus || pillar.epistemicStatus || pillar.differentiationClassification || 'SHARED_CAPABILITY_STRATEGIC_EMPHASIS'}
+                  label={pillar.truthLabel || pillar.honestLabel}
+                  claimText={pillar.description || pillar.detail || pillar.claim}
+                  compact
+                />
                 <Text style={styles.pillarBody}>
-                  {pillar.description || pillar.detail || pillar.claim || 'Defensible differentiation supported by first-party product capability.'}
+                  {pillar.description || pillar.detail || pillar.claim || 'Strategic market emphasis grounded in first-party product capability.'}
                 </Text>
-                {pillar.supportingProof && pillar.supportingProof.length > 0 && (
+                {((Array.isArray(pillar.supportingProof) && pillar.supportingProof.length > 0) ||
+                  (Array.isArray(pillar.proofRequirements) && pillar.proofRequirements.length > 0)) && (
                   <View style={styles.proofTagRow}>
                     <Feather name="check" size={12} color="#10B981" style={{ marginRight: 4 }} />
                     <Text style={styles.proofTagText}>
-                      Proof: {Array.isArray(pillar.supportingProof) ? pillar.supportingProof.join(', ') : String(pillar.supportingProof)}
+                      Proof: {Array.isArray(pillar.supportingProof) && pillar.supportingProof.length > 0
+                        ? pillar.supportingProof.join(', ')
+                        : Array.isArray(pillar.proofRequirements)
+                          ? pillar.proofRequirements.join(', ')
+                          : String(pillar.supportingProof || pillar.proofRequirements)}
                     </Text>
                   </View>
                 )}
@@ -465,4 +544,50 @@ const styles = StyleSheet.create({
     color: '#E2E8F0',
     lineHeight: 16,
   },
+  variantBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E2535',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  variantBadgeLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#A78BFA',
+    marginRight: 6,
+  },
+  variantBadgeValue: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#F8FAFC',
+  },
+  unresolvedBox: {
+    backgroundColor: '#F59E0B12',
+    borderWidth: 1,
+    borderColor: '#F59E0B30',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+  },
+  unresolvedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  unresolvedLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#F59E0B',
+    letterSpacing: 0.5,
+  },
+  unresolvedText: {
+    fontSize: 11,
+    color: '#FCD34D',
+    lineHeight: 16,
+    marginLeft: 4,
+  },
 });
+

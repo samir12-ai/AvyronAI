@@ -21,6 +21,7 @@ export interface ShellMonitoringState {
 export interface ShellBadges {
   whatToDoToday: number | null;
   watchtower: number | null;
+  performance: number | null;
 }
 
 export interface ShellWorkspace {
@@ -53,6 +54,7 @@ export function useAppShellController(): AppShellController {
   const [badges, setBadges] = useState<ShellBadges>({
     whatToDoToday: null,
     watchtower: null,
+    performance: null,
   });
   const [isSetupComplete, setIsSetupComplete] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -108,8 +110,8 @@ export function useAppShellController(): AppShellController {
     async function fetchShellData() {
       if (!selectedCampaignId) {
         if (isMounted) {
-          setMonitoring({ status: 'NO_SOURCES', competitorsCount: null, lastCheckTimestamp: null });
-          setBadges({ whatToDoToday: null, watchtower: null });
+          setMonitoring({ status: 'NO_SOURCES', competitorsCount: null, lastCheckTimestamp: null, isScanning: false });
+          setBadges({ whatToDoToday: null, watchtower: null, performance: null });
           setIsSetupComplete(false);
           setIsLoading(false);
         }
@@ -121,12 +123,15 @@ export function useAppShellController(): AppShellController {
         const apiUrl = getApiUrl();
         
         // Fetch all dependencies in parallel without blocking main render
-        const [monitoringRes, tasksRes, watchtowerRes, setupStatusRes] = await Promise.all([
+        const [monitoringRes, tasksRes, watchtowerRes, setupStatusRes, notificationsRes] = await Promise.all([
           authFetch(new URL(`/api/perception/monitoring?campaignId=${selectedCampaignId}`, apiUrl).toString()),
           authFetch(new URL(`/api/execution/required-work?campaignId=${selectedCampaignId}`, apiUrl).toString()),
           authFetch(new URL(`/api/perception/market-signals?campaignId=${selectedCampaignId}`, apiUrl).toString()),
-          authFetch(new URL(`/api/setup/status`, apiUrl).toString())
+          authFetch(new URL(`/api/setup/status?campaignId=${selectedCampaignId}`, apiUrl).toString()),
+          authFetch(new URL(`/api/notifications?campaignId=${selectedCampaignId}`, apiUrl).toString()),
         ]);
+
+        if (!isMounted) return;
 
         let newMonitoring = { ...monitoring };
         let newBadges = { ...badges };
@@ -135,7 +140,7 @@ export function useAppShellController(): AppShellController {
         if (setupStatusRes.ok) {
           const sData = await setupStatusRes.json();
           if (sData.success) {
-            setIsSetupComplete(!!sData.isComplete);
+            setIsSetupComplete(!!sData.isComplete || !!sData.hasAnyCompletedCampaign);
           }
         }
 
@@ -185,6 +190,27 @@ export function useAppShellController(): AppShellController {
           }
         }
 
+        // Process Performance Loop Badge (Canonical Unread Due Requests: Baseline & Due Weekly Check-In)
+        if (notificationsRes.ok) {
+          const nData = await notificationsRes.json();
+          if (nData.success && Array.isArray(nData.notifications)) {
+            const dueSourceRoots = new Set<string>();
+            for (const n of nData.notifications) {
+              if (
+                !n.isRead &&
+                (n.type === 'PERFORMANCE_CLARIFICATION_REQUIRED' ||
+                  n.type === 'PERFORMANCE_CLARIFICATION_REMINDER' ||
+                  n.type === 'WEEKLY_INVENTORY_DUE' ||
+                  n.type === 'WEEKLY_INVENTORY_REMINDER')
+              ) {
+                const rootId = String(n.sourceEntityId || '').replace(/_reminder_\d+$/, '');
+                if (rootId) dueSourceRoots.add(rootId);
+              }
+            }
+            newBadges.performance = dueSourceRoots.size > 0 ? dueSourceRoots.size : null;
+          }
+        }
+
         if (isMounted) {
           setMonitoring(newMonitoring);
           setBadges(newBadges);
@@ -202,9 +228,18 @@ export function useAppShellController(): AppShellController {
     
     // Poll for updates every 60s
     const intervalId = setInterval(fetchShellData, 60000);
+    const handleDemoChange = () => {
+      fetchShellData();
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('avyron-demo-state-changed', handleDemoChange);
+    }
     return () => {
       isMounted = false;
       clearInterval(intervalId);
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('avyron-demo-state-changed', handleDemoChange);
+      }
     };
   }, [selectedCampaign?.selectedCampaignId]);
 

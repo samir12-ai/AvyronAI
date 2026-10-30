@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { targetAssessments } from "@shared/schema";
 import { aiGemini, aiChat } from "../ai-client";
+import { computePainContentHash } from "../shared/audience-pain-registry";
 
 export interface TargetAssessmentInput {
   painId: string;
@@ -21,6 +22,7 @@ export interface TargetAssessmentInput {
   accountId: string;
   campaignId: string;
   jobId: string;
+  painContentHash?: string;
   existingAssessment?: {
     targetAssessmentAuthorityId: string;
     status: string;
@@ -31,6 +33,7 @@ export interface TargetAssessmentInput {
     painId: string;
     targetUnderstandingAuthorityId: string;
     reason?: string;
+    painContentHash?: string;
   };
 }
 
@@ -43,6 +46,47 @@ export interface TargetAssessmentResult {
   parentAuthorityIds: string[];
   reason: string;
   jobId: string;
+  painClaim?: string;
+  painContentHash?: string;
+}
+
+export function canReuseTargetAssessment(
+  existingAssessment: any,
+  targetPain: { painId?: string; id?: string; statement?: string; canonicalPain?: string; contentHash?: string; painContentHash?: string },
+  opts?: { jobId?: string; accountId?: string; campaignId?: string; targetUnderstandingAuthorityId?: string }
+): boolean {
+  if (!existingAssessment) return false;
+  if (existingAssessment.status && existingAssessment.status !== "COMPLETE") return false;
+  if (opts?.jobId && existingAssessment.jobId && existingAssessment.jobId !== opts.jobId) return false;
+  if (opts?.accountId && existingAssessment.accountId && existingAssessment.accountId !== opts.accountId) return false;
+  if (opts?.campaignId && existingAssessment.campaignId && existingAssessment.campaignId !== opts.campaignId) return false;
+  if (opts?.targetUnderstandingAuthorityId && existingAssessment.targetUnderstandingAuthorityId && existingAssessment.targetUnderstandingAuthorityId !== opts.targetUnderstandingAuthorityId) return false;
+
+  const targetPid = targetPain.painId || targetPain.id;
+  if (existingAssessment.painId && targetPid && existingAssessment.painId !== targetPid) return false;
+
+  const targetHash = targetPain.contentHash || targetPain.painContentHash || computePainContentHash(targetPain.statement || targetPain.canonicalPain || "");
+  if (existingAssessment.painContentHash && existingAssessment.painContentHash !== targetHash) return false;
+
+  return true;
+}
+
+const targetAssessmentSegmentCache = new Map<string, {
+  decision: "COVERED" | "RELATED_BUT_UNPROVEN" | "NOT_COVERED";
+  reason: string;
+}>();
+
+export function __clearTargetAssessmentCacheForTests(): void {
+  targetAssessmentSegmentCache.clear();
+}
+
+function computeTargetAssessmentSegmentCacheKey(input: TargetAssessmentInput): string {
+  const rolesSignature = (input.canonicalTargetRoles || [])
+    .map(r => `${r.targetRoleFactId || ""}:${r.roleType || ""}:${r.roleTitle || ""}`)
+    .sort()
+    .join("|");
+  const segSig = `${input.segmentId || ""}::${input.segmentContext?.name || ""}::${input.segmentContext?.role || ""}::${input.segmentContext?.segmentDefinition || ""}`;
+  return `${input.accountId || "default"}::${input.campaignId || ""}::${input.jobId || ""}::${input.targetUnderstandingAuthorityId}::${segSig}::${rolesSignature}`;
 }
 
 export async function runTargetAssessmentForPain(
@@ -78,6 +122,8 @@ export async function runTargetAssessmentForPain(
     return incompleteRes;
   }
 
+  const painContentHash = input.painContentHash || computePainContentHash(canonicalPain);
+
   // 2. Check if a valid same-job Target Assessment authority can be reused
   const canReuse = (
     existingAssessment &&
@@ -87,7 +133,8 @@ export async function runTargetAssessmentForPain(
     existingAssessment.campaignId === campaignId &&
     existingAssessment.painId === painId &&
     existingAssessment.targetUnderstandingAuthorityId === targetUnderstandingAuthorityId &&
-    ["COVERED", "RELATED_BUT_UNPROVEN", "NOT_COVERED"].includes(existingAssessment.decision)
+    ["COVERED", "RELATED_BUT_UNPROVEN", "NOT_COVERED"].includes(existingAssessment.decision) &&
+    (!existingAssessment.painContentHash || existingAssessment.painContentHash === painContentHash)
   );
 
   if (canReuse) {
@@ -100,7 +147,44 @@ export async function runTargetAssessmentForPain(
       parentAuthorityIds: [targetUnderstandingAuthorityId, painId],
       reason: existingAssessment.reason || "Reused valid same-job Target Assessment authority",
       jobId,
+      painClaim: canonicalPain,
+      painContentHash,
     };
+  }
+
+  // 2b. Segment-level cache reuse: WHO the audience segment represents is invariant across pains in the same segment
+  const segCacheKey = computeTargetAssessmentSegmentCacheKey(input);
+  const cachedSegAssessment = targetAssessmentSegmentCache.get(segCacheKey);
+  if (cachedSegAssessment) {
+    const result: TargetAssessmentResult = {
+      targetAssessmentAuthorityId,
+      painId,
+      targetUnderstandingAuthorityId,
+      decision: cachedSegAssessment.decision,
+      status: "COMPLETE",
+      parentAuthorityIds: [targetUnderstandingAuthorityId, painId],
+      reason: cachedSegAssessment.reason,
+      jobId,
+      painClaim: canonicalPain,
+      painContentHash,
+    };
+    try {
+      await db.insert(targetAssessments).values({
+        id: targetAssessmentAuthorityId,
+        jobId,
+        campaignId,
+        accountId,
+        painId,
+        targetUnderstandingAuthorityId,
+        decision: cachedSegAssessment.decision,
+        status: "COMPLETE",
+        parentAuthorityIds: [targetUnderstandingAuthorityId, painId],
+        payload: { ...result, painClaim: canonicalPain, painContentHash } as any,
+      });
+    } catch {
+      // Ignore duplicate persistence warnings in tests
+    }
+    return result;
   }
 
   // 3. Execute semantic LLM evaluation against canonical Target Roles
@@ -143,7 +227,7 @@ Output JSON format exactly:
       model: "gpt-4.1-mini",
       max_tokens: 1024,
       response_format: { type: "json_object" },
-      accountId: "system",
+      accountId: accountId || "system",
       endpoint: "target-assessment-engine",
     });
     const parsed = JSON.parse(chatRes.choices[0]?.message?.content || "{}");
@@ -151,6 +235,7 @@ Output JSON format exactly:
       decision = parsed.decision;
       reason = parsed.reason || reason;
     }
+    targetAssessmentSegmentCache.set(segCacheKey, { decision, reason });
   } catch (chatErr: any) {
     console.error(`[TargetAssessment] Evaluation failed: ${chatErr.message}`);
     return {
@@ -174,6 +259,8 @@ Output JSON format exactly:
     parentAuthorityIds: [targetUnderstandingAuthorityId, painId],
     reason,
     jobId,
+    painClaim: canonicalPain,
+    painContentHash,
   };
 
   try {
@@ -187,7 +274,7 @@ Output JSON format exactly:
       decision,
       status: "COMPLETE",
       parentAuthorityIds: [targetUnderstandingAuthorityId, painId],
-      payload: result as any,
+      payload: { ...result, painClaim: canonicalPain, painContentHash } as any,
     });
   } catch (dbErr: any) {
     console.warn(`[TargetAssessment] Failed to persist assessment ${targetAssessmentAuthorityId}: ${dbErr.message}`);

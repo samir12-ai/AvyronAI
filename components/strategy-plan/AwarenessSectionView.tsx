@@ -18,32 +18,113 @@ export default function AwarenessSectionView({ planData, intelligenceData }: Pro
   const [showEvidence, setShowEvidence] = useState(false);
 
   const sections = planData?.sections || {};
-  const awareness = sections.awareness || {};
-  const businessRep = sections.businessRepresentation;
-  const stratSummary = sections.strategicSummary;
+  const rawAwareness = sections.awareness || planData?.awareness || {};
+  const primaryRoute = rawAwareness.primaryRoute || rawAwareness;
 
-  const narrativeReframe = awareness.narrativeReframe || awareness.reframe || stratSummary?.strategy || businessRep?.strategicSummary?.strategy || 'Transitioning from unverified market noise to continuous signal intelligence.';
-  const currentBelief = awareness.currentBelief || awareness.oldBelief || 'Most growth strategies rely on guesswork, manual research, and static competitive audits.';
-  const desiredBelief = awareness.desiredBelief || awareness.newBelief || 'Winning market strategies require continuous real-time market signals and verified customer evidence.';
+  const reframeObj =
+    (typeof primaryRoute.narrativeReframe === 'object' && primaryRoute.narrativeReframe !== null ? primaryRoute.narrativeReframe : null) ||
+    (typeof rawAwareness.narrativeReframeDetails === 'object' && rawAwareness.narrativeReframeDetails !== null ? rawAwareness.narrativeReframeDetails : null) ||
+    (typeof rawAwareness.narrativeReframe === 'object' && rawAwareness.narrativeReframe !== null ? rawAwareness.narrativeReframe : null);
+  const mythObj =
+    (typeof primaryRoute.mythBreaker === 'object' && primaryRoute.mythBreaker !== null ? primaryRoute.mythBreaker : null) ||
+    (typeof rawAwareness.mythBreakerDetails === 'object' && rawAwareness.mythBreakerDetails !== null ? rawAwareness.mythBreakerDetails : null) ||
+    (typeof rawAwareness.mythBreaker === 'object' && rawAwareness.mythBreaker !== null ? rawAwareness.mythBreaker : null);
+
+  const routeName = String(primaryRoute.routeName || primaryRoute.name || rawAwareness.routeName || sections.awarenessRoute || '');
+  const entryStage = String(primaryRoute.entryStage || primaryRoute.entryMechanismType || rawAwareness.entryStage || '');
+  const targetReadinessStage = String(primaryRoute.targetReadinessStage || rawAwareness.targetReadinessStage || '');
+
+  const currentBelief = String(
+    primaryRoute.oldBelief ||
+    rawAwareness.oldBelief ||
+    primaryRoute.currentBelief ||
+    rawAwareness.currentBelief ||
+    reframeObj?.currentModel?.statement ||
+    mythObj?.beliefToContradict ||
+    ''
+  );
+  const desiredBelief = String(
+    primaryRoute.newBelief ||
+    rawAwareness.newBelief ||
+    primaryRoute.desiredBelief ||
+    rawAwareness.desiredBelief ||
+    reframeObj?.newModel?.reclassification ||
+    mythObj?.mythBreakerStatement ||
+    ''
+  );
+  const narrativeReframe = String(
+    (typeof primaryRoute.narrativeReframe === 'string' ? primaryRoute.narrativeReframe : '') ||
+    (typeof rawAwareness.narrativeReframe === 'string' ? rawAwareness.narrativeReframe : '') ||
+    (reframeObj?.newModel?.namedPrinciple
+      ? `${reframeObj.newModel.namedPrinciple}: ${reframeObj.newModel.reclassification || desiredBelief}`
+      : '') ||
+    reframeObj?.bridgeMechanism?.specificMove ||
+    mythObj?.mythBreakerStatement ||
+    primaryRoute.reframe ||
+    rawAwareness.reframe ||
+    ''
+  );
+  const entryLogic = String(
+    primaryRoute.entryLogic ||
+    rawAwareness.entryLogic ||
+    reframeObj?.bridgeMechanism?.specificMove ||
+    mythObj?.contradictionLogic ||
+    primaryRoute.trustRequirement ||
+    primaryRoute.audienceFraming ||
+    rawAwareness.audienceFraming ||
+    ''
+  );
+  const audienceFraming = String(
+    primaryRoute.audienceFraming ||
+    rawAwareness.audienceFraming ||
+    primaryRoute.funnelCompatibility ||
+    reframeObj?.discomfortCost?.privateAdmission ||
+    ''
+  );
 
   const mythBreakers: Array<{ myth: string; reality: string }> = React.useMemo(() => {
-    if (Array.isArray(awareness.mythBreakers) && awareness.mythBreakers.length > 0) {
-      return awareness.mythBreakers.map((m: any) => ({
-        myth: m.myth || m.falseAssumption || 'Manual market research is sufficient for modern GTM speed.',
-        reality: m.reality || m.truth || m.reframe || 'Manual research decays rapidly; real-time competitive mirrors maintain targeting precision.',
-      }));
+    const rawList = Array.isArray(primaryRoute.mythBreakers) && primaryRoute.mythBreakers.length > 0
+      ? primaryRoute.mythBreakers
+      : Array.isArray(rawAwareness.mythBreakers) && rawAwareness.mythBreakers.length > 0
+        ? rawAwareness.mythBreakers
+        : [];
+    if (rawList.length > 0) {
+      return rawList.map((m: any) => {
+        if (typeof m === 'string') {
+          return {
+            myth: currentBelief || 'Conventional category assumption held by skeptical buyers',
+            reality: m,
+          };
+        }
+        return {
+          myth: String(m.myth || m.falseAssumption || m.beliefToContradict || currentBelief || 'Unverified market assumption'),
+          reality: String(m.reality || m.truth || m.reframe || m.mythBreakerStatement || desiredBelief || ''),
+        };
+      });
     }
-    return [
-      {
-        myth: 'More content volume automatically drives qualified customer acquisition.',
-        reality: 'Only content addressing verified buying pains and defended against competitor saturation converts high-intent buyers.',
-      },
-      {
-        myth: 'Market positioning is a one-time branding exercise.',
-        reality: 'Market territories evolve continuously; live signal tracking prevents narrative drift and wasted media spend.',
-      }
-    ];
-  }, [awareness]);
+    if (mythObj && (mythObj.mythBreakerStatement || mythObj.beliefToContradict)) {
+      return [
+        {
+          myth: String(mythObj.beliefToContradict || currentBelief || 'Conventional category assumption held by skeptical buyers'),
+          reality: String(mythObj.mythBreakerStatement || desiredBelief || ''),
+        },
+      ];
+    }
+    const singleMythBreaker =
+      (typeof primaryRoute.mythBreaker === 'string' ? primaryRoute.mythBreaker : '') ||
+      (typeof rawAwareness.mythBreaker === 'string' ? rawAwareness.mythBreaker : '');
+    if (singleMythBreaker) {
+      return [
+        {
+          myth: currentBelief || 'Conventional category assumption held by skeptical buyers',
+          reality: String(singleMythBreaker),
+        },
+      ];
+    }
+    return [];
+  }, [primaryRoute, rawAwareness, mythObj, currentBelief, desiredBelief]);
+
+  const hasAwarenessData = Boolean(routeName || narrativeReframe || currentBelief || desiredBelief);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
@@ -56,84 +137,116 @@ export default function AwarenessSectionView({ planData, intelligenceData }: Pro
           </View>
           <View style={styles.statusPill}>
             <View style={styles.statusDot} />
-            <Text style={styles.statusText}>Strategic Mindset Shift</Text>
+            <Text style={styles.statusText}>
+              {entryStage && targetReadinessStage
+                ? `${entryStage.replace(/_/g, ' ')} → ${targetReadinessStage.replace(/_/g, ' ')}`
+                : 'Strategic Mindset Shift'}
+            </Text>
           </View>
         </View>
 
-        <Text style={styles.heroTitle}>Strategic Narrative Reframe</Text>
-        <Text style={styles.heroDescription}>"{narrativeReframe}"</Text>
+        {hasAwarenessData ? (
+          <>
+            <Text style={styles.heroTitle}>{routeName || 'Strategic Narrative Reframe'}</Text>
+            {narrativeReframe ? (
+              <Text style={styles.heroDescription}>"{narrativeReframe}"</Text>
+            ) : null}
 
-        {/* Belief Transformation Box */}
-        <View style={styles.beliefContainer}>
-          <View style={styles.beliefBoxOld}>
-            <View style={styles.beliefHeader}>
-              <Feather name="x-circle" size={12} color="#EF4444" style={{ marginRight: 5 }} />
-              <Text style={styles.beliefLabelOld}>CURRENT MARKET ASSUMPTION</Text>
-            </View>
-            <Text style={styles.beliefTextOld}>{currentBelief}</Text>
-          </View>
+            {/* Belief Transformation Box */}
+            {(currentBelief || desiredBelief) && (
+              <View style={styles.beliefContainer}>
+                {currentBelief ? (
+                  <View style={styles.beliefBoxOld}>
+                    <View style={styles.beliefHeader}>
+                      <Feather name="x-circle" size={12} color="#EF4444" style={{ marginRight: 5 }} />
+                      <Text style={styles.beliefLabelOld}>CURRENT MARKET ASSUMPTION</Text>
+                    </View>
+                    <Text style={styles.beliefTextOld}>{currentBelief}</Text>
+                  </View>
+                ) : null}
 
-          <View style={styles.beliefArrowWrap}>
-            <Feather name="arrow-down" size={16} color="#8B5CF6" />
-          </View>
+                {currentBelief && desiredBelief ? (
+                  <View style={styles.beliefArrowWrap}>
+                    <Feather name="arrow-down" size={16} color="#8B5CF6" />
+                  </View>
+                ) : null}
 
-          <View style={styles.beliefBoxNew}>
-            <View style={styles.beliefHeader}>
-              <Feather name="check-circle" size={12} color="#10B981" style={{ marginRight: 5 }} />
-              <Text style={styles.beliefLabelNew}>REQUIRED STRATEGIC MINDSET</Text>
-            </View>
-            <Text style={styles.beliefTextNew}>{desiredBelief}</Text>
+                {desiredBelief ? (
+                  <View style={styles.beliefBoxNew}>
+                    <View style={styles.beliefHeader}>
+                      <Feather name="check-circle" size={12} color="#10B981" style={{ marginRight: 5 }} />
+                      <Text style={styles.beliefLabelNew}>REQUIRED STRATEGIC MINDSET</Text>
+                    </View>
+                    <Text style={styles.beliefTextNew}>{desiredBelief}</Text>
+                  </View>
+                ) : null}
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={{ paddingVertical: 8 }}>
+            <Text style={styles.heroTitle}>AWARENESS SNAPSHOT NOT AVAILABLE IN PLAN</Text>
+            <Text style={styles.heroDescription}>
+              No canonical Awareness Engine output is attached to this plan revision.
+            </Text>
           </View>
-        </View>
+        )}
       </View>
 
       {/* ── 2. MYTHS & FALSE ASSUMPTIONS TO BREAK ── */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeader}>
-          <Feather name="zap" size={16} color="#8B5CF6" style={{ marginRight: 8 }} />
-          <Text style={styles.sectionTitle}>MYTHS & ASSUMPTIONS TO CHALLENGE</Text>
-        </View>
-        <Text style={styles.sectionSubtitle}>
-          Key industry misconceptions that content and messaging must dismantle to establish category authority.
-        </Text>
+      {mythBreakers.length > 0 && (
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <Feather name="zap" size={16} color="#8B5CF6" style={{ marginRight: 8 }} />
+            <Text style={styles.sectionTitle}>MYTHS & ASSUMPTIONS TO CHALLENGE</Text>
+          </View>
+          <Text style={styles.sectionSubtitle}>
+            Key industry misconceptions that content and messaging must dismantle to establish category authority.
+          </Text>
 
-        <View style={styles.mythsList}>
-          {mythBreakers.map((item, idx) => (
-            <View key={idx} style={styles.mythCard}>
-              <View style={styles.mythRow}>
-                <View style={styles.mythIcon}>
-                  <Text style={styles.mythIconText}>✕</Text>
+          <View style={styles.mythsList}>
+            {mythBreakers.map((item, idx) => (
+              <View key={idx} style={styles.mythCard}>
+                <View style={styles.mythRow}>
+                  <View style={styles.mythIcon}>
+                    <Text style={styles.mythIconText}>✕</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.mythLabel}>COMMON MYTH / OLD BELIEF</Text>
+                    <Text style={styles.mythText}>"{item.myth}"</Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.mythLabel}>COMMON MYTH</Text>
-                  <Text style={styles.mythText}>"{item.myth}"</Text>
+
+                <View style={styles.realityRow}>
+                  <View style={styles.realityIcon}>
+                    <Feather name="check" size={12} color="#10B981" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.realityLabel}>MYTH BREAKER & STRATEGIC TRUTH</Text>
+                    <Text style={styles.realityText}>{item.reality}</Text>
+                  </View>
                 </View>
               </View>
-
-              <View style={styles.realityRow}>
-                <View style={styles.realityIcon}>
-                  <Feather name="check" size={12} color="#10B981" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.realityLabel}>STRATEGIC TRUTH</Text>
-                  <Text style={styles.realityText}>{item.reality}</Text>
-                </View>
-              </View>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ── 3. TOP OF FUNNEL ENTRY LOGIC ── */}
-      <View style={styles.entryCard}>
-        <View style={styles.entryHeader}>
-          <Feather name="compass" size={14} color="#38BDF8" style={{ marginRight: 6 }} />
-          <Text style={styles.entryTitle}>TOP-OF-FUNNEL ENTRY LOGIC</Text>
+      {entryLogic ? (
+        <View style={styles.entryCard}>
+          <View style={styles.entryHeader}>
+            <Feather name="compass" size={14} color="#38BDF8" style={{ marginRight: 6 }} />
+            <Text style={styles.entryTitle}>TOP-OF-FUNNEL ENTRY LOGIC</Text>
+          </View>
+          <Text style={styles.entryBody}>{entryLogic}</Text>
+          {audienceFraming && audienceFraming !== entryLogic ? (
+            <Text style={[styles.entryBody, { marginTop: 8, opacity: 0.9 }]}>
+              Audience Framing: {audienceFraming}
+            </Text>
+          ) : null}
         </View>
-        <Text style={styles.entryBody}>
-          Target prospects are initially addressed at the problem-agitation stage: exposing the operational friction of unverified targeting before introducing product capabilities.
-        </Text>
-      </View>
+      ) : null}
 
       {/* ── 4. EVIDENCE & LINEAGE DRAWER ── */}
       <View style={styles.drawerCard}>
@@ -151,9 +264,9 @@ export default function AwarenessSectionView({ planData, intelligenceData }: Pro
         {showEvidence && (
           <View style={styles.drawerBody}>
             <View style={styles.evidenceItem}>
-              <Text style={styles.evidenceLabel}>ENGINE PRIORITY</Text>
+              <Text style={styles.evidenceLabel}>PRIMARY ROUTE & READINESS</Text>
               <Text style={styles.evidenceValue}>
-                MESSAGING Tier (#7) · Derived from verified audience objections and contrast axes.
+                {routeName || 'Canonical Route'} · {entryStage || 'unaware'} → {targetReadinessStage || 'product_aware'}
               </Text>
             </View>
             <View style={styles.evidenceItem}>

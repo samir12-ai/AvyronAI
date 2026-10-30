@@ -133,6 +133,11 @@ export interface OfferCandidate {
   problemStatement?: string;
   proofPath?: string[];
   objectionHandling?: string[];
+  structuredObjections?: import("../../shared/contracts/claim-status").StructuredObjectionResolution[];
+  internalStrategyNotes?: {
+    unaddressedFrictions?: string[];
+    prohibitedMarketingAngles?: string[];
+  };
   outcomeLayer: OutcomeLayer;
   mechanismLayer: MechanismLayer;
   deliveryLayer: DeliveryLayer;

@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { buildExecutionPlanningContext } from "./context-builder";
 import { logger } from "../logger";
+import { evaluateTaskEligibility } from "../shared/task-eligibility";
 
 export interface ProductionScene {
   sceneNumber: number;
@@ -82,13 +83,35 @@ export class TaskBlueprintGenerator {
       throw new Error(`TASK_NOT_FOUND: Execution task ${taskId} does not exist.`);
     }
 
-    // 2. Return cached blueprint if available and not forced
-    if (task.productionBlueprint && !forceRegenerate) {
+    // Task execution guard: Draft or blocked tasks cannot generate executable production blueprints
+    if (task.status === "DRAFT" || task.status === "BLOCKED") {
+      throw new Error(`TASK_NOT_EXECUTABLE: Task ${taskId} is in ${task.status} status and cannot generate production content.`);
+    }
+
+    // 2. Return cached blueprint if available and not forced (always return cached in Demo Mode)
+    if (task.productionBlueprint && (!forceRegenerate || process.env.AVYRON_DEMO_MODE === "1")) {
       return task.productionBlueprint as TaskProductionBlueprint;
     }
 
     // 3. Build Planning Context from Strategy Lineage
     const context = await buildExecutionPlanningContext(task.campaignId);
+
+    // 4. Validate Task Eligibility with structured operational purpose and verified evidence
+    const taskEligibility = evaluateTaskEligibility(task, {
+      planStatus: "APPROVED",
+      isPlanDesignatedActive: true,
+      verifiedEvidenceTexts: [
+        context.approvedMechanism.mechanismName,
+        context.approvedMechanism.corePrinciple,
+        context.approvedMechanism.proofArtifact,
+        ...context.approvedLanes.map(l => l.primaryPain || ""),
+      ].filter(Boolean),
+      unresolvedDependencies: Array.isArray(task.dependencies) ? (task.dependencies as string[]) : [],
+    });
+
+    if (!taskEligibility.isEligible) {
+      throw new Error(`TASK_RESTRICTED: ${taskEligibility.reason || "Task cannot generate production content"}`);
+    }
 
     // 4. Generate with LLM
     const systemPrompt = `You are the Video Production Director & B2B SaaS Content Architect.

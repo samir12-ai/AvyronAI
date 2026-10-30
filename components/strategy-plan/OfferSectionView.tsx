@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { AudiencePositioningViewModel } from '@/types/audience-positioning';
+import { ProductTruthBadge } from './ProductTruthBadge';
 
 interface Props {
   planData: any;
@@ -78,6 +79,43 @@ export default function OfferSectionView({ planData, intelligenceData }: Props) 
     return [];
   }, [rawOffer]);
 
+  const objections = React.useMemo(() => {
+    if (Array.isArray(rawOffer.structuredObjections) && rawOffer.structuredObjections.length > 0) {
+      return rawOffer.structuredObjections;
+    }
+    if (Array.isArray(rawOffer.objectionHandling) && rawOffer.objectionHandling.length > 0) {
+      return rawOffer.objectionHandling.map((text: string) => {
+        let status = 'UNRESOLVED';
+        let label = 'Unresolved Concern';
+        let cleanText = text;
+
+        if (/^\[ADDRESSED\]/i.test(text)) {
+          status = 'ADDRESSED';
+          label = 'Addressed via Verified Proof';
+          cleanText = text.replace(/^\[ADDRESSED\]\s*/i, '');
+        } else if (/^\[PARTIALLY_MITIGATED\]/i.test(text)) {
+          status = 'PARTIALLY_MITIGATED';
+          label = 'Partially Mitigated — Risk Reduction';
+          cleanText = text.replace(/^\[PARTIALLY_MITIGATED\]\s*/i, '');
+        } else if (/^\[PROPOSED\]/i.test(text)) {
+          status = 'PROPOSED';
+          label = 'Proposed — Requires Validation';
+          cleanText = text.replace(/^\[PROPOSED\]\s*/i, '');
+        } else if (/^\[UNRESOLVED\]/i.test(text)) {
+          status = 'UNRESOLVED';
+          label = 'Unresolved Concern';
+          cleanText = text.replace(/^\[UNRESOLVED\]\s*/i, '');
+        }
+        return {
+          status,
+          label,
+          resolutionText: cleanText,
+        };
+      });
+    }
+    return [];
+  }, [rawOffer]);
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       {/* ── 1. APPROVED CORE OFFER HERO ── */}
@@ -94,6 +132,11 @@ export default function OfferSectionView({ planData, intelligenceData }: Props) 
         </View>
 
         <Text style={styles.heroTitle}>{offerTitle}</Text>
+        <ProductTruthBadge
+          status={rawOffer.truthStatus || rawOffer.coreOutcomeGrounded?.status}
+          label={rawOffer.truthLabel || rawOffer.coreOutcomeGrounded?.label}
+          claimText={offerOutcome}
+        />
         {offerOutcome ? (
           <Text style={styles.heroDescription}>"{offerOutcome}"</Text>
         ) : null}
@@ -146,6 +189,71 @@ export default function OfferSectionView({ planData, intelligenceData }: Props) 
           <Text style={styles.emptySectionText}>No specific deliverables defined for this offer.</Text>
         )}
       </View>
+
+      {/* ── 2.5. OBJECTION RESOLUTION & RISK MITIGATION ── */}
+      {objections.length > 0 ? (
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <Feather name="shield" size={16} color="#F59E0B" style={{ marginRight: 8 }} />
+            <Text style={styles.sectionTitle}>OBJECTION RESOLUTION & RISK MITIGATION</Text>
+          </View>
+          <Text style={styles.sectionSubtitle}>
+            How buyer hesitation and operational concerns are resolved or mitigated.
+          </Text>
+
+          <View style={{ marginTop: 12 }}>
+            {objections.map((item: any, idx: number) => {
+              const status = item.status || 'UNRESOLVED';
+              let badgeBg = '#7F1D1D40';
+              let badgeBorder = '#DC2626';
+              let badgeText = '#F87171';
+              let defaultLabel = 'UNRESOLVED';
+
+              if (status === 'ADDRESSED') {
+                badgeBg = '#064E3B40';
+                badgeBorder = '#059669';
+                badgeText = '#34D399';
+                defaultLabel = 'ADDRESSED';
+              } else if (status === 'PARTIALLY_MITIGATED') {
+                badgeBg = '#78350F40';
+                badgeBorder = '#D97706';
+                badgeText = '#FCD34D';
+                defaultLabel = 'PARTIALLY MITIGATED';
+              } else if (status === 'PROPOSED') {
+                badgeBg = '#312E8140';
+                badgeBorder = '#6366F1';
+                badgeText = '#A5B4FC';
+                defaultLabel = 'PROPOSED';
+              }
+
+              const displayLabel = item.label || defaultLabel;
+              const textContent = item.resolutionText || item.objection || JSON.stringify(item);
+
+              return (
+                <View key={idx} style={styles.objectionCard}>
+                  <View style={styles.objectionBadgeRow}>
+                    <View style={[styles.objectionPill, { backgroundColor: badgeBg, borderColor: badgeBorder }]}>
+                      <Text style={[styles.objectionPillText, { color: badgeText }]}>{displayLabel}</Text>
+                    </View>
+                    {item.underlyingConcern ? (
+                      <Text style={styles.objectionConcernTag}>Concern: {item.underlyingConcern}</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.objectionResolutionText}>{textContent}</Text>
+                  {Array.isArray(item.prerequisites) && item.prerequisites.length > 0 ? (
+                    <View style={styles.objectionPrereqBox}>
+                      <Text style={styles.objectionPrereqTitle}>Prerequisites:</Text>
+                      {item.prerequisites.map((p: string, pIdx: number) => (
+                        <Text key={pIdx} style={styles.objectionPrereqItem}>• {p}</Text>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
       {/* ── 3. COMMERCIAL VALUE & VALUE WEDGE ── */}
       {commercialValue ? (
@@ -529,6 +637,61 @@ const styles = StyleSheet.create({
   evidenceValue: {
     fontSize: 11,
     color: '#E2E8F0',
+    lineHeight: 16,
+  },
+  objectionCard: {
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#1F2937',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 10,
+  },
+  objectionBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  objectionPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+  },
+  objectionPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  objectionConcernTag: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+  },
+  objectionResolutionText: {
+    fontSize: 13,
+    color: '#E5E7EB',
+    lineHeight: 18,
+  },
+  objectionPrereqBox: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderColor: '#1F2937',
+  },
+  objectionPrereqTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#A5B4FC',
+    marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  objectionPrereqItem: {
+    fontSize: 11,
+    color: '#C7D2FE',
     lineHeight: 16,
   },
 });

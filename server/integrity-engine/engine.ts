@@ -761,7 +761,9 @@ export function layer9_strategicLaneAuthority(
     const laneTitle = lane.title || `Lane ${idx + 1}`;
     const coreIds = Array.isArray(lane.corePainIds) ? lane.corePainIds : [];
     const suppIds = Array.isArray(lane.supportingPainIds) ? lane.supportingPainIds : [];
-    const allPainIds = Array.isArray(lane.painIds) ? lane.painIds : [...coreIds, ...suppIds];
+    const allPainIds = (coreIds.length > 0 || suppIds.length > 0)
+      ? [...new Set([...coreIds, ...suppIds])]
+      : (Array.isArray(lane.painIds) ? lane.painIds : []);
     const primaryId = lane.primaryPainId || coreIds[0];
 
     // A. Must contain >= 1 CORE_PURCHASE pain

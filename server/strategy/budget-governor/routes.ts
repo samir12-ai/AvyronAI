@@ -133,7 +133,7 @@ export function registerBudgetGovernorRoutes(app: Express) {
         campaignPerformance,
       };
 
-      const result = runBudgetGovernorEngine(input);
+      const result = await runBudgetGovernorEngine(input);
 
       const hasPerformanceOverride = statValidity &&
         statValidity.isStatisticallyValid &&

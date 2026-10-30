@@ -40,14 +40,16 @@ export function getApiUrl(path?: string): string {
   if (typeof window !== "undefined" && window.location && window.location.host) {
     if (window.location.port === "8081" || window.location.port === "8082" || window.location.port === "19006") {
       const hostname = window.location.hostname || "127.0.0.1";
-      host = `${hostname}:8808`;
+      const apiPort = process.env.EXPO_PUBLIC_API_PORT || "5000";
+      host = `${hostname}:${apiPort}`;
     } else {
       host = window.location.host;
     }
   }
 
   if (!host) {
-    host = "127.0.0.1:8808";
+    const apiPort = process.env.EXPO_PUBLIC_API_PORT || "5000";
+    host = `127.0.0.1:${apiPort}`;
   }
 
   const protocol = host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https";

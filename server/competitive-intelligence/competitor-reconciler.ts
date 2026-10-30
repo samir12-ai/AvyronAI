@@ -1,6 +1,16 @@
 import { db } from "../db";
 import * as schema from "@shared/schema";
-import { eq, and, inArray, sql, notInArray } from "drizzle-orm";
+import { eq, and, inArray, sql, notInArray, desc } from "drizzle-orm";
+import { createHash, randomUUID as uuidv4 } from "crypto";
+import { extractAppListingIdentity, extractBrandEntityInfo, generateCanonicalEntityId } from "../discovery/entity-resolver";
+import {
+  extractExternalAccountId,
+  extractSourcesFromHtml,
+  isPlatformOwnedHandle,
+  verifySearchCandidateOwnership,
+  persistManifestSourcesToDb,
+  type CompetitorSourceManifest,
+} from "./source-discovery";
 
 export interface ReconcileCompetitorsOptions {
   accountId: string;
@@ -56,14 +66,18 @@ export interface CompetitorReconciliationResult {
 
 /**
  * Normalizes a competitor domain/profile link to a canonical domain identity key.
+ * Preserves full app-store listing paths (e.g. apps.apple.com/.../id...) as distinct identities.
  */
 export function getNormalizedCompetitorDomain(competitor: {
   name: string;
   websiteUrl?: string | null;
-  profileLink?: string | null;
 }): string {
-  const raw = (competitor.websiteUrl || competitor.profileLink || "").trim();
+  const raw = (competitor.websiteUrl || "").trim();
   if (!raw) return `name_${competitor.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+  const appListing = extractAppListingIdentity(raw);
+  if (appListing.isAppListing && appListing.listingKey) {
+    return appListing.listingKey;
+  }
   try {
     const u = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
     const h = u.hostname.replace(/^www\./, "").toLowerCase();
@@ -73,10 +87,719 @@ export function getNormalizedCompetitorDomain(competitor: {
         return `instagram.com/${parts[0].toLowerCase()}`;
       }
     }
+    if (h === "apps.apple.com" || h === "play.google.com") {
+      return `${h}_unqualified_${competitor.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+    }
     return h;
   } catch {
     return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
   }
+}
+
+export interface IdentityRepairReport {
+  unmergedRecords: Array<{
+    originalCompetitorId: string;
+    primaryDomain: string;
+    restoredCompetitorId: string;
+    restoredDomain: string;
+    restoredName: string;
+    reparentedSources: number;
+    reparentedSnapshots: number;
+    reparentedUnderstandingSnapshots: number;
+    reparentedPosts: number;
+  }>;
+  restoredAppListings: Array<{
+    competitorId: string;
+    name: string;
+    previousUrl: string;
+    restoredUrl: string;
+    quarantinedPlatformSources: number;
+    removedPlatformPosts: number;
+  }>;
+  quarantinedSources: Array<{
+    sourceId: string;
+    competitorId: string;
+    competitorName: string;
+    platform: string;
+    url: string;
+    reason: string;
+    preservedTestimonials: number;
+    removedMisattributedPosts: number;
+  }>;
+  repairedSources: Array<{
+    sourceId: string;
+    competitorId: string;
+    platform: string;
+    previousUrl: string;
+    repairedUrl: string;
+  }>;
+  populatedExternalAccountIds: number;
+}
+
+/**
+ * Reusable campaign-wide competitor identity and source attribution repair.
+ * 1. Splits multi-business records that were erroneously merged via generic SEO titles in `storefronts`.
+ * 2. Restores truncated app-store root URLs (`https://apps.apple.com`) from discovery session provenance and quarantines `@appstore`.
+ * 3. Quarantines misattributed third-party testimonial accounts (preserving customer testimonials in `evidence_registry`) and invalid social URLs (`facebook.com/tr`, bare `facebook.com/profile.php`).
+ * 4. Populates missing `externalAccountId` on `competitor_sources`.
+ */
+export async function repairCampaignCompetitorIdentitiesAndSources(
+  options: ReconcileCompetitorsOptions
+): Promise<IdentityRepairReport> {
+  const { accountId, campaignId, dryRun = false } = options;
+  const report: IdentityRepairReport = {
+    unmergedRecords: [],
+    restoredAppListings: [],
+    quarantinedSources: [],
+    repairedSources: [],
+    populatedExternalAccountIds: 0,
+  };
+
+  const allComps = await db
+    .select()
+    .from(schema.ciCompetitors)
+    .where(and(eq(schema.ciCompetitors.accountId, accountId), eq(schema.ciCompetitors.campaignId, campaignId)));
+
+  // 1. Unmerge multi-business records where `storefronts` contains distinct domain brandTokens from `websiteUrl`
+  for (const comp of allComps) {
+    if (!comp.isActive) continue;
+    const storefronts = Array.isArray(comp.storefronts) ? (comp.storefronts as Array<{ domain?: string; url?: string; title?: string }>) : [];
+    if (storefronts.length === 0) continue;
+
+    const primaryBrand = extractBrandEntityInfo(comp.websiteUrl || storefronts[0]?.url || storefronts[0]?.domain || "");
+    const distinctSecondaryStorefronts = storefronts.filter(sf => {
+      const info = extractBrandEntityInfo(sf.url || sf.domain || "");
+      return info.brandToken && info.brandToken !== primaryBrand.brandToken;
+    });
+
+    if (distinctSecondaryStorefronts.length === 0) continue;
+
+    for (const secSf of distinctSecondaryStorefronts) {
+      const secInfo = extractBrandEntityInfo(secSf.url || secSf.domain || "");
+      const secUrl = secSf.url || `https://${secInfo.baseDomain}`;
+      const secBrandToken = secInfo.brandToken;
+      const derivedBrandName =
+        secBrandToken === "melodybolt"
+          ? "MelodyBolt"
+          : secSf.title && !secSf.title.toLowerCase().includes("personalised songs uk")
+            ? secSf.title
+            : secBrandToken.charAt(0).toUpperCase() + secBrandToken.slice(1);
+
+      // Find if a deactivated/superseded row already exists for secInfo.baseDomain
+      const existingInactive = allComps.find(
+        c =>
+          c.id !== comp.id &&
+          extractBrandEntityInfo(c.websiteUrl || "").brandToken === secBrandToken
+      );
+
+      const targetSecCompId = existingInactive ? existingInactive.id : `comp_${uuidv4().slice(0, 10)}`;
+
+      // Identify child records belonging to the secondary business
+      const compSources = await db
+        .select()
+        .from(schema.competitorSources)
+        .where(and(eq(schema.competitorSources.accountId, accountId), eq(schema.competitorSources.competitorId, comp.id)));
+
+      const compWebSnaps = await db
+        .select()
+        .from(schema.competitorWebsiteSnapshots)
+        .where(and(eq(schema.competitorWebsiteSnapshots.accountId, accountId), eq(schema.competitorWebsiteSnapshots.competitorId, comp.id)));
+
+      const compUndSnaps = await db
+        .select()
+        .from(schema.competitorUnderstandingSnapshots)
+        .where(and(eq(schema.competitorUnderstandingSnapshots.accountId, accountId), eq(schema.competitorUnderstandingSnapshots.competitorId, comp.id)));
+
+      const compPosts = await db
+        .select()
+        .from(schema.ciCompetitorPosts)
+        .where(and(eq(schema.ciCompetitorPosts.accountId, accountId), eq(schema.ciCompetitorPosts.competitorId, comp.id)));
+
+      const matchesSecondaryBrand = (str: string | null | undefined): boolean => {
+        if (!str) return false;
+        const lower = str.toLowerCase();
+        if (lower.includes(secInfo.baseDomain) || lower.includes(secBrandToken)) return true;
+        // Also check reversed compound tokens (e.g. bolt.melody for melodybolt)
+        if (secBrandToken === "melodybolt" && lower.includes("bolt") && lower.includes("melody")) return true;
+        return false;
+      };
+
+      const secSources = compSources.filter(s => matchesSecondaryBrand(s.canonicalUrl) || matchesSecondaryBrand(s.externalAccountId));
+      const secWebSnaps = compWebSnaps.filter(s => matchesSecondaryBrand(s.websiteUrl));
+      const secWebSnapIds = new Set(secWebSnaps.map(s => s.id));
+      const secUndSnaps = compUndSnaps.filter(
+        u => secWebSnapIds.has(u.competitorWebsiteSnapshotId) || matchesSecondaryBrand(JSON.stringify(u.competitorUnderstanding || {}))
+      );
+      const secPosts = compPosts.filter(
+        p =>
+          matchesSecondaryBrand(p.authorUsername) ||
+          matchesSecondaryBrand(p.url) ||
+          matchesSecondaryBrand(p.caption)
+      );
+
+      if (!dryRun) {
+        await db.transaction(async (tx) => {
+          // 1. Update primary competitor (`comp.id`) to hold only its primary storefront (`songforyou.co.uk`)
+          const filteredPrimaryStorefronts = storefronts.filter(
+            sf => extractBrandEntityInfo(sf.url || sf.domain || "").brandToken === primaryBrand.brandToken
+          );
+          const primaryDisplayName =
+            primaryBrand.brandToken === "songforyou" && comp.name.toLowerCase() === "personalised songs uk"
+              ? "Song For You (Personalised Songs UK)"
+              : comp.name;
+          const primaryOnlyStorefronts =
+            filteredPrimaryStorefronts.length > 0
+              ? filteredPrimaryStorefronts
+              : [
+                  {
+                    domain: primaryBrand.baseDomain,
+                    url: comp.websiteUrl || `https://${primaryBrand.baseDomain}`,
+                    title: primaryDisplayName,
+                  },
+                ];
+
+          let updatedPrimaryNotes = comp.notes;
+          try {
+            if (comp.notes) {
+              const parsed = JSON.parse(comp.notes) as CompetitorSourceManifest;
+              if (parsed?.sources) {
+                for (const k of Object.keys(parsed.sources) as Array<keyof typeof parsed.sources>) {
+                  const s = parsed.sources[k];
+                  if (s?.url && matchesSecondaryBrand(s.url)) {
+                    parsed.sources[k] = {
+                      platform: k,
+                      url: null,
+                      status: "PENDING_DISCOVERY",
+                      verificationMethod: "NONE",
+                      detail: `Split from merged storefront ${secInfo.baseDomain}; re-queued for ${primaryInfoUrl(comp.websiteUrl)}.`,
+                    };
+                  }
+                }
+                parsed.discoveryState = {
+                  status: "PENDING",
+                  attempts: 0,
+                  maxAttempts: 3,
+                  lastAttemptAt: null,
+                  nextRetryAt: new Date().toISOString(),
+                  lastError: null,
+                };
+                updatedPrimaryNotes = JSON.stringify(parsed);
+              }
+            }
+          } catch {}
+
+          await tx
+            .update(schema.ciCompetitors)
+            .set({
+              name: primaryDisplayName,
+              canonicalEntityId: generateCanonicalEntityId(primaryBrand.brandToken),
+              storefronts: primaryOnlyStorefronts,
+              notes: updatedPrimaryNotes,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.ciCompetitors.id, comp.id));
+
+          // 2. Reactivate or insert secondary competitor (`targetSecCompId`)
+          const secStorefronts = [
+            {
+              domain: secInfo.baseDomain,
+              url: secUrl,
+              title: derivedBrandName,
+            },
+          ];
+
+          if (existingInactive) {
+            await tx
+              .update(schema.ciCompetitors)
+              .set({
+                name: derivedBrandName,
+                websiteUrl: secUrl,
+                canonicalEntityId: generateCanonicalEntityId(secBrandToken),
+                storefronts: secStorefronts,
+                isActive: true,
+                tier: comp.tier || "A",
+                strategicRole: comp.strategicRole || "DIRECT",
+                geographicClassification: comp.geographicClassification || "LOCAL_MARKET",
+                updatedAt: new Date(),
+              })
+              .where(eq(schema.ciCompetitors.id, targetSecCompId));
+          } else {
+            await tx.insert(schema.ciCompetitors).values({
+              id: targetSecCompId,
+              accountId,
+              campaignId,
+              name: derivedBrandName,
+              platform: "instagram",
+              websiteUrl: secUrl,
+              businessType: "Competitor",
+              primaryObjective: "Engagement",
+              strategicRole: comp.strategicRole || "DIRECT",
+              geographicClassification: comp.geographicClassification || "LOCAL_MARKET",
+              canonicalEntityId: generateCanonicalEntityId(secBrandToken),
+              storefronts: secStorefronts,
+              isActive: true,
+              isDemo: false,
+              tier: comp.tier || "A",
+            });
+          }
+
+          // 3. Reparent secondary sources, website snapshots, understanding snapshots, and posts
+          const existingSecSources = await tx
+            .select()
+            .from(schema.competitorSources)
+            .where(eq(schema.competitorSources.competitorId, targetSecCompId));
+          const existingSecSourceKeys = new Set(
+            existingSecSources.map(s => `${s.platform.toUpperCase()}:::${(s.canonicalUrl || "").toLowerCase().trim()}`)
+          );
+
+          for (const src of secSources) {
+            const key = `${src.platform.toUpperCase()}:::${(src.canonicalUrl || "").toLowerCase().trim()}`;
+            if (existingSecSourceKeys.has(key)) {
+              await tx.delete(schema.competitorSources).where(eq(schema.competitorSources.id, src.id));
+            } else {
+              await tx
+                .update(schema.competitorSources)
+                .set({
+                  competitorId: targetSecCompId,
+                  externalAccountId: src.externalAccountId || extractExternalAccountId(src.platform, src.canonicalUrl),
+                })
+                .where(eq(schema.competitorSources.id, src.id));
+              existingSecSourceKeys.add(key);
+            }
+          }
+
+          if (secWebSnaps.length > 0) {
+            await tx
+              .update(schema.competitorWebsiteSnapshots)
+              .set({ competitorId: targetSecCompId })
+              .where(inArray(schema.competitorWebsiteSnapshots.id, secWebSnaps.map(s => s.id)));
+          }
+
+          if (secUndSnaps.length > 0) {
+            await tx
+              .update(schema.competitorUnderstandingSnapshots)
+              .set({ competitorId: targetSecCompId })
+              .where(inArray(schema.competitorUnderstandingSnapshots.id, secUndSnaps.map(u => u.id)));
+          }
+
+          if (secPosts.length > 0) {
+            const existingTargetPosts = await tx
+              .select({ postId: schema.ciCompetitorPosts.postId })
+              .from(schema.ciCompetitorPosts)
+              .where(eq(schema.ciCompetitorPosts.competitorId, targetSecCompId));
+            const existingPostSet = new Set(existingTargetPosts.map(p => p.postId));
+            const toMove = secPosts.filter(p => !existingPostSet.has(p.postId)).map(p => p.id);
+            const toDelete = secPosts.filter(p => existingPostSet.has(p.postId)).map(p => p.id);
+
+            if (toMove.length > 0) {
+              await tx
+                .update(schema.ciCompetitorPosts)
+                .set({ competitorId: targetSecCompId })
+                .where(inArray(schema.ciCompetitorPosts.id, toMove));
+            }
+            if (toDelete.length > 0) {
+              await tx
+                .delete(schema.ciCompetitorPosts)
+                .where(inArray(schema.ciCompetitorPosts.id, toDelete));
+            }
+          }
+
+          // 4. Record audit revision
+          await tx.insert(schema.ciCompetitorRevisions).values({
+            id: `rev_${uuidv4().slice(0, 12)}`,
+            accountId,
+            campaignId,
+            competitorId: comp.id,
+            changedFields: JSON.stringify(["name", "canonical_entity_id", "storefronts", "notes"]),
+            previousValues: JSON.stringify({ mergedStorefronts: storefronts }),
+            currentValues: JSON.stringify({
+              primaryCompetitorId: comp.id,
+              primaryDomain: primaryBrand.baseDomain,
+              restoredCompetitorId: targetSecCompId,
+              restoredDomain: secInfo.baseDomain,
+              reason: `Unmerged distinct businesses (${primaryBrand.baseDomain} and ${secInfo.baseDomain}) that shared generic SEO title.`,
+            }),
+          } as any);
+        });
+      }
+
+      report.unmergedRecords.push({
+        originalCompetitorId: comp.id,
+        primaryDomain: primaryBrand.baseDomain,
+        restoredCompetitorId: targetSecCompId,
+        restoredDomain: secInfo.baseDomain,
+        restoredName: derivedBrandName,
+        reparentedSources: secSources.length,
+        reparentedSnapshots: secWebSnaps.length,
+        reparentedUnderstandingSnapshots: secUndSnaps.length,
+        reparentedPosts: secPosts.length,
+      });
+    }
+  }
+
+  // 2. Restore truncated App Store / Play Store root URLs from discovery session provenance
+  const discoverySessions = await db
+    .select()
+    .from(schema.competitorDiscoverySessions)
+    .where(and(eq(schema.competitorDiscoverySessions.accountId, accountId), eq(schema.competitorDiscoverySessions.campaignId, campaignId)))
+    .orderBy(desc(schema.competitorDiscoverySessions.createdAt))
+    .limit(5);
+
+  const refreshedComps = await db
+    .select()
+    .from(schema.ciCompetitors)
+    .where(and(eq(schema.ciCompetitors.accountId, accountId), eq(schema.ciCompetitors.campaignId, campaignId)));
+
+  for (const comp of refreshedComps) {
+    const rawUrl = (comp.websiteUrl || "").trim().replace(/\/+$/, "").toLowerCase();
+    if (rawUrl === "https://apps.apple.com" || rawUrl === "http://apps.apple.com" || rawUrl === "https://play.google.com") {
+      let restoredListingUrl: string | null = null;
+      const compNameLower = comp.name.toLowerCase();
+      const nameToken = compNameLower.split(/[-|–:]/)[1]?.trim().split(/\s+/)[0] || compNameLower.split(/\s+/)[0] || "";
+
+      for (const sess of discoverySessions) {
+        const rep = ((sess as any).discoveryReport || {}) as any;
+        const sessionCandidates = Array.isArray((sess as any).candidates) ? (sess as any).candidates : [];
+        const allCands = [
+          ...sessionCandidates,
+          ...(Array.isArray(rep.approvedCandidates) ? rep.approvedCandidates : []),
+          ...(Array.isArray(rep.localCandidates) ? rep.localCandidates : []),
+          ...(Array.isArray(rep.crossBorderCandidates) ? rep.crossBorderCandidates : []),
+          ...(Array.isArray(rep.unverifiedMarketCandidates) ? rep.unverifiedMarketCandidates : []),
+        ];
+        for (const cand of allCands) {
+          const occs = Array.isArray(cand?.occurrences) ? cand.occurrences : [];
+          for (const occ of occs) {
+            const occUrl = String(occ?.url || "");
+            const listing = extractAppListingIdentity(occUrl);
+            if (listing.isAppListing && listing.canonicalListingUrl) {
+              const titleLower = String(occ?.rawTitle || cand?.name || "").toLowerCase();
+              if (
+                titleLower.includes(compNameLower) ||
+                compNameLower.includes(titleLower) ||
+                (nameToken.length >= 4 && occUrl.toLowerCase().includes(nameToken))
+              ) {
+                restoredListingUrl = listing.canonicalListingUrl;
+                break;
+              }
+            }
+          }
+          if (restoredListingUrl) break;
+        }
+        if (restoredListingUrl) break;
+      }
+
+      if (restoredListingUrl) {
+        // Also find any @appstore sources/posts on this competitor
+        const compSources = await db
+          .select()
+          .from(schema.competitorSources)
+          .where(and(eq(schema.competitorSources.accountId, accountId), eq(schema.competitorSources.competitorId, comp.id)));
+
+        const platformSources = compSources.filter(s => {
+          const h = s.externalAccountId || extractExternalAccountId(s.platform, s.canonicalUrl);
+          return h && isPlatformOwnedHandle(h, restoredListingUrl!);
+        });
+
+        const compPosts = await db
+          .select()
+          .from(schema.ciCompetitorPosts)
+          .where(and(eq(schema.ciCompetitorPosts.accountId, accountId), eq(schema.ciCompetitorPosts.competitorId, comp.id)));
+
+        if (!dryRun) {
+          const listingInfo = extractAppListingIdentity(restoredListingUrl);
+          await db
+            .update(schema.ciCompetitors)
+            .set({
+              websiteUrl: restoredListingUrl,
+              canonicalEntityId: listingInfo.brandToken ? generateCanonicalEntityId(listingInfo.brandToken) : comp.canonicalEntityId,
+              storefronts: [{ domain: listingInfo.listingKey || restoredListingUrl, url: restoredListingUrl, title: comp.name }],
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.ciCompetitors.id, comp.id));
+
+          // Update WEBSITE source
+          const webSrc = compSources.find(s => s.platform.toUpperCase() === "WEBSITE");
+          if (webSrc) {
+            await db
+              .update(schema.competitorSources)
+              .set({
+                canonicalUrl: restoredListingUrl,
+                metadata: { ...(webSrc.metadata as any || {}), repairedFromPlatformRoot: comp.websiteUrl },
+              })
+              .where(eq(schema.competitorSources.id, webSrc.id));
+          }
+
+          if (platformSources.length > 0) {
+            await db
+              .update(schema.competitorSources)
+              .set({
+                status: "DISABLED",
+                activityState: "QUARANTINED_PLATFORM_ACCOUNT",
+                metadata: { quarantinedReason: "Platform-owned @appstore account, not competitor profile" },
+              })
+              .where(inArray(schema.competitorSources.id, platformSources.map(s => s.id)));
+          }
+
+          if (compPosts.length > 0) {
+            await db
+              .delete(schema.ciCompetitorPosts)
+              .where(inArray(schema.ciCompetitorPosts.id, compPosts.map(p => p.id)));
+          }
+        }
+
+        report.restoredAppListings.push({
+          competitorId: comp.id,
+          name: comp.name,
+          previousUrl: comp.websiteUrl || "",
+          restoredUrl: restoredListingUrl,
+          quarantinedPlatformSources: platformSources.length,
+          removedPlatformPosts: compPosts.length,
+        });
+      }
+    }
+  }
+
+  // 3. Audit all competitor_sources for invalid URLs, misattributed third-party accounts, and missing externalAccountId
+  const allSources = await db
+    .select()
+    .from(schema.competitorSources)
+    .where(and(eq(schema.competitorSources.accountId, accountId), eq(schema.competitorSources.campaignId, campaignId)));
+
+  const compById = new Map((await db.select().from(schema.ciCompetitors).where(and(eq(schema.ciCompetitors.accountId, accountId), eq(schema.ciCompetitors.campaignId, campaignId)))).map(c => [c.id, c]));
+
+  for (const src of allSources) {
+    const comp = compById.get(src.competitorId);
+    if (!comp) continue;
+
+    const plat = src.platform.toUpperCase();
+    const url = (src.canonicalUrl || "").trim();
+    const meta = (src.metadata || {}) as Record<string, any>;
+
+    // 3A. Invalid Facebook URLs (facebook.com/tr tracking pixel or truncated facebook.com/profile.php without ?id=)
+    if (plat === "FACEBOOK") {
+      const isTrackingPixel = /facebook\.com\/tr(\/|\?|$)/i.test(url);
+      const isTruncatedProfilePhp = /facebook\.com\/profile\.php(\/|$)/i.test(url) && !url.includes("id=");
+      if (isTrackingPixel || isTruncatedProfilePhp) {
+        // Attempt to recover full profile.php?id=... from live/stored HTML if truncated
+        let recoveredFbUrl: string | null = null;
+        if (isTruncatedProfilePhp && comp.websiteUrl && !comp.websiteUrl.includes("apple.com")) {
+          try {
+            const res = await fetch(comp.websiteUrl, {
+              headers: { "User-Agent": "Mozilla/5.0 AvyronAI/1.0" },
+              signal: AbortSignal.timeout(8000),
+            });
+            if (res.ok) {
+              const html = await res.text();
+              const extracted = extractSourcesFromHtml(html, comp.websiteUrl);
+              if (extracted.facebook && extracted.facebook.includes("id=")) {
+                recoveredFbUrl = extracted.facebook;
+              }
+            }
+          } catch {}
+        }
+
+        if (recoveredFbUrl) {
+          if (!dryRun) {
+            await db
+              .update(schema.competitorSources)
+              .set({
+                canonicalUrl: recoveredFbUrl,
+                externalAccountId: extractExternalAccountId("facebook", recoveredFbUrl),
+                status: "ACTIVE",
+                activityState: "UNSUPPORTED_PROVIDER",
+                metadata: { ...meta, repairedFromTruncatedUrl: url, acquisitionSupport: "UNSUPPORTED" },
+              })
+              .where(eq(schema.competitorSources.id, src.id));
+          }
+          report.repairedSources.push({
+            sourceId: src.id,
+            competitorId: comp.id,
+            platform: plat,
+            previousUrl: url,
+            repairedUrl: recoveredFbUrl,
+          });
+        } else {
+          if (!dryRun) {
+            await db
+              .update(schema.competitorSources)
+              .set({
+                status: "DISABLED",
+                activityState: "INVALID_URL_QUARANTINED",
+                metadata: {
+                  ...meta,
+                  quarantinedReason: isTrackingPixel
+                    ? "Facebook tracking pixel URL (facebook.com/tr), not a social profile"
+                    : "Truncated facebook.com/profile.php without numeric id parameter",
+                },
+              })
+              .where(eq(schema.competitorSources.id, src.id));
+          }
+          report.quarantinedSources.push({
+            sourceId: src.id,
+            competitorId: comp.id,
+            competitorName: comp.name,
+            platform: plat,
+            url,
+            reason: isTrackingPixel ? "Facebook tracking pixel (facebook.com/tr)" : "Truncated profile.php without ?id=",
+            preservedTestimonials: 0,
+            removedMisattributedPosts: 0,
+          });
+        }
+        continue;
+      }
+    }
+
+    // 3B. Verify external search-discovered social accounts (e.g. @thythickmomma on SongGifts) and platform-owned accounts (@appstore)
+    if (["INSTAGRAM", "TIKTOK", "YOUTUBE", "X", "FACEBOOK"].includes(plat) && src.status === "ACTIVE") {
+      const handle = src.externalAccountId || extractExternalAccountId(plat, url);
+      const cleanDomain = (comp.websiteUrl || "").replace(/^https?:\/\/(www\.)?/i, "").split("/")[0].toLowerCase();
+      const verMethod = meta.verificationMethod || "NONE";
+
+      // Check if platform-owned (@appstore) or unverified search-matched third-party account
+      const isPlatformAcct = handle ? isPlatformOwnedHandle(handle, cleanDomain) : false;
+      let isMisattributedThirdParty = false;
+
+      if (!isPlatformAcct && verMethod === "DOMAIN_MATCH_SEARCH" && handle) {
+        const ownership = verifySearchCandidateOwnership({
+          platform: plat.toLowerCase() as any,
+          url,
+          handle,
+          title: "",
+          snippet: "",
+          competitorName: comp.name,
+          cleanDomain,
+        });
+        if (!ownership.verified) {
+          isMisattributedThirdParty = true;
+        }
+      }
+
+      if (isPlatformAcct || isMisattributedThirdParty) {
+        const compPosts = await db
+          .select()
+          .from(schema.ciCompetitorPosts)
+          .where(
+            and(
+              eq(schema.ciCompetitorPosts.accountId, accountId),
+              eq(schema.ciCompetitorPosts.competitorId, comp.id),
+              eq(schema.ciCompetitorPosts.platform, plat.toLowerCase())
+            )
+          );
+
+        const brandTokens = [
+          cleanDomain.split(".")[0],
+          comp.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+        ].filter(t => t && t.length >= 3);
+
+        const matchingTestimonialPosts = compPosts.filter(p => {
+          const text = `${p.caption || ""}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+          return brandTokens.some(bt => text.includes(bt));
+        });
+
+        if (!dryRun) {
+          // Preserve customer testimonial posts in evidence_registry
+          for (const tp of matchingTestimonialPosts) {
+            const evId = `ev_test_${createHash("sha256").update(`${campaignId}:${comp.id}:${tp.postId}`).digest("hex").slice(0, 16)}`;
+            await db
+              .insert(schema.evidenceRegistry)
+              .values({
+                id: evId,
+                accountId,
+                campaignId,
+                evidenceUid: `testimonial:${comp.id}:${tp.postId}`,
+                kind: "CUSTOMER_TESTIMONIAL_SOCIAL",
+                sourceTable: "ci_competitor_posts",
+                sourceId: tp.id || tp.postId,
+                label: `Customer testimonial by @${handle} referencing ${comp.name}`,
+                detail: JSON.stringify({
+                  attributedCompetitorId: comp.id,
+                  attributedCompetitorName: comp.name,
+                  authorHandle: handle,
+                  platform: plat.toLowerCase(),
+                  postId: tp.postId,
+                  url: (tp as any).permalink || (tp as any).url || url,
+                  caption: tp.caption,
+                  likes: tp.likes,
+                  comments: tp.comments,
+                  views: tp.views,
+                  timestamp: tp.timestamp,
+                  note: `Customer testimonial post by @${handle} referencing ${comp.name}; preserved as customer voice evidence and removed from competitor owned-profile metrics.`,
+                }),
+                observedAt: tp.timestamp || new Date(),
+              } as any)
+              .onConflictDoNothing();
+          }
+
+          // Quarantine the source
+          await db
+            .update(schema.competitorSources)
+            .set({
+              status: "DISABLED",
+              activityState: isPlatformAcct ? "QUARANTINED_PLATFORM_ACCOUNT" : "QUARANTINED_TESTIMONIAL",
+              metadata: {
+                ...meta,
+                quarantinedReason: isPlatformAcct
+                  ? `Platform-owned account @${handle}`
+                  : `Third-party creator/testimonial account @${handle} not owned by ${comp.name}`,
+                preservedTestimonialCount: matchingTestimonialPosts.length,
+              },
+            })
+            .where(eq(schema.competitorSources.id, src.id));
+
+          // Remove misattributed posts from ci_competitor_posts so competitor metrics are not polluted
+          if (compPosts.length > 0) {
+            await db
+              .delete(schema.ciCompetitorPosts)
+              .where(inArray(schema.ciCompetitorPosts.id, compPosts.map(p => p.id)));
+          }
+        }
+
+        report.quarantinedSources.push({
+          sourceId: src.id,
+          competitorId: comp.id,
+          competitorName: comp.name,
+          platform: plat,
+          url,
+          reason: isPlatformAcct
+            ? `Platform-owned account (@${handle})`
+            : `Third-party testimonial/creator account (@${handle}) misattributed via search snippet mention`,
+          preservedTestimonials: matchingTestimonialPosts.length,
+          removedMisattributedPosts: compPosts.length,
+        });
+        continue;
+      }
+    }
+
+    // 3C. Populate externalAccountId & unsupported provider activityState if missing
+    const extractedExtId = extractExternalAccountId(plat, url);
+    const isUnsupported = ["FACEBOOK", "LINKEDIN", "X"].includes(plat);
+    const needsExtIdUpdate = extractedExtId && src.externalAccountId !== extractedExtId;
+    const needsActivityUpdate = isUnsupported && src.status === "ACTIVE" && src.activityState !== "UNSUPPORTED_PROVIDER";
+
+    if (needsExtIdUpdate || needsActivityUpdate) {
+      if (!dryRun) {
+        await db
+          .update(schema.competitorSources)
+          .set({
+            externalAccountId: extractedExtId || src.externalAccountId,
+            activityState: isUnsupported && src.status === "ACTIVE" ? "UNSUPPORTED_PROVIDER" : src.activityState,
+            metadata: {
+              ...meta,
+              acquisitionSupport: isUnsupported ? "UNSUPPORTED" : "SUPPORTED",
+            },
+          })
+          .where(eq(schema.competitorSources.id, src.id));
+      }
+      if (needsExtIdUpdate) report.populatedExternalAccountIds++;
+    }
+  }
+
+  return report;
+}
+
+function primaryInfoUrl(url: string | null | undefined): string {
+  return url || "primary domain";
 }
 
 /**
@@ -93,6 +816,9 @@ export async function reconcileCompetitors(
   options: ReconcileCompetitorsOptions
 ): Promise<CompetitorReconciliationResult> {
   const { accountId, campaignId, dryRun = false } = options;
+
+  // 0. Run identity unmerge and source attribution repair first so merged businesses are separated before deduplicating same-domain rows
+  await repairCampaignCompetitorIdentitiesAndSources({ accountId, campaignId, dryRun });
 
   // 1. Fetch all competitors for campaign
   const allComps = await db

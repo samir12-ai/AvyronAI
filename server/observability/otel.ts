@@ -128,7 +128,15 @@ export const metrics = {
     "http_request_duration_seconds",
     "HTTP request duration in seconds",
   ),
-  aiCostUsd: new Counter("ai_cost_usd_total", "Total AI provider cost in USD"),
+  aiCostUsd: new Counter("ai_cost_usd_total", "Total known AI provider cost in USD"),
+  aiCallsTotal: new Counter(
+    "ai_calls_total",
+    "Total AI provider attempts and logical requests by provider, model, kind, outcome, and cost_status",
+  ),
+  aiTokensTotal: new Counter(
+    "ai_tokens_total",
+    "Total AI tokens by provider, model, and token_type",
+  ),
   workerTick: new Counter("worker_tick_total", "Total worker tick executions"),
   workerQueueDepth: new Gauge("worker_queue_depth", "Current worker queue depth"),
   // Phase 4 (AI Proposes / Code Validates) — label-less run-completion gauges.
@@ -156,6 +164,8 @@ export function renderMetrics(): string {
   return [
     metrics.httpRequestDuration.render(),
     metrics.aiCostUsd.render(),
+    metrics.aiCallsTotal.render(),
+    metrics.aiTokensTotal.render(),
     metrics.workerTick.render(),
     metrics.workerQueueDepth.render(),
     metrics.aiPathEngineCoverage.render(),
@@ -171,8 +181,45 @@ export function recordHttpRequest(method: string, route: string, status: number,
     durationSeconds,
   );
 }
-export function recordAiCost(provider: string, model: string, costUsd: number): void {
-  metrics.aiCostUsd.inc({ provider, model }, costUsd);
+export function recordAiCost(provider: string, model: string, costUsd: number | null): void {
+  if (costUsd !== null && Number.isFinite(costUsd) && costUsd >= 0) {
+    metrics.aiCostUsd.inc({ provider, model }, costUsd);
+  }
+}
+export function recordAiCallTelemetry(params: {
+  provider: string;
+  model: string;
+  kind: "logical_request" | "provider_attempt";
+  outcome: "success" | "failed" | "timeout" | "circuit_broken";
+  costStatus: "ESTIMATED" | "PROVIDER_REPORTED" | "PRICING_UNKNOWN" | "USAGE_UNAVAILABLE" | "NOT_APPLICABLE";
+  errorCategory?: string;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  reasoningTokens?: number;
+}): void {
+  metrics.aiCallsTotal.inc({
+    provider: params.provider,
+    model: params.model,
+    kind: params.kind,
+    outcome: params.outcome,
+    cost_status: params.costStatus,
+    ...(params.errorCategory ? { error_category: params.errorCategory } : {}),
+  });
+  if (params.kind === "provider_attempt" && params.outcome === "success") {
+    if (params.inputTokens && params.inputTokens > 0) {
+      metrics.aiTokensTotal.inc({ provider: params.provider, model: params.model, token_type: "input" }, params.inputTokens);
+    }
+    if (params.cachedInputTokens && params.cachedInputTokens > 0) {
+      metrics.aiTokensTotal.inc({ provider: params.provider, model: params.model, token_type: "cached_input" }, params.cachedInputTokens);
+    }
+    if (params.outputTokens && params.outputTokens > 0) {
+      metrics.aiTokensTotal.inc({ provider: params.provider, model: params.model, token_type: "output" }, params.outputTokens);
+    }
+    if (params.reasoningTokens && params.reasoningTokens > 0) {
+      metrics.aiTokensTotal.inc({ provider: params.provider, model: params.model, token_type: "reasoning" }, params.reasoningTokens);
+    }
+  }
 }
 export function recordWorkerTick(worker: string, result: "ok" | "error" | "skipped"): void {
   metrics.workerTick.inc({ worker, result });
@@ -180,3 +227,4 @@ export function recordWorkerTick(worker: string, result: "ok" | "error" | "skipp
 export function setWorkerQueueDepth(worker: string, depth: number): void {
   metrics.workerQueueDepth.set({ worker }, depth);
 }
+

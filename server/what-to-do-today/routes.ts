@@ -8,6 +8,8 @@ import { Router, Request, Response } from "express";
 import { WhatToDoTodayService } from "./service";
 import { TaskBlueprintGenerator } from "./blueprint-generator";
 import { logger } from "../logger";
+import { resolveAccountId } from "../auth";
+import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 
 export const whatToDoTodayRouter = Router();
 
@@ -18,12 +20,21 @@ export const whatToDoTodayRouter = Router();
 whatToDoTodayRouter.get("/today/:campaignId", async (req: Request, res: Response) => {
   try {
     const { campaignId } = req.params;
+    const accountId = resolveAccountId(req as any);
+    try {
+      await assertCampaignBelongsTo(accountId, campaignId);
+    } catch (e) {
+      if (handleOwnershipError(e, res)) return;
+      throw e;
+    }
+
     const date = (req.query.date as string) || undefined;
     const force = req.query.force === "true";
 
-    const payload = await WhatToDoTodayService.getOrCreateTodayPlan(campaignId, date, force);
+    const payload = await WhatToDoTodayService.getOrCreateTodayPlan(campaignId, date, force, accountId);
     return res.json(payload);
   } catch (err: any) {
+    if (handleOwnershipError(err, res)) return;
     logger.error("[WhatToDoTodayRoutes] GET /today error:", err);
     return res.status(500).json({ error: err.message || "Failed to load today's execution plan." });
   }
@@ -36,11 +47,20 @@ whatToDoTodayRouter.get("/today/:campaignId", async (req: Request, res: Response
 whatToDoTodayRouter.post("/generate/:campaignId", async (req: Request, res: Response) => {
   try {
     const { campaignId } = req.params;
+    const accountId = resolveAccountId(req as any);
+    try {
+      await assertCampaignBelongsTo(accountId, campaignId);
+    } catch (e) {
+      if (handleOwnershipError(e, res)) return;
+      throw e;
+    }
+
     const { date, force } = req.body || {};
 
-    const payload = await WhatToDoTodayService.getOrCreateTodayPlan(campaignId, date, force === true);
+    const payload = await WhatToDoTodayService.getOrCreateTodayPlan(campaignId, date, force === true, accountId);
     return res.json(payload);
   } catch (err: any) {
+    if (handleOwnershipError(err, res)) return;
     logger.error("[WhatToDoTodayRoutes] POST /generate error:", err);
     return res.status(500).json({ error: err.message || "Failed to generate daily execution plan." });
   }
@@ -78,9 +98,17 @@ whatToDoTodayRouter.post("/tasks/:taskId/status", updateTaskStatusHandler);
 whatToDoTodayRouter.get("/days/:campaignId", async (req: Request, res: Response) => {
   try {
     const { campaignId } = req.params;
+    const accountId = resolveAccountId(req as any);
+    try {
+      await assertCampaignBelongsTo(accountId, campaignId);
+    } catch (e) {
+      if (handleOwnershipError(e, res)) return;
+      throw e;
+    }
     const days = await WhatToDoTodayService.getExecutionDaysHistory(campaignId);
     return res.json({ days });
   } catch (err: any) {
+    if (handleOwnershipError(err, res)) return;
     logger.error("[WhatToDoTodayRoutes] GET /days error:", err);
     return res.status(500).json({ error: err.message || "Failed to fetch execution days history." });
   }

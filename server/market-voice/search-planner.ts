@@ -431,37 +431,50 @@ CURRENT RUNTIME CONTEXT:
 - Target Market Geography: ${context.targetMarketGeography || "Global / Unspecified"}
 
 CORE CONSTITUTIONAL INVARIANTS:
-1. STRICT NEUTRALITY: You discover where customers talk, what they ask, and what real buyers experience in the market. You DO NOT pre-judge or assume what they hate, struggle with, or complain about.
-   - FORBIDDEN: Do NOT include pre-decided pain queries like "why customers hate [X]", "pricing problems with [X]", "bad quality [X]", or "[X] returns and fit complaints".
-   - REQUIRED: Natural, unbiased search queries like "customer discussions on [X]", "recommendations for [X]", "[X] fabric wear review", "buying advice for [X]".
-2. OFFERING SPECIFICITY (CRITICAL):
-   - Queries MUST be specifically relevant to the canonical Hero Product: "${context.heroProductCanonicalText}"${context.category ? ` and Category: "${context.category}"` : ""}.
-   - FORBIDDEN: Do NOT generate generic queries that drift into broad, unrelated concepts (e.g. DO NOT produce "best summer products", "summer shopping", "general retail deals").
-   - REQUIRED: Ground queries in the actual product type (e.g. "summer modest dresses", "modest dresses fabric breathable review", "hijabi summer outfits styling").
+1. BALANCED DISCOVERY & STRICT NEUTRALITY: You discover where customers talk, what they ask, what they desire, where they express satisfaction or hesitation, and what real buyers experience across the entire customer journey. You MUST capture a balanced spectrum of customer voice—including desires, satisfactions, hesitations, feature requests, and alternatives—and NOT only complaints or pain points.
+   - FORBIDDEN: Do NOT include pre-decided pain queries like "why customers hate [X]", "pricing problems with [X]", "bad quality [X]", or "[X] complaints and returns".
+   - REQUIRED: Natural, unbiased search queries covering positive satisfaction, pre-purchase hesitations, feature desires, and alternative comparisons (e.g. "customer discussions on [X]", "recommendations for [X]", "[X] user experience review", "buying advice for [X]").
+2. OFFERING SPECIFICITY & ANTI-DRIFT ANCHORING (CRITICAL):
+   - Queries MUST be specifically and authentically relevant to the canonical Hero Product: "${context.heroProductCanonicalText}"${context.category ? ` and Category: "${context.category}"` : ""}.
+   - FORBIDDEN - STRICT CATEGORY CONFINEMENT: Do NOT pivot, drift, or substitute the canonical product with unrelated or tangential categories outside the offering domain.
+   - FORBIDDEN: Do NOT generate generic queries that drift into broad, unrelated concepts (e.g. DO NOT produce "best products", "general shopping", "top deals").
+   - REQUIRED: Ground queries dynamically in the actual product type, offering, and category (e.g. "${context.heroProductCanonicalText}"${context.category ? `, "${context.category}"` : ""}).
+   - QUERY ABSTRACTION (WEIGHTS, VOLUMES & SEATS vs PACKAGING/MODALITY NOUNS): When the canonical Hero Product includes catalog weights, packaging sizes, seat numbers, or SKU volume numbers (e.g. "400g", "1kg", "500ml", "100ml", "5 seats", "10 users"), abstract the specific numeric quantity from customer discovery queries (because customers and forum posters search for the core product, format, or capability, NOT the exact catalog SKU number). NEVER strip meaningful product format, packaging, tier, or modality nouns (e.g. "Box", "Set", "Tier", "Enterprise", "Starter", "Bundle", "Assortment"), as these represent authentic purchase formats and buyer intent.
 3. TEMPORAL RELEVANCE & FRESHNESS:
    - This is a current-market discovery run for ${currentYear}.
    - FORBIDDEN: Do NOT include stale historical years (e.g. 2023, 2024, etc.) in search queries.
-   - Natural timeless queries (e.g. "modest summer dresses reviews", "summer hijabi clothing reddit") or queries referencing current trends (${currentYear}) are valid.
+   - Natural timeless queries (e.g. "${context.heroProductCanonicalText} reviews", "${context.category || context.heroProductCanonicalText} advice reddit") or queries referencing current trends (${currentYear}) are valid.
 4. DUAL MARKET SCOPE REPRESENTATION:
    ${context.targetMarketGeography ? `- When target market exists ("${context.targetMarketGeography}"):
      - Produce representation for BOTH "TARGET_MARKET" (at least 2-3 queries with targetGeography: "${context.targetMarketGeography}") AND "GLOBAL_CATEGORY" (at least 2-3 queries with targetGeography: null).
      - TARGET_MARKET queries must focus specifically on customer discussions, shopping experiences, recommendations, or community questions in "${context.targetMarketGeography}".
+     - NATIVE LOCAL LANGUAGE FOR TARGET_MARKET: When target market has a local language (e.g. Turkey -> Turkish, Germany -> German, France -> French, Japan -> Japanese, Arab countries -> Arabic), generate TARGET_MARKET search queries in that market's NATIVE language using natural community idioms for the offering and category. Set languageHint to the ISO code (e.g. "tr", "de", "fr", "ar", "ja") for these queries.
      - GLOBAL_CATEGORY queries seek global category-wide customer voice, reviews, and discussions without geographic restriction.` : `- Produce category-wide "GLOBAL_CATEGORY" queries with targetGeography: null.`}
 5. CUSTOMER-AUTHORED VOICE RETRIEVAL FOCUS (CRITICAL):
-   - Market Voice discovery is specifically designed to retrieve CUSTOMER-AUTHORED and PROSPECTIVE-BUYER discussions, reviews, recommendations, complaints, sizing/fit questions, and firsthand experiences.
-   - FORBIDDEN: Do NOT generate commercial store/merchant discovery queries (e.g. DO NOT produce "clothing stores in [market]", "top brands to shop from", "where to buy online stores"). Commercial competitor discovery is a separate frozen engine.
-   - REQUIRED: Generate queries targeting discussion threads, forum topics, buyer wear tests, reddit advice threads, and customer feedback.
+   - Market Voice discovery is specifically designed to retrieve CUSTOMER-AUTHORED and PROSPECTIVE-BUYER discussions, reviews, recommendations, complaints, selection questions, and firsthand experiences across the entire spectrum (desires, satisfactions, hesitations, feature requests, alternatives).
+   - FORBIDDEN: Do NOT generate commercial store/merchant discovery queries (e.g. DO NOT produce "stores in [market]", "top brands to shop from", "where to buy online"). Commercial competitor discovery is a separate frozen engine.
+   - REQUIRED: Generate queries targeting discussion threads, forum topics, buyer hands-on tests, reddit advice threads, and customer feedback.
 6. INTENT CATEGORY TO DISCOVERY GOAL ALIGNMENT:
-   - CUSTOMER_DISCUSSION: Community discussion topics & advice threads (e.g. "customer discussions on summer modest dresses", "modest dresses styling advice reddit").
-   - CUSTOMER_EXPERIENCE: Firsthand buyer experience & wear feedback (e.g. "firsthand experiences wearing linen modest dresses in summer heat").
-   - CUSTOMER_QUESTION: Pre-purchase buyer questions & sizing/styling advice (e.g. "questions about modest dress fabrics transparency").
-   - PRODUCT_REVIEW: Customer reviews, unboxings, wear feedback (e.g. "summer modest dresses customer reviews wear test", "linen dresses feedback").
-   - RECOMMENDATION: Seeking buying recommendations / advice from shoppers (e.g. "best summer modest dresses recommendations from shoppers").
-   - COMPARISON: Product, material, or fit comparisons (e.g. "linen vs chiffon modest dresses summer comfort").
-   - CATEGORY_DISCUSSION: Industry trend and fabric/style community discussions (e.g. "trends in modest summer dresses ${currentYear} discussion").
-7. ALLOWED PLATFORMS: GOOGLE_SEARCH, REDDIT, WEB_FORUMS. Distribute queries across these platforms only. DO NOT use social media platforms (INSTAGRAM, TIKTOK, YOUTUBE_SEARCH) for broad market voice discovery.
-8. PACKAGE BUDGET: Produce between 8 and 10 high-diversity search intents.
-9. NO DETERMINISTIC FALLBACKS: Produce authentic natural search queries suited for real web/community search engines.
+   - CUSTOMER_DISCUSSION: Community discussion topics & advice threads (e.g. "customer discussions on ${context.heroProductCanonicalText}", "${context.category || context.heroProductCanonicalText} advice reddit").
+   - CUSTOMER_EXPERIENCE: Firsthand buyer experience & real-world feedback (e.g. "firsthand experiences using ${context.heroProductCanonicalText}").
+   - CUSTOMER_QUESTION: Pre-purchase buyer questions & selection advice (e.g. "questions about choosing ${context.heroProductCanonicalText}").
+   - PRODUCT_REVIEW: Customer reviews, evaluations, hands-on feedback (e.g. "${context.heroProductCanonicalText} customer reviews feedback").
+   - RECOMMENDATION: Seeking buying recommendations / advice from peers (e.g. "best ${context.heroProductCanonicalText} recommendations from users").
+   - COMPARISON: Product, feature, or vendor comparisons (e.g. "[Option A] vs [Option B] ${context.category || context.heroProductCanonicalText}").
+   - CATEGORY_DISCUSSION: Industry trend and community discussions (e.g. "trends in ${context.category || context.heroProductCanonicalText} ${currentYear} discussion").
+7. ALLOWED PLATFORMS & SOURCE SHAPING:
+   - Distribute queries across GOOGLE_SEARCH, REDDIT, and WEB_FORUMS (produce at least 2-3 REDDIT and/or WEB_FORUMS intents).
+   - For GOOGLE_SEARCH queries, use natural source-shaping keywords (e.g. "forum", "discussion", "reddit", "community", "reviews", "experiences", "advice") to retrieve authentic customer discussions and avoid plain commercial e-commerce storefronts.
+   - DO NOT use social media platforms (INSTAGRAM, TIKTOK, YOUTUBE_SEARCH) for broad market voice discovery.
+8. CATEGORY DIVERSITY & MULTI-SOURCE BREADTH (CROSS-INDUSTRY):
+   - Queries MUST explore distinct product and market angles tailored dynamically to the Offering, Category, and Target Market across multiple vendors, forums, and communities:
+     a. Functional Performance, Reliability & Core Capability: real-world quality, reliability, performance under operating conditions, durability, key functional trade-offs, service delivery, or feature stability.
+     b. Buyer Requirements, Sizing/Fit, Compatibility & Workflow Integration: how well the offering matches buyer constraints, specifications, usability, sizing/configuration, onboarding, or operational environment.
+     c. Multi-Option / Multi-Vendor Comparisons & Alternatives: honest user reviews and comparisons across alternative providers or approaches in the category.
+     d. Community Discussions, Advice & Unfiltered User Feedback: authentic user discussion forums, Q&A spaces, community threads (e.g., relevant Reddit communities, specialized user forums, consumer review platforms).
+   - FORBIDDEN: Do NOT concentrate search queries on a single brand name or a single review site.
+9. PACKAGE BUDGET: Produce between 8 and 10 high-diversity search intents.
+10. NO DETERMINISTIC FALLBACKS: Produce authentic natural search queries suited for real web/community search engines.
 
 Return ONLY valid JSON matching this exact TypeScript structure:
 {
@@ -592,12 +605,15 @@ CURRENT RUNTIME CONTEXT:
 EVALUATION CRITERIA:
 1. RELEVANCE & OFFERING SPECIFICITY:
    - Does the search query specifically relate to the canonical offering "${context.heroProductCanonicalText}"${context.category ? ` (${context.category})` : ""}?
+   - Queries that abstract catalog SKU weights/volumes/seat numbers into natural product format terms (e.g. product names, bundle types, assortment terms) are HIGHLY RELEVANT and valid.
+   - Queries written in the target market's native language are HIGHLY RELEVANT and valid.
+   - REJECT queries that drift into unrelated or tangential categories outside the offering scope as offeringSpecificity: false.
    - REJECT generic queries that drift away from the specific offering (e.g. "summer products", "stuff to buy", "general accessories").
    - Set offeringSpecificity: true ONLY if the query is specifically about the offering or its category.
 2. TEMPORAL RELEVANCE & FRESHNESS:
    - Is the query temporally fresh for ${currentYear}?
    - REJECT queries containing stale past years (e.g. 2023, 2024, etc.) unless explicitly historical.
-   - Queries without years (e.g. "modest summer dresses reviews") are FRESH and VALID.
+   - Queries without years (e.g. general product reviews and discussions) are FRESH and VALID.
    - Set temporalRelevance: false if query has a stale year.
 3. NEUTRALITY:
    - Does the query remain neutral and unbiased?
@@ -607,14 +623,14 @@ EVALUATION CRITERIA:
    - Are the queries meaningfully diverse across platforms, angles, and categories rather than repetitive rephrasings of the same search?
 5. INTENT CATEGORY FIT (CRITICAL):
    - Does intentCategory accurately represent what the query is attempting to discover?
-   - Brand / store / boutique / seller discovery queries MUST have intentCategory = "COMPETITOR_DISCOVERY".
-   - Customer feedback / video wear reviews / try-ons MUST have intentCategory = "PRODUCT_REVIEW".
-   - Shopper advice seeking / best suggestions MUST have intentCategory = "RECOMMENDATION".
+   - Competitor / vendor / provider discovery queries MUST have intentCategory = "COMPETITOR_DISCOVERY".
+   - Customer feedback / user evaluations / reviews MUST have intentCategory = "PRODUCT_REVIEW".
+   - Peer advice seeking / recommendation queries MUST have intentCategory = "RECOMMENDATION".
    - Forum / community conversations MUST have intentCategory = "CUSTOMER_DISCUSSION".
    - Firsthand user experience reports MUST have intentCategory = "CUSTOMER_EXPERIENCE".
-   - Pre-purchase buyer inquiries / questions MUST have intentCategory = "CUSTOMER_QUESTION".
-   - Comparisons between fabrics/styles MUST have intentCategory = "COMPARISON".
-   - Trend and material discussions MUST have intentCategory = "CATEGORY_DISCUSSION".
+   - Pre-purchase buyer inquiries / selection questions MUST have intentCategory = "CUSTOMER_QUESTION".
+   - Comparisons between alternatives, features, or vendors MUST have intentCategory = "COMPARISON".
+   - Trend, industry, and category discussions MUST have intentCategory = "CATEGORY_DISCUSSION".
    - Set intentCategoryFit: true if intentCategory properly aligns with the query goal. Set intentCategoryFit: false and status: "REPAIR_REQUIRED" if miscategorized.
 6. DUAL MARKET SCOPE MANDATE (CRITICAL - DO NOT REJECT GLOBAL_CATEGORY):
    - A complete package MUST contain BOTH TARGET_MARKET queries AND GLOBAL_CATEGORY queries.
@@ -971,7 +987,7 @@ export interface PlanMarketVoiceResult {
 
 export async function planMarketVoiceSearchIntents(
   rawContext: MarketVoicePlannerContext,
-  options: { maxRetries?: number } = {}
+  options: { maxRetries?: number; repairInstructions?: string } = {}
 ): Promise<PlanMarketVoiceResult> {
   const maxRetries = options.maxRetries ?? 2;
 
@@ -1009,7 +1025,7 @@ export async function planMarketVoiceSearchIntents(
 
   let currentPackage: SearchPlanPackage | null = null;
   let judgeReport: SearchPlanJudgeReport | null = null;
-  let repairPrompt: string | undefined = undefined;
+  let repairPrompt: string | undefined = options.repairInstructions;
   let attempts = 0;
 
   while (attempts <= maxRetries) {

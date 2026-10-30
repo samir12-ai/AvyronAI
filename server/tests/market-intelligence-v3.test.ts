@@ -36,7 +36,6 @@ function makeCompetitor(overrides: Partial<CompetitorInput> = {}, postCount = 0)
     id: `comp-${Math.random().toString(36).slice(2)}`,
     name: `Competitor ${Math.random().toString(36).slice(2, 5)}`,
     platform: "instagram",
-    profileLink: "https://instagram.com/test",
     businessType: "marketing",
     postingFrequency: 5,
     contentTypeRatio: "50/30/20",
@@ -299,8 +298,7 @@ describe("Market Intelligence V3 - Anti-Bias Guard", () => {
       contentTypeRatio: null,
       engagementRatio: null,
       ctaPatterns: null,
-      profileLink: "",
-    }, 2);
+      }, 2);
     const signals = computeAllSignals([comp]);
     if (signals[0].signalCoverageScore < MI_CONFIDENCE.BLOCK_COVERAGE) {
       const guard = evaluateSignalStabilityGuard(signals);
@@ -1831,7 +1829,7 @@ describe("Layer-0 Signal-Only Contract", () => {
 
     it("AW-3) computeAllSignals populates authorityWeight on every result", () => {
       const competitors = [
-        { id: "c1", name: "C1", platform: "instagram", profileLink: "", businessType: "test", postingFrequency: null, contentTypeRatio: null, engagementRatio: null, ctaPatterns: null, discountFrequency: null, hookStyles: null, messagingTone: null, socialProofPresence: null, posts: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}`, caption: "test", likes: 100, comments: 10, mediaType: "image", hashtags: ["test"], timestamp: new Date(Date.now() - i * 86400000).toISOString(), hasCTA: false, hasOffer: false })), comments: [] },
+        { id: "c1", name: "C1", platform: "instagram", businessType: "test", postingFrequency: null, contentTypeRatio: null, engagementRatio: null, ctaPatterns: null, discountFrequency: null, hookStyles: null, messagingTone: null, socialProofPresence: null, posts: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}`, caption: "test", likes: 100, comments: 10, mediaType: "image", hashtags: ["test"], timestamp: new Date(Date.now() - i * 86400000).toISOString(), hasCTA: false, hasOffer: false })), comments: [] },
       ];
       const results = computeAllSignals(competitors);
       expect(results[0].authorityWeight).toBeGreaterThanOrEqual(0);
@@ -1878,7 +1876,7 @@ describe("Layer-0 Signal-Only Contract", () => {
 
     it("LC-4) Lifecycle classification appears on signal results", () => {
       const competitors = [
-        { id: "c1", name: "C1", platform: "instagram", profileLink: "", businessType: "test", postingFrequency: null, contentTypeRatio: null, engagementRatio: null, ctaPatterns: null, discountFrequency: null, hookStyles: null, messagingTone: null, socialProofPresence: null, posts: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}`, caption: "test", likes: 100, comments: 10, mediaType: "image", hashtags: ["test"], timestamp: new Date(Date.now() - i * 86400000).toISOString(), hasCTA: false, hasOffer: false })), comments: [] },
+        { id: "c1", name: "C1", platform: "instagram", businessType: "test", postingFrequency: null, contentTypeRatio: null, engagementRatio: null, ctaPatterns: null, discountFrequency: null, hookStyles: null, messagingTone: null, socialProofPresence: null, posts: Array.from({ length: 15 }, (_, i) => ({ id: `p${i}`, caption: "test", likes: 100, comments: 10, mediaType: "image", hashtags: ["test"], timestamp: new Date(Date.now() - i * 86400000).toISOString(), hasCTA: false, hasOffer: false })), comments: [] },
       ];
       const results = computeAllSignals(competitors);
       expect(results[0].lifecycle).toBe("ACTIVE");

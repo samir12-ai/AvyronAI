@@ -39,7 +39,6 @@ function makeCompetitor(overrides: Partial<CompetitorInput> = {}): CompetitorInp
     id: `comp_${Math.random().toString(36).substr(2, 6)}`,
     name: "Test Competitor",
     platform: "instagram",
-    profileLink: "https://instagram.com/test",
     businessType: "Service",
     postingFrequency: null,
     contentTypeRatio: null,
@@ -153,8 +152,8 @@ describe("Data Acquisition Layer Tests", () => {
 
   it("T4: Duplicate competitorHash → no new snapshot needed", () => {
     const competitors = [
-      makeCompetitor({ id: "c1", name: "Alpha", profileLink: "https://instagram.com/alpha" }),
-      makeCompetitor({ id: "c2", name: "Beta", profileLink: "https://instagram.com/beta" }),
+      makeCompetitor({ id: "c1", name: "Alpha", }),
+      makeCompetitor({ id: "c2", name: "Beta", }),
     ];
 
     const hash1 = computeCompetitorHash(competitors);
@@ -166,7 +165,7 @@ describe("Data Acquisition Layer Tests", () => {
 
     const modifiedCompetitors = [
       ...competitors,
-      makeCompetitor({ id: "c3", name: "Gamma", profileLink: "https://instagram.com/gamma" }),
+      makeCompetitor({ id: "c3", name: "Gamma", }),
     ];
     const hash3 = computeCompetitorHash(modifiedCompetitors);
     expect(hash3).not.toBe(hash1);

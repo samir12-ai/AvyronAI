@@ -14,6 +14,7 @@ import Colors from '@/constants/colors';
 import { getApiUrl, safeApiJson , authFetch } from '@/lib/query-client';
 import { useCampaign } from '@/context/CampaignContext';
 import BuyerConversionJourneyView from '@/components/strategy-plan/BuyerConversionJourneyView';
+import { ProductTruthBadge } from '@/components/ProductTruthBadge';
 
 const C = {
   mint: '#8B5CF6',
@@ -960,6 +961,12 @@ export default function PlanDocumentView({ planId, blueprintId, campaignId: camp
                 <View style={{ backgroundColor: isDark ? '#1F293750' : '#F3F4F650', padding: 12, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: cardBorder }}>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: C.mint, marginBottom: 4 }}>Brand Spine (Umbrella Strategy)</Text>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: textPrimary, marginBottom: 4 }}>{sections.brandSpine.umbrellaPositionName || sections.brandSpine.title}</Text>
+                  <ProductTruthBadge
+                    status={sections.brandSpine.truthStatus}
+                    label={sections.brandSpine.truthLabel}
+                    claimText={sections.brandSpine.contrastAxis}
+                    compact
+                  />
                   {sections.brandSpine.contrastAxis && (
                     <Text style={{ fontSize: 11, color: textSecondary, lineHeight: 16, marginTop: 4 }}>Contrast Axis: {sections.brandSpine.contrastAxis}</Text>
                   )}

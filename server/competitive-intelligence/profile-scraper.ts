@@ -67,6 +67,12 @@ export interface ScrapeResult {
   // class permitted to persist a 24h platform-block cooldown. "TRANSIENT":
   // timeout / breaker-open / unknown — retry next cycle, never a persistent block.
   failureClass: "NONE" | "GENUINE_BLOCK" | "TRANSIENT";
+  isConfirmedEmpty?: boolean;
+  isPartialCoverage?: boolean;
+  postsCount?: number | null;
+  runId?: string;
+  datasetId?: string;
+  usageUsd?: number;
 }
 
 export interface CommentScrapeResult {
@@ -147,7 +153,7 @@ export function getScrapeStats(): ScrapeStats & { successRate: string; blockedRa
   };
 }
 
-const MAX_BATCH_SIZE = 10;
+const MAX_BATCH_SIZE = Number(process.env.IG_MAX_BATCH_PER_HOUR || 50);
 const BATCH_WINDOW_MS = 60 * 60 * 1000;
 
 // P4 isolation seal: per-account batch counter, profile cache, and rate-limit
@@ -188,10 +194,34 @@ export function normalizeInstagramUrl(url: string): string {
   return `https://www.instagram.com/${handle}/`;
 }
 
+const RESERVED_SOCIAL_PATHS = new Set([
+  "p", "reel", "reels", "stories", "explore", "accounts", "direct", "tv", "share", "tag", "tags", "live", "about", "legal", "home"
+]);
+
 export function extractHandleFromUrl(url: string): string {
-  let cleaned = url.trim().split("?")[0].split("#")[0];
-  const match = cleaned.match(/instagram\.com\/([^\/\?#]+)/);
-  return (match ? match[1] : url.replace(/^@/, "").split("/")[0]).toLowerCase();
+  if (!url || typeof url !== "string") return "";
+  let cleaned = url.trim().split("?")[0].split("#")[0].replace(/\/$/, "");
+
+  // Instagram check
+  const igMatch = cleaned.match(/instagram\.com\/([^\/\?#]+)/i);
+  if (igMatch) {
+    const seg = igMatch[1].toLowerCase().replace(/^@/, "");
+    if (RESERVED_SOCIAL_PATHS.has(seg)) return "";
+    return seg;
+  }
+
+  // TikTok check
+  const ttMatch = cleaned.match(/tiktok\.com\/@?([^\/\?#]+)/i);
+  if (ttMatch) {
+    const seg = ttMatch[1].toLowerCase().replace(/^@/, "");
+    if (RESERVED_SOCIAL_PATHS.has(seg)) return "";
+    return seg;
+  }
+
+  // Fallback handle extraction
+  const fallback = cleaned.replace(/^https?:\/\//, "").replace(/^@/, "").split("/")[0].toLowerCase();
+  if (RESERVED_SOCIAL_PATHS.has(fallback) || fallback.includes(".")) return "";
+  return fallback;
 }
 
 const TARGET_POSTS = 12;
@@ -270,15 +300,29 @@ export async function scrapeInstagramProfile(
   const warnings: string[] = [];
   let posts: ScrapedPost[] = [];
   let followers: number | null = null;
+  let postsCount: number | null = null;
   let profileName: string | null = null;
   let collectionMethodUsed: ScrapeResult["collectionMethodUsed"] = "NONE";
   let transportSucceeded = false;
+  let isConfirmedEmpty = false;
+  let isPartialCoverage = false;
+  let runId: string | undefined;
+  let datasetId: string | undefined;
+  let usageUsd: number | undefined;
 
   try {
     const apifyResult = await scrapeInstagramViaApify(handle, maxPosts);
-    // Actor run completed ⇒ transport reached the platform. 0 posts from a
-    // completed run = healthy-empty (failureClass NONE) — never a block.
+    runId = apifyResult.runId ?? undefined;
+    datasetId = apifyResult.datasetId ?? undefined;
+    usageUsd = apifyResult.usageUsd ?? undefined;
+    if (apifyResult.error) {
+      throw new Error(apifyResult.error);
+    }
+    // Actor run completed ⇒ transport reached the platform.
     transportSucceeded = true;
+    isConfirmedEmpty = apifyResult.isConfirmedEmpty === true;
+    isPartialCoverage = apifyResult.isPartialCoverage === true;
+    postsCount = apifyResult.postsCount ?? null;
     posts = apifyResult.posts;
     followers = apifyResult.followers;
     profileName = apifyResult.profileName;
@@ -287,7 +331,7 @@ export async function scrapeInstagramProfile(
       scrapeStats.apifyActorSuccess++;
       console.log(`[CI Scraper] APIFY_ACTOR SUCCESS: ${posts.length} posts, ${followers ?? "unknown"} followers for ${handle}`);
     } else {
-      console.log(`[CI Scraper] APIFY_ACTOR: run completed but no posts extracted for ${handle}`);
+      console.log(`[CI Scraper] APIFY_ACTOR: run completed but no posts extracted for ${handle} (confirmedEmpty=${isConfirmedEmpty}, partial=${isPartialCoverage})`);
     }
   } catch (err: any) {
     // Apify-side errors must never look like an Instagram platform block:
@@ -312,28 +356,40 @@ export async function scrapeInstagramProfile(
     posts: posts.slice(0, maxPosts > 60 ? 60 : maxPosts),
     embeddedComments: [], // profile actor returns no comment threads — see comment actor
     followers,
+    postsCount,
     profileName: profileName || handle,
     collectionMethodUsed,
     attempts,
     warnings,
     paginationPages: 1,
     rawFetchedCount: posts.length,
-    paginationStopReason: posts.length === 0 ? "UNKNOWN_FAILURE" : posts.length >= maxPosts ? "TARGET_REACHED" : "NO_MORE_PAGES",
+    paginationStopReason: posts.length === 0 ? (isConfirmedEmpty ? "NO_MORE_PAGES" : "UNKNOWN_FAILURE") : posts.length >= maxPosts ? "TARGET_REACHED" : "NO_MORE_PAGES",
     // Fix #1a — transport-reached-but-empty ⇒ NONE (never a block). A failed
     // actor run is always TRANSIENT here (see sanitization note above).
     failureClass: posts.length > 0 || transportSucceeded ? "NONE" : "TRANSIENT",
+    isConfirmedEmpty,
+    isPartialCoverage,
+    runId,
+    datasetId,
+    usageUsd,
   };
 
   // P4 isolation seal: cacheKey is already account-namespaced via nsCacheKey above.
-  profileCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  // Only cache when transport succeeded with posts or confirmed-empty so partial header-only responses are not cached for 24h.
+  if (transportSucceeded && (posts.length > 0 || isConfirmedEmpty)) {
+    profileCache.set(cacheKey, { data: result, timestamp: Date.now() });
+  }
   return result;
 }
 
 export interface CommentsForPostsMeta {
   runId: string | null;
+  datasetId: string | null;
   requestedPosts: number;
+  itemsReceived: number;
   perUrlErrors: { url: string; error: string }[];
   durationMs: number;
+  usageUsd: number | null;
   estimatedCostUsd: number;
 }
 
@@ -345,29 +401,107 @@ export interface CommentsForPostsMeta {
  * posts give the densest audience evidence per dollar), capped so that
  * postsUsed × maxPerPost ≤ maxTotalComments.
  */
+export interface PostCandidateForComments {
+  postId: string;
+  shortcode: string;
+  commentCount: number | null;
+  likesCount?: number | null;
+  timestamp?: string | Date | null;
+  mediaType?: string | null;
+}
+
+/**
+ * Composite scoring function for comment acquisition:
+ * Score = 0.40 * NormalizedEngagement + 0.30 * Recency + 0.30 * FormatDiversity
+ * Strict caps: max 3 posts per competitor, 10 comments per post, 25 comments per competitor.
+ */
+export function rankAndSamplePostsForComments(
+  posts: PostCandidateForComments[],
+  maxPosts = 3
+): PostCandidateForComments[] {
+  const eligible = posts.filter(
+    (p) => p.shortcode && (p.commentCount === null || p.commentCount > 0)
+  );
+  if (eligible.length <= maxPosts) return eligible;
+
+  let maxEngagement = 1;
+  const now = Date.now();
+  const times = eligible.map((p) => {
+    const t = p.timestamp ? new Date(p.timestamp).getTime() : now - 30 * 86400 * 1000;
+    return isNaN(t) ? now - 30 * 86400 * 1000 : t;
+  });
+  const minTime = Math.min(...times);
+  const maxTime = Math.max(...times);
+  const timeSpan = Math.max(1, maxTime - minTime);
+
+  for (const p of eligible) {
+    const eng = (p.likesCount || 0) + (p.commentCount || 0) * 2;
+    if (eng > maxEngagement) maxEngagement = eng;
+  }
+
+  // Iteratively pick posts to maximize diversity and score
+  const selected: PostCandidateForComments[] = [];
+  const selectedFormats = new Set<string>();
+  const remaining = [...eligible];
+
+  while (selected.length < maxPosts && remaining.length > 0) {
+    let bestIdx = -1;
+    let bestScore = -1;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const p = remaining[i];
+      const eng = (p.likesCount || 0) + (p.commentCount || 0) * 2;
+      const normalizedEng = eng / maxEngagement;
+
+      const t = p.timestamp ? new Date(p.timestamp).getTime() : minTime;
+      const validTime = isNaN(t) ? minTime : t;
+      const recency = (validTime - minTime) / timeSpan;
+
+      const format = (p.mediaType || "UNKNOWN").toUpperCase();
+      const formatDiversity = selectedFormats.has(format) ? 0.3 : 1.0;
+
+      const score = 0.4 * normalizedEng + 0.3 * recency + 0.3 * formatDiversity;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+
+    if (bestIdx >= 0) {
+      const chosen = remaining.splice(bestIdx, 1)[0];
+      selected.push(chosen);
+      selectedFormats.add((chosen.mediaType || "UNKNOWN").toUpperCase());
+    } else {
+      break;
+    }
+  }
+
+  return selected;
+}
+
 export async function scrapeCommentsForPosts(
-  posts: Array<{ postId: string; shortcode: string; commentCount: number | null }>,
+  posts: Array<PostCandidateForComments>,
   opts: {
     maxTotalComments?: number;
     maxPerPost?: number;
     budgetMs?: number;
   } = {},
 ): Promise<{ totalScraped: number; results: CommentScrapeResult[]; meta: CommentsForPostsMeta }> {
-  const maxTotalComments = opts.maxTotalComments ?? 200;
-  const maxPerPost = opts.maxPerPost ?? 10;
+  // Strict caps: max 25 comments per competitor, max 10 comments per post, max 3 posts
+  const maxTotalComments = Math.min(opts.maxTotalComments ?? 25, 25);
+  const maxPerPost = Math.min(opts.maxPerPost ?? 10, 10);
+  const maxPosts = Math.min(3, Math.max(1, Math.floor(maxTotalComments / maxPerPost)));
 
-  const sortedPosts = [...posts]
-    .filter((p) => p.shortcode && (p.commentCount === null || p.commentCount > 0))
-    .sort((a, b) => (b.commentCount || 0) - (a.commentCount || 0));
-
-  const maxPostsForBudget = Math.max(1, Math.floor(maxTotalComments / maxPerPost));
-  const selected = sortedPosts.slice(0, maxPostsForBudget);
+  const selected = rankAndSamplePostsForComments(posts, maxPosts);
 
   const emptyMeta: CommentsForPostsMeta = {
     runId: null,
+    datasetId: null,
     requestedPosts: selected.length,
+    itemsReceived: 0,
     perUrlErrors: [],
     durationMs: 0,
+    usageUsd: null,
     estimatedCostUsd: 0,
   };
 
@@ -435,7 +569,7 @@ export async function scrapeCommentsForPosts(
   });
 
   console.log(
-    `[CI Scraper] COMMENTS_BATCH_COMPLETE: ${totalScraped} real comments from ${selected.length} posts | run=${actorResult.meta.runId} | cost≈$${actorResult.meta.estimatedCostUsd}`,
+    `[CI Scraper] COMMENTS_BATCH_COMPLETE: ${totalScraped} real comments from ${selected.length} posts | run=${actorResult.meta.runId} | dataset=${actorResult.meta.datasetId} | cost≈$${actorResult.meta.estimatedCostUsd}`,
   );
 
   return {
@@ -443,9 +577,12 @@ export async function scrapeCommentsForPosts(
     results,
     meta: {
       runId: actorResult.meta.runId,
+      datasetId: actorResult.meta.datasetId,
       requestedPosts: selected.length,
+      itemsReceived: actorResult.meta.itemsReceived,
       perUrlErrors: actorResult.meta.perUrlErrors,
       durationMs: actorResult.meta.durationMs,
+      usageUsd: actorResult.meta.usageUsd,
       estimatedCostUsd: actorResult.meta.estimatedCostUsd,
     },
   };

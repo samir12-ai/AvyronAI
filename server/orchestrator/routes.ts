@@ -17,8 +17,14 @@ import {
   planAssumptions,
   orchestratorJobs,
   offerSnapshots,
+  strategyRoots,
+  mechanismSnapshots,
+  awarenessSnapshots,
+  differentiationSnapshots,
+  positioningSnapshots,
+  budgetAllocationSnapshots,
 } from "@shared/schema";
-import { eq, and, or, desc, sql } from "drizzle-orm";
+import { eq, and, or, desc, sql, inArray } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
 import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "../strategic-core/cas-helper";
 import { computeFulfillment } from "../fulfillment-engine";
@@ -27,7 +33,10 @@ import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
 
 import { resolveAccountId } from "../auth";
 import { resolveRunId } from "./run-resolver";
-import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
+import { assertCampaignBelongsTo, handleOwnershipError, resolveApprovalProvenance } from "../auth-helpers";
+import { designateActiveExecutionPlan, resolvePlanContext } from "./execution-plan-resolver";
+import { evaluateTaskEligibility } from "../shared/task-eligibility";
+import { runWithAiCampaignContext } from "../ai-client";
 export function registerOrchestratorV2Routes(app: Express) {
   app.post("/api/orchestrator/run", async (req: Request, res: Response) => {
     try {
@@ -110,15 +119,24 @@ export function registerOrchestratorV2Routes(app: Express) {
         jobId: pendingJobId,
       });
 
-      runOrchestrator({
-        accountId,
-        campaignId: String(campaignId),
-        forceRefresh: forceRefresh || false,
-        resumeFromEngine,
-        pausedJobId: pausedJobId || undefined,
-        preassignedJobId: pausedJobId ? undefined : pendingJobId,
-        scopedEngines: Array.isArray(scopedEngines) ? scopedEngines : undefined,
-      }).then(result => {
+      runWithAiCampaignContext(
+        {
+          accountId,
+          campaignId: String(campaignId),
+          operationType: "strategy_orchestration",
+          runId: pendingJobId,
+        },
+        () =>
+          runOrchestrator({
+            accountId,
+            campaignId: String(campaignId),
+            forceRefresh: forceRefresh || false,
+            resumeFromEngine,
+            pausedJobId: pausedJobId || undefined,
+            preassignedJobId: pausedJobId ? undefined : pendingJobId,
+            scopedEngines: Array.isArray(scopedEngines) ? scopedEngines : undefined,
+          })
+      ).then(result => {
         console.log(`[OrchestratorV2] Run complete: ${result.status} | ${result.completedEngines.length} engines | Plan: ${result.planId || "none"} | NeedsInput: ${result.needsInput?.engine || "none"}`);
       }).catch(err => {
         console.error(`[OrchestratorV2] Run failed:`, err.message);
@@ -211,32 +229,49 @@ export function registerOrchestratorV2Routes(app: Express) {
         throw e;
       }
 
+      const requestedPlanId = (req.query.planId as string) || null;
+      const requestedRunId = (req.query.runId as string) || null;
+
       let resolved;
       try {
-        resolved = await resolveRunId(req.params.campaignId, accountId, (req.query.runId as string) || null);
+        resolved = await resolveRunId(req.params.campaignId, accountId, requestedRunId);
       } catch (e: any) {
         return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
       }
 
-      const [selectedJob] = await db
-        .select({
-          id: orchestratorJobs.id,
-          status: orchestratorJobs.status,
-          error: orchestratorJobs.error,
-          planId: orchestratorJobs.planId,
-          sectionStatuses: orchestratorJobs.sectionStatuses,
-          createdAt: orchestratorJobs.createdAt,
-        })
-        .from(orchestratorJobs)
-        .where(and(
-          eq(orchestratorJobs.id, resolved.runId!),
-          eq(orchestratorJobs.campaignId, req.params.campaignId),
-          eq(orchestratorJobs.accountId, accountId),
-        ))
-        .limit(1);
+      const planCtx = await resolvePlanContext({
+        campaignId: req.params.campaignId,
+        accountId,
+        specificPlanId: requestedPlanId || (!requestedRunId ? undefined : null),
+        specificRunId: requestedRunId || resolved.runId || null,
+        mode: "LATEST_VIEWABLE",
+      });
 
-      let plan: any = null;
-      if (resolved.runId && resolved.planId) {
+      const effectiveRunId = planCtx.jobId || resolved.runId;
+
+      const [selectedJob] = effectiveRunId
+        ? await db
+            .select({
+              id: orchestratorJobs.id,
+              status: orchestratorJobs.status,
+              error: orchestratorJobs.error,
+              planId: orchestratorJobs.planId,
+              sectionStatuses: orchestratorJobs.sectionStatuses,
+              createdAt: orchestratorJobs.createdAt,
+            })
+            .from(orchestratorJobs)
+            .where(
+              and(
+                eq(orchestratorJobs.id, effectiveRunId),
+                eq(orchestratorJobs.campaignId, req.params.campaignId),
+                eq(orchestratorJobs.accountId, accountId)
+              )
+            )
+            .limit(1)
+        : [undefined];
+
+      let plan: any = planCtx.selectedPlan;
+      if (!plan && resolved.runId && resolved.planId) {
         const [p] = await db
           .select()
           .from(strategicPlans)
@@ -244,12 +279,14 @@ export function registerOrchestratorV2Routes(app: Express) {
             and(
               eq(strategicPlans.accountId, accountId),
               eq(strategicPlans.campaignId, req.params.campaignId),
-              eq(strategicPlans.id, resolved.planId),
+              eq(strategicPlans.id, resolved.planId)
             )
           )
           .limit(1);
         plan = p || null;
       }
+
+      const designatedActivePlan = planCtx.designatedActivePlan;
 
       // eslint-disable-next-line semantic/no-semantic-fallback -- G (H8): defensive null coalesce on optional jobId field — no semantic substitution
       const pipelineStatus = selectedJob?.status || null;
@@ -269,11 +306,33 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       if (!plan) {
         return res.json({
-          runId: resolved.runId,
+          runId: effectiveRunId,
           isLatest: resolved.isLatest,
           isStale: resolved.isStale,
           completedAt: resolved.completedAt,
           hasPlan: false,
+          designatedActivePlan: designatedActivePlan ? {
+            id: designatedActivePlan.id,
+            status: designatedActivePlan.status,
+            executionStatus: designatedActivePlan.executionStatus,
+            isDesignatedActive: true,
+            summary: designatedActivePlan.planSummary,
+            rootBundleId: designatedActivePlan.rootBundleId,
+            version: designatedActivePlan.version,
+            createdAt: designatedActivePlan.createdAt,
+            updatedAt: designatedActivePlan.updatedAt,
+          } : null,
+          approvedPlan: designatedActivePlan ? {
+            id: designatedActivePlan.id,
+            status: designatedActivePlan.status,
+            executionStatus: designatedActivePlan.executionStatus,
+            isDesignatedActive: true,
+            summary: designatedActivePlan.planSummary,
+            rootBundleId: designatedActivePlan.rootBundleId,
+            version: designatedActivePlan.version,
+            createdAt: designatedActivePlan.createdAt,
+            updatedAt: designatedActivePlan.updatedAt,
+          } : null,
           pipelineState: selectedJob ? {
             status: pipelineStatus,
             isBlocked: pipelineBlocked,
@@ -286,23 +345,360 @@ export function registerOrchestratorV2Routes(app: Express) {
         });
       }
 
-      const planData = plan.planJson ? JSON.parse(plan.planJson) : {};
+      const safeParse = (val: any) => {
+        if (!val) return null;
+        if (typeof val === "object") return val;
+        try { return JSON.parse(val); } catch { return val; }
+      };
 
-      // Hydrate canonical same-run Offer Snapshot if missing from planJson (Fix 6)
-      if (planData && !planData.offer && (resolved.runId || plan.jobId)) {
-        const targetJobId = resolved.runId || plan.jobId;
-        const [offerSnap] = await db.select().from(offerSnapshots).where(
-          and(
-            eq(offerSnapshots.accountId, accountId),
-            eq(offerSnapshots.campaignId, req.params.campaignId),
-            eq(offerSnapshots.jobId, targetJobId)
-          )
-        ).limit(1);
+      const planData = plan.planJson ? JSON.parse(plan.planJson) : {};
+      const targetJobId = plan.jobId || planCtx.jobId || resolved.runId;
+
+      // 1. Hydrate Strategy Root & approvedMechanism from pinned root
+      if (planData && !planData.strategyRoot && planCtx.strategyRoot) {
+        const sr = planCtx.strategyRoot;
+        planData.strategyRoot = {
+          id: sr.id,
+          runId: sr.runId,
+          status: sr.status,
+          primaryAxis: sr.primaryAxis,
+          contrastAxis: sr.contrastAxisText,
+          approvedPromise: sr.approvedPromise,
+          approvedTransformation: sr.approvedTransformation,
+          approvedMechanism: safeParse(sr.approvedMechanism),
+          approvedPositioningContext: safeParse(sr.approvedPositioningContext),
+        };
+      }
+
+      // 1b. Hydrate canonical Positioning Snapshot with epistemic status, comparison status, and rationale
+      if (planData && (planCtx.snapshotIds.positioningSnapshotId || targetJobId)) {
+        const [posSnap] = planCtx.snapshotIds.positioningSnapshotId
+          ? await db.select().from(positioningSnapshots).where(eq(positioningSnapshots.id, planCtx.snapshotIds.positioningSnapshotId)).limit(1)
+          : await db.select().from(positioningSnapshots).where(
+              and(
+                eq(positioningSnapshots.accountId, accountId),
+                eq(positioningSnapshots.campaignId, req.params.campaignId),
+                eq(positioningSnapshots.jobId, targetJobId!)
+              )
+            ).orderBy(desc(positioningSnapshots.createdAt)).limit(1);
+
+        if (posSnap) {
+          const posTerritories = safeParse(posSnap.territories) || [];
+          const primaryTerr = Array.isArray(posTerritories) && posTerritories.length > 0 ? posTerritories[0] : (safeParse(posSnap.territory) || {});
+          const semCol = primaryTerr?.semanticCollision || {};
+          const comparedCompetitorCount = Number(semCol?.comparedCompetitorCount ?? 0);
+          const comparisonStatus =
+            primaryTerr?.comparisonStatus ||
+            semCol?.comparisonStatus ||
+            (comparedCompetitorCount > 0 ? "COMPARISON_COMPLETED" : "COMPETITIVE_COMPARISON_UNAVAILABLE");
+          const epistemicStatus =
+            primaryTerr?.epistemicStatus ||
+            (comparisonStatus !== "COMPARISON_COMPLETED" || comparedCompetitorCount === 0
+              ? "STRATEGIC_HYPOTHESIS"
+              : "VERIFIED_FACT");
+          const epistemicLabel =
+            primaryTerr?.epistemicLabel ||
+            (comparisonStatus !== "COMPARISON_COMPLETED" || comparedCompetitorCount === 0
+              ? "Proposed Strategic Hypothesis — Requires Market Validation (No Competitor Positioning Compared)"
+              : "Supported by Product Facts");
+          const proposalStatus = primaryTerr?.proposalStatus || (epistemicStatus === "STRATEGIC_HYPOTHESIS" ? "PROPOSED" : "VERIFIED");
+          const positioningOutcomeType =
+            primaryTerr?.positioningOutcomeType ||
+            (comparisonStatus !== "COMPARISON_COMPLETED" || comparedCompetitorCount === 0
+              ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+              : "SUPPORTED_DIFFERENTIATED");
+
+          planData.positioning = {
+            ...(planData.positioning || {}),
+            snapshotId: posSnap.id,
+            jobId: posSnap.jobId,
+            status: posSnap.status,
+            territory: primaryTerr?.name || (typeof posSnap.territory === "string" && !posSnap.territory.startsWith("{") ? posSnap.territory : planCtx.strategyRoot?.primaryAxis || ""),
+            enemyDefinition: posSnap.enemyDefinition || primaryTerr?.enemyDefinition || "",
+            contrastAxis: posSnap.contrastAxis || primaryTerr?.contrastAxis || planCtx.strategyRoot?.contrastAxisText || "",
+            narrativeDirection: posSnap.narrativeDirection || primaryTerr?.narrativeDirection || "",
+            rationale: primaryTerr?.rationale || planData.positioning?.rationale || "",
+            epistemicStatus,
+            epistemicLabel,
+            proposalStatus,
+            verificationStatus: proposalStatus,
+            positioningOutcomeType,
+            comparisonStatus,
+            comparedCompetitorCount,
+          };
+
+          if (planData.strategyRoot && !planData.strategyRoot.rationale && primaryTerr?.rationale) {
+            planData.strategyRoot.rationale = primaryTerr.rationale;
+          }
+          if (planData.strategicSummary) {
+            planData.strategicSummary.epistemicStatus = planData.strategicSummary.epistemicStatus || epistemicStatus;
+            planData.strategicSummary.epistemicLabel = planData.strategicSummary.epistemicLabel || epistemicLabel;
+            planData.strategicSummary.proposalStatus = planData.strategicSummary.proposalStatus || proposalStatus;
+            planData.strategicSummary.comparisonStatus = planData.strategicSummary.comparisonStatus || comparisonStatus;
+            planData.strategicSummary.positioningOutcomeType = planData.strategicSummary.positioningOutcomeType || positioningOutcomeType;
+          }
+          if (planData.businessRepresentation?.strategicSummary) {
+            planData.businessRepresentation.strategicSummary.epistemicStatus = planData.businessRepresentation.strategicSummary.epistemicStatus || epistemicStatus;
+            planData.businessRepresentation.strategicSummary.epistemicLabel = planData.businessRepresentation.strategicSummary.epistemicLabel || epistemicLabel;
+            planData.businessRepresentation.strategicSummary.proposalStatus = planData.businessRepresentation.strategicSummary.proposalStatus || proposalStatus;
+            planData.businessRepresentation.strategicSummary.comparisonStatus = planData.businessRepresentation.strategicSummary.comparisonStatus || comparisonStatus;
+            planData.businessRepresentation.strategicSummary.positioningOutcomeType = planData.businessRepresentation.strategicSummary.positioningOutcomeType || positioningOutcomeType;
+          }
+        }
+      }
+
+      // 2. Hydrate canonical same-run / root-pinned Offer Snapshot if missing from planJson
+      if (planData && !planData.offer && (planCtx.snapshotIds.offerSnapshotId || targetJobId)) {
+        const [offerSnap] = planCtx.snapshotIds.offerSnapshotId
+          ? await db.select().from(offerSnapshots).where(eq(offerSnapshots.id, planCtx.snapshotIds.offerSnapshotId)).limit(1)
+          : await db.select().from(offerSnapshots).where(
+              and(
+                eq(offerSnapshots.accountId, accountId),
+                eq(offerSnapshots.campaignId, req.params.campaignId),
+                eq(offerSnapshots.jobId, targetJobId!)
+              )
+            ).limit(1);
 
         if (offerSnap?.primaryOffer) {
-          planData.offer = typeof offerSnap.primaryOffer === "string"
-            ? JSON.parse(offerSnap.primaryOffer)
-            : offerSnap.primaryOffer;
+          planData.offer = safeParse(offerSnap.primaryOffer);
+        }
+      }
+
+      // 3. Hydrate canonical Mechanism Snapshot if missing from planJson
+      if (planData && (!planData.mechanism || !planData.mechanism.mechanismName) && (planCtx.snapshotIds.mechanismSnapshotId || targetJobId)) {
+        const [mechSnap] = planCtx.snapshotIds.mechanismSnapshotId
+          ? await db.select().from(mechanismSnapshots).where(eq(mechanismSnapshots.id, planCtx.snapshotIds.mechanismSnapshotId)).limit(1)
+          : await db.select().from(mechanismSnapshots).where(
+              and(
+                eq(mechanismSnapshots.accountId, accountId),
+                eq(mechanismSnapshots.campaignId, req.params.campaignId),
+                eq(mechanismSnapshots.jobId, targetJobId!)
+              )
+            ).orderBy(desc(mechanismSnapshots.createdAt)).limit(1);
+
+        if (mechSnap) {
+          const primaryMech = safeParse(mechSnap.primaryMechanism) || {};
+          const steps = safeParse(mechSnap.mechanismSteps) || primaryMech.mechanismSteps || [];
+          const proof = safeParse(mechSnap.proofArtifact) || primaryMech.proofArtifact || null;
+          planData.mechanism = {
+            snapshotId: mechSnap.id,
+            jobId: mechSnap.jobId,
+            status: mechSnap.status,
+            confidenceScore: mechSnap.confidenceScore,
+            mechanismName: primaryMech.mechanismName || primaryMech.name || "",
+            name: primaryMech.mechanismName || primaryMech.name || "",
+            mechanismType: primaryMech.mechanismType || mechSnap.mechanismType || "",
+            mechanismLogic: primaryMech.mechanismLogic || primaryMech.logic || "",
+            mechanismPromise: primaryMech.mechanismPromise || primaryMech.promise || "",
+            whyItWorks: primaryMech.whyItWorks || primaryMech.rationale || "",
+            mechanismSteps: Array.isArray(steps) ? steps : [],
+            proofArtifact: proof,
+            primaryMechanism: primaryMech,
+          };
+          if (planData.brandSpine && !planData.brandSpine.mechanismName && planData.mechanism.mechanismName) {
+            planData.brandSpine.mechanismName = planData.mechanism.mechanismName;
+            planData.brandSpine.mechanismSummary = planData.mechanism.mechanismSteps
+              .map((s: any) => typeof s === "string" ? s : `${s.title || s.name || `Step ${s.step}`}: ${s.description || ""}`)
+              .join(" → ");
+          }
+        }
+      }
+
+      // 4. Hydrate canonical Awareness Snapshot if missing from planJson
+      if (planData && (!planData.awareness || !planData.awareness.oldBelief || !planData.awareness.entryStage) && (planCtx.snapshotIds.awarenessSnapshotId || targetJobId)) {
+        const [awSnap] = planCtx.snapshotIds.awarenessSnapshotId
+          ? await db.select().from(awarenessSnapshots).where(eq(awarenessSnapshots.id, planCtx.snapshotIds.awarenessSnapshotId)).limit(1)
+          : await db.select().from(awarenessSnapshots).where(
+              and(
+                eq(awarenessSnapshots.accountId, accountId),
+                eq(awarenessSnapshots.campaignId, req.params.campaignId),
+                eq(awarenessSnapshots.jobId, targetJobId!)
+              )
+            ).orderBy(desc(awarenessSnapshots.createdAt)).limit(1);
+
+        const existingPrimary = safeParse(planData.awareness?.primaryRoute) || {};
+        const snapPrimary = awSnap ? (safeParse(awSnap.primaryRoute) || {}) : {};
+        const primaryRoute = Object.keys(snapPrimary).length > 0 ? snapPrimary : existingPrimary;
+
+        if (awSnap || Object.keys(primaryRoute).length > 0) {
+          const reframeObj = safeParse(primaryRoute.narrativeReframe) || safeParse(planData.awareness?.narrativeReframe) || null;
+          const mythBreakerObj = safeParse(primaryRoute.mythBreaker) || safeParse(planData.awareness?.mythBreaker) || null;
+          const layerMechs = awSnap ? (safeParse(awSnap.layerResults) || null) : (planData.awareness?.layerMechanisms || null);
+
+          const oldBelief =
+            reframeObj?.currentModel?.statement ||
+            reframeObj?.oldBelief ||
+            mythBreakerObj?.beliefToContradict ||
+            mythBreakerObj?.commonMyth ||
+            planData.awareness?.oldBelief ||
+            "";
+          const newBelief =
+            reframeObj?.newModel?.reclassification ||
+            reframeObj?.newBelief ||
+            mythBreakerObj?.mythBreakerStatement ||
+            mythBreakerObj?.reframeStatement ||
+            planData.awareness?.newBelief ||
+            "";
+          const narrativeReframeText =
+            typeof reframeObj === "string"
+              ? reframeObj
+              : (reframeObj?.newModel?.namedPrinciple
+                  ? `${reframeObj.newModel.namedPrinciple}: ${reframeObj.newModel.reclassification || newBelief}`
+                  : (reframeObj?.bridgeMechanism?.specificMove || mythBreakerObj?.mythBreakerStatement || ""));
+          const entryLogicText =
+            reframeObj?.bridgeMechanism?.specificMove ||
+            mythBreakerObj?.contradictionLogic ||
+            primaryRoute.trustRequirement ||
+            planData.awareness?.entryLogic ||
+            "";
+          const audienceFramingText =
+            primaryRoute.funnelCompatibility ||
+            reframeObj?.discomfortCost?.privateAdmission ||
+            planData.awareness?.audienceFraming ||
+            "";
+          const mythBreakersList = mythBreakerObj
+            ? [{
+                myth: mythBreakerObj.beliefToContradict || mythBreakerObj.commonMyth || oldBelief,
+                reality: mythBreakerObj.mythBreakerStatement || mythBreakerObj.realityTruth || newBelief,
+                contradictionLogic: mythBreakerObj.contradictionLogic || "",
+              }]
+            : [];
+
+          planData.awareness = {
+            ...(planData.awareness || {}),
+            snapshotId: awSnap?.id || planData.awareness?.snapshotId,
+            jobId: awSnap?.jobId || planData.awareness?.jobId || targetJobId,
+            status: awSnap?.status || planData.awareness?.status || "COMPLETE",
+            confidenceScore: awSnap?.awarenessStrengthScore ?? primaryRoute.awarenessStrengthScore ?? null,
+            routeName: primaryRoute.routeName || planData.awareness?.routeName || planData.awarenessRoute || "",
+            entryStage: primaryRoute.entryStage || primaryRoute.entryMechanismType || "proof_led_entry",
+            targetReadinessStage: primaryRoute.targetReadinessStage || "problem_aware",
+            oldBelief,
+            currentBelief: oldBelief,
+            newBelief,
+            desiredBelief: newBelief,
+            narrativeReframe: narrativeReframeText,
+            narrativeReframeDetails: reframeObj,
+            mythBreaker: mythBreakerObj?.mythBreakerStatement || null,
+            mythBreakerDetails: mythBreakerObj,
+            mythBreakers: mythBreakersList,
+            entryLogic: entryLogicText,
+            audienceFraming: audienceFramingText,
+            primaryRoute,
+            layerMechanisms: layerMechs,
+          };
+        }
+      }
+
+      // 5. Hydrate Differentiation Pillars with epistemic classifications from pinned Differentiation Snapshot
+      if (planData && (!Array.isArray(planData.differentiationPillars) || planData.differentiationPillars.length === 0) && (planCtx.snapshotIds.differentiationSnapshotId || targetJobId)) {
+        const [diffSnap] = planCtx.snapshotIds.differentiationSnapshotId
+          ? await db.select().from(differentiationSnapshots).where(eq(differentiationSnapshots.id, planCtx.snapshotIds.differentiationSnapshotId)).limit(1)
+          : await db.select().from(differentiationSnapshots).where(
+              and(
+                eq(differentiationSnapshots.accountId, accountId),
+                eq(differentiationSnapshots.campaignId, req.params.campaignId),
+                eq(differentiationSnapshots.jobId, targetJobId!)
+              )
+            ).orderBy(desc(differentiationSnapshots.createdAt)).limit(1);
+
+        if (diffSnap) {
+          const rawPillars = safeParse(diffSnap.differentiationPillars) || [];
+          const claimAssessments = safeParse(diffSnap.claimAssessments) || [];
+          const snapClassification = diffSnap.differentiationClassification || "SHARED_CAPABILITY_STRATEGIC_EMPHASIS";
+          planData.differentiationPillars = (Array.isArray(rawPillars) ? rawPillars : []).map((p: any, idx: number) => {
+            const pObj = typeof p === "string" ? { pillarName: p, description: p } : p;
+            const matchedAssessment = Array.isArray(claimAssessments)
+              ? claimAssessments.find((ca: any) => ca.claimId === pObj.id || ca.pillarName === pObj.pillarName || ca.title === pObj.title) || claimAssessments[idx]
+              : null;
+            const classification = pObj.differentiationClassification || matchedAssessment?.differentiationClassification || snapClassification;
+            const isStrategicEmphasis = classification === "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" || diffSnap.status === "COMPETITIVE_COMPARISON_UNAVAILABLE";
+            return {
+              ...pObj,
+              snapshotId: diffSnap.id,
+              pillarName: pObj.pillarName || pObj.pillar || pObj.title || pObj.name || `Differentiation Pillar ${idx + 1}`,
+              title: pObj.title || pObj.pillarName || pObj.pillar || pObj.name || `Differentiation Pillar ${idx + 1}`,
+              description: pObj.description || pObj.rationale || pObj.whyItMatters || "",
+              differentiationClassification: classification,
+              competitiveSupport: pObj.competitiveSupport || matchedAssessment?.competitiveSupport || (diffSnap.status === "COMPETITIVE_COMPARISON_UNAVAILABLE" ? "COMPETITIVE_COMPARISON_UNAVAILABLE" : "SHARED_CAPABILITY"),
+              epistemicStatus: pObj.epistemicStatus || (isStrategicEmphasis ? "STRATEGIC_HYPOTHESIS" : "SUPPORTED"),
+              strategicStatus: pObj.strategicStatus || (isStrategicEmphasis ? "STRATEGIC_MARKET_EMPHASIS" : "SUPPORTED"),
+              truthStatus: pObj.truthStatus || (isStrategicEmphasis ? "PROPOSED" : "SUPPORTED"),
+              honestLabel: pObj.honestLabel || (isStrategicEmphasis
+                ? "Supported Product Capability · Strategic Market Emphasis (Competitor Uniqueness Unverified)"
+                : "Supported by Product Truth"),
+              truthLabel: pObj.truthLabel || (isStrategicEmphasis
+                ? "Supported Capability · Strategic Market Emphasis (Competitor Uniqueness Unverified)"
+                : "Supported by Product Truth"),
+              supportingProof: pObj.supportingProof || pObj.evidence || matchedAssessment?.supportingFacts || [],
+              limitations: pObj.limitations || matchedAssessment?.limitations || (diffSnap.status === "COMPETITIVE_COMPARISON_UNAVAILABLE"
+                ? ["Direct competitor feature comparison unavailable; positioned as strategic market emphasis."]
+                : []),
+            };
+          });
+        }
+      }
+
+      // 6. Hydrate Budget Allocation Snapshot from pinned snapshot or targetJobId if missing
+      if (planData && !planData.budgetAllocation && (planCtx.snapshotIds.budgetSnapshotId || targetJobId)) {
+        const [budgetSnap] = planCtx.snapshotIds.budgetSnapshotId
+          ? await db.select().from(budgetAllocationSnapshots).where(eq(budgetAllocationSnapshots.id, planCtx.snapshotIds.budgetSnapshotId)).limit(1)
+          : await db.select().from(budgetAllocationSnapshots).where(
+              and(
+                eq(budgetAllocationSnapshots.accountId, accountId),
+                eq(budgetAllocationSnapshots.campaignId, req.params.campaignId),
+                eq(budgetAllocationSnapshots.jobId, targetJobId!)
+              )
+            ).orderBy(desc(budgetAllocationSnapshots.createdAt)).limit(1);
+
+        if (budgetSnap) {
+          const channelAllocs = (safeParse(budgetSnap.channelAllocations) || []).map((alloc: any) => ({
+            ...alloc,
+            channelId: alloc.channelId || alloc.id || String(alloc.channel || alloc.channelName || "").toLowerCase().replace(/\s+/g, "_"),
+            channelName: alloc.channelName || alloc.channel || alloc.category || "Channel",
+            channel: alloc.channel || alloc.channelName || alloc.category || "Channel",
+            platform: alloc.platform || (String(alloc.channel || "").toLowerCase().includes("instagram") ? "Instagram" : String(alloc.channel || "").toLowerCase().includes("tiktok") ? "TikTok" : alloc.channel),
+            mode: alloc.mode || (String(alloc.channel || "").toLowerCase().includes("organic") ? "ORGANIC" : "PAID"),
+            costCategory: alloc.costCategory || (String(alloc.channel || "").toLowerCase().includes("organic") ? "ORGANIC_PRODUCTION_EFFORT" : "PAID_MEDIA_AD_SPEND"),
+            percentage: Number(alloc.percentage ?? alloc.sharePercent ?? 0),
+            monthlyAmount: Number(alloc.monthlyAmount ?? alloc.monthlyBudget ?? alloc.allocatedAmount ?? 0),
+            monthlyBudget: Number(alloc.monthlyBudget ?? alloc.monthlyAmount ?? alloc.allocatedAmount ?? 0),
+            allocatedAmount: Number(alloc.allocatedAmount ?? alloc.monthlyAmount ?? alloc.monthlyBudget ?? 0),
+          }));
+          planData.budgetAllocation = {
+            snapshotId: budgetSnap.id,
+            jobId: budgetSnap.jobId,
+            status: budgetSnap.status,
+            totalMonthlyBudget: budgetSnap.totalMonthlyBudget,
+            currency: budgetSnap.currency || "USD",
+            channelAllocations: channelAllocs,
+            paidVsOrganicSplit: safeParse(budgetSnap.paidVsOrganicSplit),
+            creativeProductionReserve: safeParse(budgetSnap.creativeProductionReserve),
+            experimentBudget: safeParse(budgetSnap.experimentBudget),
+            scalingRules: safeParse(budgetSnap.scalingRules),
+          };
+        }
+      }
+
+      // 7. Hydrate canonical campaignOffering from Business Understanding if missing from planJson
+      if (planData && !planData.campaignOffering) {
+        try {
+          const buRes = await db.execute(sql`
+            SELECT business_understanding 
+            FROM business_understanding_snapshots 
+            WHERE campaign_id = ${req.params.campaignId} 
+            ORDER BY created_at DESC 
+            LIMIT 1
+          `);
+          if (buRes.rows.length > 0) {
+            const raw = (buRes.rows[0] as any).business_understanding;
+            const parsedBu = typeof raw === "string" ? JSON.parse(raw) : raw;
+            if (parsedBu?.campaignOffering) {
+              planData.campaignOffering = parsedBu.campaignOffering;
+            }
+          }
+        } catch (err: any) {
+          console.warn("[PlanRoute] Could not hydrate campaignOffering:", err.message);
         }
       }
 
@@ -368,23 +764,91 @@ export function registerOrchestratorV2Routes(app: Express) {
         stories: liveRhythm.storiesPerDay - (approvedRhythm.storiesPerDay || 0),
       } : null;
 
+      const allCampaignPlans = await db
+        .select({ id: strategicPlans.id })
+        .from(strategicPlans)
+        .where(
+          and(
+            eq(strategicPlans.accountId, accountId),
+            eq(strategicPlans.campaignId, req.params.campaignId)
+          )
+        );
+      const totalPlanRevisions = allCampaignPlans.length;
+      const activePlanVersion = designatedActivePlan?.version ?? plan.version ?? null;
+      const rootBundleVersion =
+        designatedActivePlan?.rootBundleVersion ??
+        plan.rootBundleVersion ??
+        planData?.rootBundle?.bundleVersion ??
+        planData?.rootBundle?.version ??
+        null;
+
       res.json({
         runId: resolved.runId,
         isLatest: resolved.isLatest,
         isStale: resolved.isStale,
         completedAt: resolved.completedAt,
         hasPlan: true,
+        activePlanVersion,
+        rootBundleVersion,
+        totalPlanRevisions,
         liveRhythm,
         approvedRhythm,
         rhythmDelta,
+        designatedActivePlan: designatedActivePlan ? {
+          id: designatedActivePlan.id,
+          status: designatedActivePlan.status,
+          executionStatus: designatedActivePlan.executionStatus,
+          isDesignatedActive: true,
+          summary: designatedActivePlan.planSummary,
+          rootBundleId: designatedActivePlan.rootBundleId,
+          rootBundleVersion: designatedActivePlan.rootBundleVersion ?? rootBundleVersion,
+          version: designatedActivePlan.version,
+          activePlanVersion: designatedActivePlan.version,
+          totalPlanRevisions,
+          createdAt: designatedActivePlan.createdAt,
+          updatedAt: designatedActivePlan.updatedAt,
+        } : null,
+        approvedPlan: designatedActivePlan ? {
+          id: designatedActivePlan.id,
+          status: designatedActivePlan.status,
+          executionStatus: designatedActivePlan.executionStatus,
+          isDesignatedActive: true,
+          summary: designatedActivePlan.planSummary,
+          rootBundleId: designatedActivePlan.rootBundleId,
+          rootBundleVersion: designatedActivePlan.rootBundleVersion ?? rootBundleVersion,
+          version: designatedActivePlan.version,
+          activePlanVersion: designatedActivePlan.version,
+          totalPlanRevisions,
+          createdAt: designatedActivePlan.createdAt,
+          updatedAt: designatedActivePlan.updatedAt,
+        } : null,
+        candidateDraftPlan: plan && plan.status === "DRAFT" ? {
+          id: plan.id,
+          status: plan.status,
+          executionStatus: plan.executionStatus,
+          summary: plan.planSummary,
+          rootBundleId: plan.rootBundleId,
+          version: plan.version,
+          createdAt: plan.createdAt,
+          updatedAt: plan.updatedAt,
+        } : null,
         plan: {
           id: plan.id,
+          version: plan.version,
+          activePlanVersion,
+          jobId: plan.jobId,
+          rootBundleId: plan.rootBundleId,
+          rootBundleVersion: plan.rootBundleVersion ?? rootBundleVersion,
+          totalPlanRevisions,
+          strategyRootId: planCtx.strategyRoot?.id || planData?.governance?.strategyRoot?.rootId || planData?._provenance?.strategyRootId || null,
+          isDesignatedActive: Boolean(plan.isDesignatedActive),
           status: plan.status,
           executionStatus: plan.executionStatus,
           summary: plan.planSummary,
           emergencyStopped: plan.emergencyStopped,
           createdAt: plan.createdAt,
           updatedAt: plan.updatedAt,
+          snapshotIds: planCtx.snapshotIds,
           sections: planData,
         },
         requiredWork: work ? {
@@ -485,7 +949,20 @@ export function registerOrchestratorV2Routes(app: Express) {
         .limit(1);
 
       if (!plan) return res.status(404).json({ error: "Plan not found" });
-      if (plan.status !== "DRAFT" && plan.status !== "READY_FOR_REVIEW") {
+
+      let decidedBy: string;
+      try {
+        decidedBy = resolveApprovalProvenance(req, plan);
+      } catch (authErr: any) {
+        if (handleOwnershipError(authErr, res)) return;
+        throw authErr;
+      }
+
+      if (
+        plan.status !== "DRAFT" &&
+        plan.status !== "READY_FOR_REVIEW" &&
+        !(plan.status === "APPROVED" && !plan.isDesignatedActive)
+      ) {
         return res.status(400).json({ error: `Plan is ${plan.status}, not approvable` });
       }
 
@@ -512,7 +989,14 @@ export function registerOrchestratorV2Routes(app: Express) {
         .orderBy(desc(orchestratorJobs.completedAt))
         .limit(1);
 
-      if (plan.jobId && latestCompletedJob && latestCompletedJob.id !== plan.jobId) {
+      if (
+        plan.jobId &&
+        latestCompletedJob &&
+        latestCompletedJob.id !== plan.jobId &&
+        latestCompletedJob.completedAt &&
+        plan.createdAt &&
+        latestCompletedJob.completedAt.getTime() > plan.createdAt.getTime()
+      ) {
         blockReasons.push({
           code: "PLAN_OUTDATED",
           message: `Plan is from a previous pipeline run (${plan.jobId}). A newer run has completed (${latestCompletedJob.id}). Regenerate the plan from the latest run before approving.`,
@@ -587,11 +1071,41 @@ export function registerOrchestratorV2Routes(app: Express) {
         }
       }
 
-      // PLAN_OUTDATED is a structural lifecycle problem and must NOT be
-      // bypassed by forceApprove. Other blockers (root integrity, calendar
-      // deviation) can still be force-approved by an explicit operator.
-      const hasPlanOutdated = blockReasons.some(b => b.code === "PLAN_OUTDATED");
-      const shouldBlock = (hasPlanOutdated || blockReasons.length > 0) && (!forceApprove || hasPlanOutdated);
+      let parsedPlan: any = null;
+      try {
+        parsedPlan = typeof plan.planJson === "string" ? JSON.parse(plan.planJson) : plan.planJson;
+      } catch (pErr: any) {
+        // ignore parse error
+      }
+
+      const governanceBlockers: string[] = parsedPlan?.governance?.approvalBlockers || [];
+      if (Array.isArray(governanceBlockers) && governanceBlockers.length > 0) {
+        for (const blocker of governanceBlockers) {
+          blockReasons.push({
+            code: "GOVERNANCE_BLOCKED",
+            message: blocker,
+            detail: { blocker },
+          });
+        }
+      }
+
+      if (parsedPlan?.consistencyValidation && (parsedPlan.consistencyValidation.checkFailed === true || parsedPlan.consistencyValidation.valid === false || parsedPlan.consistencyValidation.blocking === true)) {
+        blockReasons.push({
+          code: "CONSISTENCY_VALIDATION_FAILED",
+          message: parsedPlan.consistencyValidation.conflict || "Final cross-engine consistency, factual grounding, or input coverage validation did not pass.",
+          detail: parsedPlan.consistencyValidation,
+        });
+      }
+
+      // PLAN_OUTDATED, GOVERNANCE_BLOCKED, and CONSISTENCY_VALIDATION_FAILED (whether deterministic, semantic, or incomplete inputs)
+      // are structural lifecycle and governance problems and must NOT be bypassed by forceApprove.
+      const hasUnbypassableBlocker = blockReasons.some(
+        b =>
+          b.code === "PLAN_OUTDATED" ||
+          b.code === "GOVERNANCE_BLOCKED" ||
+          b.code === "CONSISTENCY_VALIDATION_FAILED"
+      );
+      const shouldBlock = (hasUnbypassableBlocker || blockReasons.length > 0) && (!forceApprove || hasUnbypassableBlocker);
 
       if (shouldBlock) {
         return res.status(409).json({
@@ -599,8 +1113,8 @@ export function registerOrchestratorV2Routes(app: Express) {
           blocked: true,
           warnings,
           blockReasons,
-          message: hasPlanOutdated
-            ? "Plan approval blocked: plan is outdated relative to the latest pipeline run. Regenerate the plan and try again. Force-approve is not permitted for outdated plans."
+          message: hasUnbypassableBlocker
+            ? "Plan approval blocked by governance or lifecycle invariants. Force-approve is not permitted."
             : "Plan approval blocked due to integrity issues. Set force=true to override (not recommended for execution drift without investigating root cause).",
         });
       }
@@ -610,12 +1124,14 @@ export function registerOrchestratorV2Routes(app: Express) {
       // APPROVED/REJECTED between the SELECT above and this write is
       // detected (no rows updated → 409).
       try {
-        await casUpdateStrategicPlanByVersion(
-          planId,
-          plan.version,
-          { status: "APPROVED", updatedAt: new Date() },
-          or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
-        );
+        if (plan.status !== "APPROVED") {
+          await casUpdateStrategicPlanByVersion(
+            planId,
+            plan.version,
+            { status: "APPROVED", updatedAt: new Date() },
+            or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
+          );
+        }
       } catch (casErr: any) {
         if (casErr?.code === "CONCURRENT_MODIFICATION") {
           return res.status(409).json({ error: "Plan was modified concurrently or already approved/rejected" });
@@ -623,15 +1139,24 @@ export function registerOrchestratorV2Routes(app: Express) {
         throw casErr;
       }
 
-      let rhythmSnapshot: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; approvedAt: string } | null = null;
+      let rhythmSnapshot: Record<string, unknown> | null = null;
       try {
         const rhythm = await computeAdaptiveRhythm(plan.campaignId, plan.accountId);
+        const approvedAtIso = new Date().toISOString();
         rhythmSnapshot = {
+          posts_per_week: rhythm.postsPerWeek,
+          reels_per_week: rhythm.reelsPerWeek,
+          carousels_per_week: rhythm.carouselsPerWeek,
+          videos_per_week: (rhythm as any).videosPerWeek ?? 0,
+          stories_per_day: rhythm.storiesPerDay,
+          approved_at: approvedAtIso,
+          schema_version: "v1",
+          // Preserve camelCase compatibility keys for legacy UI readers
           reelsPerWeek: rhythm.reelsPerWeek,
           carouselsPerWeek: rhythm.carouselsPerWeek,
           storiesPerDay: rhythm.storiesPerDay,
           postsPerWeek: rhythm.postsPerWeek,
-          approvedAt: new Date().toISOString(),
+          approvedAt: approvedAtIso,
         };
         await casUpdateStrategicPlan(planId, { approvedRhythmJson: JSON.stringify(rhythmSnapshot) });
       } catch (snapshotErr: any) {
@@ -643,11 +1168,92 @@ export function registerOrchestratorV2Routes(app: Express) {
         accountId: plan.accountId,
         decision: "APPROVED",
         reason: req.body.reason || (warnings.length > 0 ? `Force-approved with warnings: ${warnings.join("; ")}` : "Approved by user"),
-        decidedBy: "client",
+        decidedBy,
         rhythmSnapshotJson: rhythmSnapshot ? JSON.stringify(rhythmSnapshot) : null,
       });
 
-      res.json({ success: true, status: "APPROVED", warnings, approvedRhythm: rhythmSnapshot });
+      // Atomically designate approved plan as active execution plan
+      await designateActiveExecutionPlan({
+        accountId: plan.accountId,
+        campaignId: plan.campaignId,
+        planId,
+        reason: req.body.reason || "plan_approved",
+      });
+
+      // Plan approval promotes ELIGIBLE draft tasks based on structured operational purpose,
+      // parent plan authority, and verified claim entailment.
+      // Tasks advertising ungrounded claims or with unfulfilled dependencies remain in DRAFT.
+      const draftTasks = await db
+        .select()
+        .from(executionTasks)
+        .where(
+          and(
+            eq(executionTasks.planId, planId),
+            eq(executionTasks.accountId, plan.accountId),
+            eq(executionTasks.status, "DRAFT")
+          )
+        );
+
+      let verifiedEvidenceTexts: string[] = [];
+      try {
+        const buRes = await db.execute(sql`
+          SELECT business_understanding 
+          FROM business_understanding_snapshots 
+          WHERE campaign_id = ${plan.campaignId} 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `);
+        if (buRes.rows.length > 0) {
+          const raw = (buRes.rows[0] as any).business_understanding;
+          const parsedBu = typeof raw === "string" ? JSON.parse(raw) : raw;
+          const facts = parsedBu?.campaignOffering?.productTruthFacts || [];
+          verifiedEvidenceTexts = facts.map((f: any) => typeof f === "string" ? f : f.statement || f.fact).filter(Boolean);
+        }
+      } catch (err: any) {
+        console.warn("[ApproveRoute] Could not load verified facts for eligibility:", err.message);
+      }
+
+      const taskEligibilityContext = {
+        planStatus: "APPROVED" as const,
+        isPlanDesignatedActive: true,
+        verifiedEvidenceTexts,
+      };
+
+      const eligibleTaskIds: string[] = [];
+      const restrictedTaskIds: string[] = [];
+
+      for (const t of draftTasks) {
+        const eligibility = evaluateTaskEligibility(t, taskEligibilityContext);
+        if (eligibility.isEligible) {
+          eligibleTaskIds.push(t.id);
+        } else {
+          restrictedTaskIds.push(t.id);
+        }
+      }
+
+      if (eligibleTaskIds.length > 0) {
+        await db
+          .update(executionTasks)
+          .set({ status: "pending", updatedAt: new Date() })
+          .where(
+            and(
+              inArray(executionTasks.id, eligibleTaskIds),
+              eq(executionTasks.accountId, plan.accountId),
+              eq(executionTasks.status, "DRAFT")
+            )
+          );
+      }
+      console.log(`[ApproveRoute] Promoted ${eligibleTaskIds.length} eligible tasks to pending. Retained ${restrictedTaskIds.length} restricted tasks in DRAFT.`);
+
+      try {
+        const { WhatToDoTodayService } = await import("../what-to-do-today/service");
+        await WhatToDoTodayService.getOrCreateTodayPlan(plan.campaignId, undefined, true, plan.accountId);
+        console.log(`[ApproveRoute] Regenerated WhatToDoToday daily tasks for newly approved plan ${plan.id}`);
+      } catch (wtdErr: any) {
+        console.warn(`[ApproveRoute] Could not regenerate WhatToDoToday plan on approval:`, wtdErr?.message || wtdErr);
+      }
+
+      res.json({ success: true, status: "APPROVED", warnings, approvedRhythm: rhythmSnapshot, designatedActive: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
@@ -658,11 +1264,24 @@ export function registerOrchestratorV2Routes(app: Express) {
       const { planId } = req.params;
       const { reason } = req.body;
 
-      const [plan] = await db.select({ id: strategicPlans.id }).from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
+      const [plan] = await db.select().from(strategicPlans).where(eq(strategicPlans.id, planId)).limit(1);
       if (!plan) return res.status(404).json({ error: "Plan not found" });
 
+      let decidedBy: string;
       try {
-        await casUpdateStrategicPlan(planId, { status: "REJECTED", updatedAt: new Date() });
+        decidedBy = resolveApprovalProvenance(req, plan);
+      } catch (authErr: any) {
+        if (handleOwnershipError(authErr, res)) return;
+        throw authErr;
+      }
+
+      try {
+        await casUpdateStrategicPlanByVersion(
+          planId,
+          plan.version,
+          { status: "REJECTED", updatedAt: new Date() },
+          or(eq(strategicPlans.status, "DRAFT"), eq(strategicPlans.status, "READY_FOR_REVIEW")),
+        );
       } catch (casErr: any) {
         if (casErr?.code === "CONCURRENT_MODIFICATION") {
           return res.status(409).json({ error: "Plan was modified concurrently by another request" });
@@ -672,10 +1291,10 @@ export function registerOrchestratorV2Routes(app: Express) {
 
       await db.insert(planApprovals).values({
         planId,
-        accountId: resolveAccountId(req),
+        accountId: plan.accountId,
         decision: "REJECTED",
         reason: reason || "Rejected by user",
-        decidedBy: "client",
+        decidedBy,
       });
 
       res.json({ success: true, status: "REJECTED" });

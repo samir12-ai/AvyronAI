@@ -2,6 +2,7 @@ import { eq, and, desc, sql, inArray, ne, lt } from "drizzle-orm";
 import { db } from "../db";
 import { watchtowerStrategicBriefs, pipelineChangeEvents } from "../../shared/schema";
 import { buildStrategicContext, type EvidenceRegistryEntry } from "./strategic-brief-context";
+import { syncCampaignAdaptiveReasoning } from "../adaptive/case-coordinator";
 import {
   runStrategicInterpreter,
   validateBriefDeterministic,
@@ -298,6 +299,14 @@ export async function executeBriefJob(briefId: string): Promise<void> {
       .where(eq(watchtowerStrategicBriefs.id, briefId));
 
     await promoteToLatest(briefId, briefRow.eventId);
+    try {
+      await syncCampaignAdaptiveReasoning({
+        accountId: briefRow.accountId,
+        campaignId: briefRow.campaignId,
+      });
+    } catch (syncErr) {
+      console.warn(`${LOG} syncCampaignAdaptiveReasoning non-fatal warning:`, (syncErr as Error).message);
+    }
     console.log(`${LOG} Successfully completed brief ${briefId} (status: ready)`);
 
   } catch (err: any) {

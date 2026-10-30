@@ -18,8 +18,22 @@ export interface EvidenceDisposition {
 
 export interface RawEvidenceItem {
   id?: string;
+  canonicalEvidenceId?: string;
+  origin?: "COMPETITOR_COMMENT" | "COMPETITOR_REVIEW" | "MARKET_VOICE" | "COMPETITOR_POST";
   text: string;
   sourceActor: string;
+  competitorId?: string;
+  competitorName?: string;
+  platform?: string;
+  author?: string | null;
+  url?: string;
+  semanticScope?: string;
+  transferability?: string;
+  offeringId?: string;
+  rawEvidenceReference?: {
+    table: string;
+    id: string;
+  };
   authorityClass?: EvidenceAuthorityClass;
   informationValue?: "HIGH" | "MEDIUM" | "LOW" | "NONE";
   safeUses?: string[];
@@ -54,8 +68,22 @@ export interface EvidenceSelectionResult {
 
 interface SelectionCandidate {
   id: string;
+  canonicalEvidenceId?: string;
+  origin?: "COMPETITOR_COMMENT" | "COMPETITOR_REVIEW" | "MARKET_VOICE" | "COMPETITOR_POST";
   text: string;
   sourceActor: string;
+  competitorId?: string;
+  competitorName?: string;
+  platform?: string;
+  author?: string | null;
+  url?: string;
+  semanticScope?: string;
+  transferability?: string;
+  offeringId?: string;
+  rawEvidenceReference?: {
+    table: string;
+    id: string;
+  };
   authorityClass?: EvidenceAuthorityClass;
   informationValue?: "HIGH" | "MEDIUM" | "LOW" | "NONE";
   safeUses?: string[];
@@ -139,7 +167,7 @@ STRICT CLASSIFICATION RULE:
 - NEVER classify a customer complaint, friction, or question as LOW_AUDIENCE_INFORMATION. Only classify pure emojis, spam, or vacuous single-word praise as LOW_AUDIENCE_INFORMATION.
 
 EVIDENCE TO EVALUATE:
-${chunk.map(c => `[ID: ${c.id} | SourceActor: ${c.sourceActor}] "${c.text.slice(0, 350)}"`).join("\n")}
+${chunk.map(c => `[ID: ${c.id} | SourceActor: ${c.sourceActor}] "${c.text.replace(/[\r\n\t]+/g, " ").replace(/"/g, "'").slice(0, 350)}"`).join("\n")}
 
 Return a JSON object with format:
 {
@@ -161,7 +189,7 @@ Return a JSON object with format:
         result = await aiChat({
           messages: [{ role: "user", content: prompt }],
           model: CHUNK_MODEL,
-          max_tokens: 3000,
+          max_tokens: 2500,
           temperature: 0.1,
           response_format: { type: "json_object" },
           accountId: "system",
@@ -346,8 +374,19 @@ export async function selectEvidence(
 ): Promise<EvidenceSelectionResult> {
   const candidates: SelectionCandidate[] = rawEvidence.map((e, idx) => ({
     id: e.id || `EV-${idx}`,
+    canonicalEvidenceId: e.canonicalEvidenceId,
+    origin: e.origin,
     text: e.text,
-    sourceActor: e.sourceActor
+    sourceActor: e.sourceActor,
+    competitorId: e.competitorId || (e as any).actualCompetitorId,
+    competitorName: e.competitorName || (e as any).competitor,
+    platform: e.platform,
+    author: e.author,
+    url: e.url,
+    semanticScope: e.semanticScope,
+    transferability: e.transferability,
+    offeringId: e.offeringId,
+    rawEvidenceReference: e.rawEvidenceReference,
   }));
 
   const { MODEL_CONTEXT_LIMITS } = await import("../shared/token-utils");
@@ -374,10 +413,11 @@ export async function selectEvidence(
   const initialTokens = candidates.reduce((acc, c) => acc + estimateTokens(c.text), 0);
   console.log(`\n[EvidenceSelector] Initial Pool: ${candidates.length} items (${initialTokens} tokens). Strict Budget: ${budget}`);
 
-  // HIERARCHICAL BATCHED CLASSIFICATION (Chunk size 25 with 4-way concurrency)
-  const CHUNK_SIZE = 25;
-  const CONCURRENCY = 2;
+  // HIERARCHICAL BATCHED CLASSIFICATION (Chunk size 35 with 5-way concurrency)
+  const CHUNK_SIZE = 35;
+  const CONCURRENCY = 5;
   const MAX_RETRY_ATTEMPTS = 2;
+  const selectorStartTime = Date.now();
   let repairFeedback: string | undefined;
   let currentCandidates = [...candidates];
   let selectedUnits: AudienceEvidenceUnit[] = [];
@@ -390,6 +430,8 @@ export async function selectEvidence(
     LOW_AUDIENCE_INFORMATION: 0,
     INVALID_UNUSABLE: 0,
   };
+
+  const batchDurations: number[] = [];
 
   for (let attempt = 1; attempt <= MAX_RETRY_ATTEMPTS; attempt++) {
     console.log(`[EvidenceSelector] Authority evaluation attempt ${attempt}/${MAX_RETRY_ATTEMPTS}...`);
@@ -404,12 +446,21 @@ export async function selectEvidence(
     }
 
     const evaluatedCandidates: SelectionCandidate[] = [];
+    const waveCount = Math.ceil(chunks.length / CONCURRENCY);
+    console.log(`[EvidenceSelector] BATCH_PLAN | items=${currentCandidates.length} | chunkSize=${CHUNK_SIZE} | chunks=${chunks.length} | concurrency=${CONCURRENCY} | waves=${waveCount}`);
 
     for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+      const batchStartTime = Date.now();
       const batch = chunks.slice(i, i + CONCURRENCY);
+      const waveIndex = Math.floor(i / CONCURRENCY) + 1;
+      
       const batchResults = await Promise.all(
         batch.map(chunk => evaluateChunkWithAuthority(chunk, task, businessContext, repairFeedback))
       );
+
+      const batchDurationMs = Date.now() - batchStartTime;
+      batchDurations.push(batchDurationMs);
+      console.log(`[EvidenceSelector] WAVE_COMPLETE | wave=${waveIndex}/${waveCount} | chunksInWave=${batch.length} | durationMs=${batchDurationMs}`);
 
       for (let b = 0; b < batch.length; b++) {
         const chunk = batch[b];
@@ -454,8 +505,19 @@ export async function selectEvidence(
     } else {
       selectedUnits = retainedCandidates.map(c => ({
         id: c.id,
+        canonicalEvidenceId: c.canonicalEvidenceId,
+        origin: c.origin,
         text: c.text,
         sourceActor: c.sourceActor,
+        competitorId: c.competitorId,
+        competitorName: c.competitorName,
+        platform: c.platform,
+        author: c.author,
+        url: c.url,
+        semanticScope: c.semanticScope,
+        transferability: c.transferability,
+        offeringId: c.offeringId,
+        rawEvidenceReference: c.rawEvidenceReference,
         authorityClass: c.authorityClass,
         informationValue: c.informationValue,
         safeUses: c.safeUses,
@@ -479,6 +541,12 @@ export async function selectEvidence(
       repairFeedback = `Judge Rejection (${verdict.rejectionCode}): ${verdict.reasons.join("; ")}`;
     }
   }
+
+  const totalSelectorDurationMs = Date.now() - selectorStartTime;
+  const avgBatchMs = batchDurations.length > 0 ? Math.round(batchDurations.reduce((a, b) => a + b, 0) / batchDurations.length) : 0;
+  const slowestBatchMs = batchDurations.length > 0 ? Math.max(...batchDurations) : 0;
+  
+  console.log(`[EvidenceSelector] TIMING_METRICS | totalDurationMs=${totalSelectorDurationMs} | items=${candidates.length} | chunkSize=${CHUNK_SIZE} | concurrency=${CONCURRENCY} | batchesEvaluated=${batchDurations.length} | avgBatchMs=${avgBatchMs} | slowestBatchMs=${slowestBatchMs}`);
 
   const finalTokens = Math.ceil(JSON.stringify(selectedUnits).length / 4);
   console.log(`[EvidenceSelector] Final Evidence Payload: ${selectedUnits.length} units (${finalTokens} tokens). Valid: ${isJudgeValid}. Remaining Capacity: ${budget - finalTokens}`);

@@ -27,7 +27,7 @@ describe("Stabilization Suite", () => {
     const res = await fetch(`${BASE}/api/ci/competitors/analyze-profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "test", profileLink: "https://instagram.com/test" }),
+      body: JSON.stringify({ name: "test", }),
     });
     expect(res.status).toBe(410);
     const data = await res.json();

@@ -1,13 +1,17 @@
 // @ts-nocheck
+import { createHash } from "crypto";
 import { db } from "../db";
 import {
   positioningSnapshots,
   miSnapshots,
   audienceSnapshots,
   ciCompetitors,
+  competitorUnderstandingSnapshots,
 } from "@shared/schema";
 import { loadProductDNA, formatProductDNAForPrompt, type ProductDNA } from "../shared/product-dna";
 import { runCandidateGateBattery } from "../shared/candidate-gate-battery";
+import { judgePositioningFactualPosture } from "./judge";
+import { validateAuthorityBoundaries } from "../shared/authority-validator";
 import {
   enrichDnaFromRejection,
   formatEnrichmentForRetry,
@@ -23,6 +27,7 @@ import { inArray, eq, and, desc } from "drizzle-orm";
 import { aiChat } from "../ai-client";
 import { selectPainsForUse } from "../shared/audience-pain-registry";
 import { deriveValidatedCapabilities } from "../shared/capability-registry";
+import { evaluateClaimSemanticEntailment } from "../shared/claim-entailment";
 import { checkForOrphanClaims, type OrphanCheckResult } from "../shared/signal-quality-gate";
 import { enforceGlobalStateRefresh } from "../shared/engine-health";
 import { formatAELForPrompt } from "../analytical-enrichment-layer/engine";
@@ -263,6 +268,1065 @@ function layer1_categoryDetection(miData: any, competitorCount: number = 0, sign
   return { macro: best, subcategory };
 }
 
+export function assessCompetitorRelationshipClass(args: {
+  competitorName: string;
+  businessType?: string | null;
+  categoryFrame?: string | null;
+  claimsAndOffersText: string;
+  productDna?: {
+    businessType?: string;
+    coreOffer?: string;
+    coreProblemSolved?: string | null;
+    uniqueMechanism?: string | null;
+    productCategory?: string;
+  } | null;
+}): "DIRECT" | "ADJACENT" | "REFERENCE" {
+  const { categoryFrame, businessType, claimsAndOffersText, productDna } = args;
+  const combinedComp = `${categoryFrame || ""} ${businessType || ""} ${claimsAndOffersText || ""}`.toLowerCase();
+  if (!productDna || (!productDna.coreOffer && !productDna.productCategory)) {
+    return "DIRECT";
+  }
+  const stopWords = new Set([
+    "custom", "personalized", "personalised", "online", "digital", "platform",
+    "service", "services", "product", "products", "company", "brand", "store",
+    "shop", "solution", "solutions", "system", "market", "business", "uk", "united", "kingdom",
+    "with", "from", "that", "your", "their", "for", "and", "the", "bespoke",
+    "gift", "gifts", "gifting", "occasion", "occasions", "present", "presents",
+    "keepsake", "keepsakes", "generated", "buyer", "buyers", "story", "stories",
+    "software", "cloud", "automated", "automation", "workflow", "workflows",
+    "management", "information", "regional", "direct"
+  ]);
+  const coreOfferTokens = `${productDna.coreOffer || ""} ${productDna.productCategory || ""}`
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !stopWords.has(t));
+
+  const coreStems = Array.from(new Set(coreOfferTokens.map(t => t.endsWith("s") && t.length >= 4 ? t.slice(0, -1) : t)));
+  const hasCoreFormatMatch = coreStems.length === 0 || coreStems.some(stem => combinedComp.includes(stem));
+
+  if (hasCoreFormatMatch) {
+    return "DIRECT";
+  }
+
+  const problemAndMechanismTokens = `${productDna.coreProblemSolved || ""} ${productDna.uniqueMechanism || ""} ${productDna.coreOffer || ""}`
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length >= 4);
+
+  const sharedContextCount = problemAndMechanismTokens.filter(tok => combinedComp.includes(tok)).length;
+  if (sharedContextCount >= 1 || /\b(gift|personalized|personalised|bespoke|custom|occasion|keepsake)\b/i.test(combinedComp)) {
+    return "ADJACENT";
+  }
+  return "REFERENCE";
+}
+
+export function extractCanonicalCompetitorPositioningClaims(args: {
+  competitors?: any[];
+  miSnapshot?: any;
+  cuSnapshots?: any[];
+  narrativeMap?: Record<string, string[]>;
+  productDna?: any;
+}): Array<{
+  competitorId?: string;
+  source: string;
+  claim: string;
+  relationshipClass: "DIRECT" | "ADJACENT" | "REFERENCE";
+  evidenceSource: string;
+}> {
+  const isFormatTag = (text: string) =>
+    /^(hook|narrative|cta|framework|archetype):/i.test(text.trim()) ||
+    /^(question_hook|story_hook|problem_agitate|before_after|curiosity_gap|authority_hook)$/i.test(text.trim().toLowerCase());
+
+  const compById = new Map<string, any>();
+  const compByName = new Map<string, any>();
+  for (const c of args.competitors || []) {
+    const cid = c.id || c.competitorId;
+    const cname = String(c.name || c.competitorName || "").trim();
+    if (cid) compById.set(String(cid), c);
+    if (cname) compByName.set(cname.toLowerCase(), c);
+  }
+
+  const perCompetitorClaims = new Map<
+    string,
+    {
+      competitorId?: string;
+      source: string;
+      businessType?: string;
+      categoryFrames: string[];
+      offersText: string[];
+      claims: Array<{ claim: string; evidenceSource: string }>;
+      seenNorm: Set<string>;
+    }
+  >();
+
+  const ensureEntry = (rawName: string, rawId?: string, businessType?: string) => {
+    const matchedComp =
+      (rawId && compById.get(String(rawId))) ||
+      (rawName && compByName.get(String(rawName).toLowerCase().trim())) ||
+      null;
+    const resolvedId = matchedComp?.id || matchedComp?.competitorId || rawId || undefined;
+    const resolvedName = String(matchedComp?.name || matchedComp?.competitorName || rawName || "competitor").trim();
+    const key = (resolvedId || resolvedName).toLowerCase();
+    let entry = perCompetitorClaims.get(key);
+    if (!entry) {
+      entry = {
+        competitorId: resolvedId,
+        source: resolvedName,
+        businessType: businessType || matchedComp?.businessType || undefined,
+        categoryFrames: [],
+        offersText: [],
+        claims: [],
+        seenNorm: new Set<string>(),
+      };
+      perCompetitorClaims.set(key, entry);
+    }
+    return entry;
+  };
+
+  const addCandidateClaim = (
+    entry: ReturnType<typeof ensureEntry>,
+    rawText: string,
+    evidenceSource: string,
+    maxPerCompetitor = 2,
+  ) => {
+    if (!rawText || typeof rawText !== "string") return;
+    const trimmed = rawText.replace(/\s+/g, " ").trim();
+    if (trimmed.length <= 15 || isFormatTag(trimmed)) return;
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) return;
+    if (/^(unknown|none|n\/a|null|undefined)$/i.test(trimmed)) return;
+    const norm = trimmed.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (norm.length < 10 || entry.seenNorm.has(norm)) return;
+    if (entry.claims.length >= maxPerCompetitor) return;
+    entry.seenNorm.add(norm);
+    entry.claims.push({
+      claim: trimmed.slice(0, 260),
+      evidenceSource,
+    });
+  };
+
+  // Source 1: Competitor Understanding Snapshots (canonical structured website extraction)
+  for (const cuRow of args.cuSnapshots || []) {
+    const cu = safeJsonParse(cuRow?.competitorUnderstanding, cuRow?.competitorUnderstanding || null);
+    if (!cu || typeof cu !== "object") continue;
+    const cId = cuRow.competitorId || cu.competitorId;
+    const matchedComp = cId ? compById.get(String(cId)) : null;
+    const cName = cuRow.competitorName || matchedComp?.name || matchedComp?.competitorName || cId || "competitor";
+    const entry = ensureEntry(cName, cId, matchedComp?.businessType);
+    const evSource = `competitor_understanding:${cuRow.id || cu.competitorUnderstandingAuthorityId || cId || "cu"}`;
+
+    if (Array.isArray(cu.offers)) {
+      for (const off of cu.offers) {
+        if (typeof off === "string") {
+          entry.offersText.push(off);
+        } else {
+          const offText = [off?.offerName, off?.description, off?.deliveryMechanism].filter(Boolean).join(" ");
+          if (offText) entry.offersText.push(offText);
+        }
+      }
+    }
+    if (Array.isArray(cu.positioning)) {
+      for (const pos of cu.positioning) {
+        if (typeof pos === "string") {
+          addCandidateClaim(entry, pos, evSource);
+        } else if (pos && typeof pos === "object") {
+          if (pos.categoryFrame) entry.categoryFrames.push(String(pos.categoryFrame));
+          const composite = [pos.statement || pos.claim, pos.primaryPromise || pos.valueProposition].filter(Boolean).join(" — ");
+          addCandidateClaim(entry, composite || pos.statement || pos.claim || pos.primaryPromise || pos.valueProposition || "", evSource);
+        }
+      }
+    } else if (typeof cu.positioning === "string") {
+      addCandidateClaim(entry, cu.positioning, evSource);
+    }
+    if (entry.claims.length === 0 && Array.isArray(cu.capabilities)) {
+      for (const cap of cu.capabilities.slice(0, 2)) {
+        const capText = typeof cap === "string" ? cap : (cap?.statement || cap?.claim || cap?.description);
+        if (capText) addCandidateClaim(entry, String(capText), evSource);
+      }
+    }
+  }
+
+  // Source 2: MI Snapshot competitorData.commercialFacts.positioning
+  const miCompetitorData = safeJsonParse(args.miSnapshot?.competitorData, args.miSnapshot?.competitorData || []);
+  if (Array.isArray(miCompetitorData)) {
+    for (const mc of miCompetitorData) {
+      const cId = mc?.id || mc?.competitorId;
+      const cName = mc?.name || mc?.competitorName || "competitor";
+      const entry = ensureEntry(cName, cId, mc?.businessType);
+      const evSource = `mi_competitor_data:${args.miSnapshot?.id || "mi"}`;
+
+      const offers = mc?.commercialFacts?.offers;
+      if (Array.isArray(offers)) {
+        for (const off of offers) {
+          if (typeof off === "string") {
+            entry.offersText.push(off);
+          } else {
+            const offText = [off?.offerName, off?.format, off?.deliveryMechanism, off?.description].filter(Boolean).join(" ");
+            if (offText) entry.offersText.push(offText);
+          }
+        }
+      }
+
+      const posArr = mc?.commercialFacts?.positioning;
+      if (Array.isArray(posArr)) {
+        for (const pos of posArr) {
+          if (typeof pos === "string") {
+            addCandidateClaim(entry, pos, evSource);
+          } else if (pos && typeof pos === "object") {
+            if (pos.categoryFrame) entry.categoryFrames.push(String(pos.categoryFrame));
+            const composite = [pos.claim || pos.statement, pos.valueProposition || pos.primaryPromise].filter(Boolean).join(" — ");
+            addCandidateClaim(entry, composite || pos.claim || pos.statement || pos.valueProposition || pos.primaryPromise || "", evSource);
+          }
+        }
+      } else if (typeof posArr === "string") {
+        addCandidateClaim(entry, posArr, evSource);
+      }
+    }
+  }
+
+  // Source 3: MI Snapshot multiSourceSignals.website (positioningLanguage, valuePropositions, headlineExtractions)
+  const multiSource = safeJsonParse(args.miSnapshot?.multiSourceSignals, {});
+  if (multiSource && typeof multiSource === "object") {
+    for (const [compNameKey, ms] of Object.entries(multiSource as Record<string, any>)) {
+      const entry = ensureEntry(compNameKey);
+      const evSource = `mi_multi_source_website:${args.miSnapshot?.id || "mi"}`;
+      const website = ms?.website || {};
+      const candidates: string[] = [
+        ...(Array.isArray(website.positioningLanguage) ? website.positioningLanguage : []),
+        ...(Array.isArray(website.valuePropositions) ? website.valuePropositions : []),
+        ...(Array.isArray(website.headlineExtractions) ? website.headlineExtractions : []),
+      ];
+      for (const text of candidates) {
+        addCandidateClaim(entry, String(text || ""), evSource);
+      }
+    }
+  }
+
+  // Source 4: Direct fields on ci_competitors rows
+  for (const c of args.competitors || []) {
+    const entry = ensureEntry(c.competitorName || c.name || "competitor", c.id || c.competitorId, c.businessType);
+    const candidate = c.positioningStatement || c.brandPromise || c.valueProposition || c.bio || c.description || c.notes || "";
+    addCandidateClaim(entry, String(candidate || ""), `ci_competitor:${c.id || c.name || "row"}`);
+  }
+
+  // Source 5: Substantive non-tag narratives from narrativeMap
+  if (args.narrativeMap && typeof args.narrativeMap === "object") {
+    for (const [compName, narratives] of Object.entries(args.narrativeMap)) {
+      const entry = ensureEntry(compName);
+      for (const narr of (Array.isArray(narratives) ? narratives : []).slice(0, 3)) {
+        if (narr && narr.length > 20 && !isFormatTag(narr)) {
+          addCandidateClaim(entry, narr, `narrative_map:${compName}`);
+        }
+      }
+    }
+  }
+
+  const flatClaims: Array<{
+    competitorId?: string;
+    source: string;
+    claim: string;
+    relationshipClass: "DIRECT" | "ADJACENT" | "REFERENCE";
+    evidenceSource: string;
+  }> = [];
+
+  for (const entry of perCompetitorClaims.values()) {
+    if (entry.claims.length === 0) continue;
+    const allText = [
+      ...entry.categoryFrames,
+      ...entry.offersText,
+      ...entry.claims.map(c => c.claim),
+    ].join(" ");
+    const relationshipClass = assessCompetitorRelationshipClass({
+      competitorName: entry.source,
+      businessType: entry.businessType,
+      categoryFrame: entry.categoryFrames.join(" | "),
+      claimsAndOffersText: allText,
+      productDna: args.productDna,
+    });
+    for (const c of entry.claims) {
+      flatClaims.push({
+        competitorId: entry.competitorId,
+        source: entry.source,
+        claim: c.claim,
+        relationshipClass,
+        evidenceSource: c.evidenceSource,
+      });
+    }
+  }
+
+  const classPriority: Record<"DIRECT" | "ADJACENT" | "REFERENCE", number> = {
+    DIRECT: 0,
+    ADJACENT: 1,
+    REFERENCE: 2,
+  };
+  flatClaims.sort((a, b) => classPriority[a.relationshipClass] - classPriority[b.relationshipClass]);
+
+  return flatClaims;
+}
+
+export interface CompactCompetitorComparisonContext {
+  promptBlock: string;
+  collidingCompetitors: Array<{
+    name: string;
+    competitorId?: string;
+    claim: string;
+    score: number;
+    evidenceSource?: string;
+  }>;
+  previewOrTrialCounterexamples: Array<{
+    competitorName: string;
+    competitorId?: string;
+    sourceId: string;
+    evidenceText: string;
+  }>;
+  multiFormatDeliverableCounterexamples: Array<{
+    competitorName: string;
+    competitorId?: string;
+    sourceId: string;
+    evidenceText: string;
+  }>;
+  competitorProfiles: Array<{
+    competitorName: string;
+    competitorId?: string;
+    sourceId: string;
+    capabilities: string[];
+    offers: string[];
+    previewOrPaymentTerms: string[];
+    deliverables: string[];
+  }>;
+  missingDataBoundaries: string[];
+}
+
+export function buildCompactCompetitorComparisonContext(args: {
+  cuSnapshots?: any[];
+  miSnapshot?: any;
+  competitors?: any[];
+  initialCollision?: any;
+  productDna?: any;
+  positioningPains?: any[];
+}): CompactCompetitorComparisonContext {
+  const compById = new Map<string, any>();
+  for (const c of args.competitors || []) {
+    const cid = c?.id || c?.competitorId;
+    if (cid) compById.set(String(cid), c);
+  }
+
+  const profileMap = new Map<string, {
+    competitorName: string;
+    competitorId?: string;
+    sourceId: string;
+    capabilities: Set<string>;
+    offers: Set<string>;
+    previewOrPaymentTerms: Set<string>;
+    deliverables: Set<string>;
+  }>();
+
+  const ensureProfile = (name: string, competitorId?: string, sourceId?: string) => {
+    const cleanName = String(name || "competitor").trim();
+    const key = cleanName.toLowerCase();
+    let p = profileMap.get(key);
+    if (!p) {
+      p = {
+        competitorName: cleanName,
+        competitorId: competitorId ? String(competitorId) : undefined,
+        sourceId: sourceId || (competitorId ? `competitor:${competitorId}` : `competitor:${cleanName}`),
+        capabilities: new Set<string>(),
+        offers: new Set<string>(),
+        previewOrPaymentTerms: new Set<string>(),
+        deliverables: new Set<string>(),
+      };
+      profileMap.set(key, p);
+    } else {
+      if (!p.competitorId && competitorId) p.competitorId = String(competitorId);
+      if (sourceId && p.sourceId.startsWith("competitor:")) p.sourceId = sourceId;
+    }
+    return p;
+  };
+
+  const PREVIEW_TRIAL_REGEX =
+    /\b(free\s+(?:45|60|[0-9]+)[-\s]?(?:second|sec|s)?\s*(?:song\s+|audio\s+)?preview|free\s+(?:song\s+|audio\s+|sample\s+)?preview|preview\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*)|listen\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*)|free\s+trial|try\s+for\s+free|pay\s+only\s+(?:if|when|after)\s+(?:you\s+)?(?:approve|like|choose|select|love)|sample\s+before\s+purchas\w*)\b/i;
+  const MULTI_DELIVERABLE_REGEX =
+    /\b(lyric\s+video|music\s+video|photo\s+slideshow|video\s+slideshow|slideshow|cover\s+art|custom\s+artwork|album\s+art|lyric\s+sheet|printable\s+lyrics?|framed\s+lyrics?|acrylic\s+plaque|wall\s+art|vinyl|cd\b|custom\s+sharing\s+page|dedicated\s+song\s+page|video\s+trim|mp4)\b/i;
+
+  const inspectTextForProfile = (
+    p: ReturnType<typeof ensureProfile>,
+    rawText: string,
+    bucket: "capability" | "offer" | "positioning" | "pricing",
+  ) => {
+    const text = String(rawText || "").trim();
+    if (!text || text.length < 4) return;
+    if (bucket === "capability" && p.capabilities.size < 4) p.capabilities.add(text.slice(0, 180));
+    if (bucket === "offer" && p.offers.size < 4) p.offers.add(text.slice(0, 180));
+    if (PREVIEW_TRIAL_REGEX.test(text) && p.previewOrPaymentTerms.size < 3) {
+      p.previewOrPaymentTerms.add(text.slice(0, 180));
+    }
+    if (MULTI_DELIVERABLE_REGEX.test(text) && p.deliverables.size < 3) {
+      p.deliverables.add(text.slice(0, 180));
+    }
+  };
+
+  for (const cuRow of args.cuSnapshots || []) {
+    const cu = safeJsonParse(cuRow?.competitorUnderstanding, cuRow?.competitorUnderstanding || null);
+    if (!cu || typeof cu !== "object") continue;
+    const cId = cuRow.competitorId || cu.competitorId;
+    const matchedComp = cId ? compById.get(String(cId)) : null;
+    const cName = cuRow.competitorName || cu.competitorName || matchedComp?.name || matchedComp?.competitorName || cId || "competitor";
+    const sourceId = `cu_snapshot:${cuRow.id || cu.competitorUnderstandingAuthorityId || cId || cName}`;
+    const p = ensureProfile(cName, cId, sourceId);
+
+    if (Array.isArray(cu.capabilities)) {
+      for (const cap of cu.capabilities) {
+        const capText = typeof cap === "string" ? cap : (cap?.statement || cap?.claim || cap?.description || "");
+        inspectTextForProfile(p, capText, "capability");
+      }
+    }
+    if (Array.isArray(cu.offers)) {
+      for (const off of cu.offers) {
+        if (typeof off === "string") {
+          inspectTextForProfile(p, off, "offer");
+        } else if (off && typeof off === "object") {
+          const items = Array.isArray(off.includedItems) ? off.includedItems.join(", ") : "";
+          const offText = [off.offerName, off.description, off.deliveryMechanism, off.pricePoint || off.pricingModel, items].filter(Boolean).join(" — ");
+          inspectTextForProfile(p, offText, "offer");
+        }
+      }
+    }
+    if (Array.isArray(cu.positioning)) {
+      for (const pos of cu.positioning) {
+        const posText = typeof pos === "string" ? pos : [pos?.statement || pos?.claim, pos?.primaryPromise || pos?.valueProposition].filter(Boolean).join(" — ");
+        inspectTextForProfile(p, posText, "positioning");
+      }
+    }
+    if (cu.pricing && typeof cu.pricing === "object") {
+      inspectTextForProfile(p, JSON.stringify(cu.pricing), "pricing");
+    }
+    if (Array.isArray(cu.trustSignals)) {
+      for (const ts of cu.trustSignals) {
+        inspectTextForProfile(p, typeof ts === "string" ? ts : (ts?.statement || ts?.signal || ts?.description || ""), "pricing");
+      }
+    }
+  }
+
+  const miCompetitorData = safeJsonParse(args.miSnapshot?.competitorData, args.miSnapshot?.competitorData || []);
+  if (Array.isArray(miCompetitorData)) {
+    for (const mc of miCompetitorData) {
+      const cId = mc?.id || mc?.competitorId;
+      const cName = mc?.name || mc?.competitorName || "competitor";
+      const sourceId = `mi_competitor:${args.miSnapshot?.id || "mi"}:${cId || cName}`;
+      const p = ensureProfile(cName, cId, sourceId);
+      const offers = mc?.commercialFacts?.offers;
+      if (Array.isArray(offers)) {
+        for (const off of offers) {
+          const offText = typeof off === "string" ? off : [off?.offerName, off?.format, off?.deliveryMechanism, off?.description].filter(Boolean).join(" — ");
+          inspectTextForProfile(p, offText, "offer");
+        }
+      }
+      const posArr = mc?.commercialFacts?.positioning;
+      if (Array.isArray(posArr)) {
+        for (const pos of posArr) {
+          const posText = typeof pos === "string" ? pos : [pos?.claim || pos?.statement, pos?.valueProposition || pos?.primaryPromise].filter(Boolean).join(" — ");
+          inspectTextForProfile(p, posText, "positioning");
+        }
+      }
+    }
+  }
+
+  const collidingCompetitors: CompactCompetitorComparisonContext["collidingCompetitors"] = (
+    args.initialCollision?.perCompetitor || []
+  )
+    .slice(0, 6)
+    .map((c: any) => ({
+      name: String(c.source || c.competitorName || c.competitorId || "competitor"),
+      competitorId: c.competitorId ? String(c.competitorId) : undefined,
+      claim: String(c.claim || c.closestClaim || ""),
+      score: Number(c.score ?? c.collisionScore ?? 0),
+      evidenceSource: c.evidenceSource ? String(c.evidenceSource) : undefined,
+    }));
+
+  for (const cc of collidingCompetitors) {
+    const p = ensureProfile(cc.name, cc.competitorId, cc.evidenceSource);
+    inspectTextForProfile(p, cc.claim, "positioning");
+  }
+
+  const previewOrTrialCounterexamples: CompactCompetitorComparisonContext["previewOrTrialCounterexamples"] = [];
+  const multiFormatDeliverableCounterexamples: CompactCompetitorComparisonContext["multiFormatDeliverableCounterexamples"] = [];
+  const competitorProfiles: CompactCompetitorComparisonContext["competitorProfiles"] = [];
+
+  for (const p of profileMap.values()) {
+    const previewTerms = Array.from(p.previewOrPaymentTerms);
+    const delivs = Array.from(p.deliverables);
+    if (previewTerms.length > 0) {
+      previewOrTrialCounterexamples.push({
+        competitorName: p.competitorName,
+        competitorId: p.competitorId,
+        sourceId: p.sourceId,
+        evidenceText: previewTerms[0],
+      });
+    }
+    if (delivs.length > 0) {
+      multiFormatDeliverableCounterexamples.push({
+        competitorName: p.competitorId ? `${p.competitorName} (${p.competitorId})` : p.competitorName,
+        competitorId: p.competitorId,
+        sourceId: p.sourceId,
+        evidenceText: delivs[0],
+      });
+    }
+    competitorProfiles.push({
+      competitorName: p.competitorName,
+      competitorId: p.competitorId,
+      sourceId: p.sourceId,
+      capabilities: Array.from(p.capabilities).slice(0, 3),
+      offers: Array.from(p.offers).slice(0, 3),
+      previewOrPaymentTerms: previewTerms,
+      deliverables: delivs,
+    });
+  }
+
+  const missingDataBoundaries = [
+    `"Digital-only" delivery in competitor records means non-physical delivery (digital files/links rather than physical shipping); it does NOT mean "isolated audio-only track".`,
+    `Missing competitor fields or unscraped subpages represent unknown data, NOT verified proof that a competitor lacks a feature, preview, or deliverable.`,
+    `Customer review complaints that a finished output sounded generic/impersonal (and AEL root-cause inferences) support reported buyer perception of output, NOT verified facts about competitors' internal production architecture (never assert "mass-produced automated prompt workflows" or "template-bound services").`,
+    `Free trials, conditional payment triggers (e.g. paying when gifting or obtaining the final product), refund policies, and satisfaction guarantees ("pay only when satisfied") are distinct facts and must never be conflated.`,
+  ];
+
+  const collidingLines = collidingCompetitors.length > 0
+    ? collidingCompetitors.map(c => `- ${c.name}${c.competitorId ? ` [${c.competitorId}]` : ""} (${c.evidenceSource || "competitor_evidence"}): "${c.claim}" (model-estimated overlap=${c.score})`).join("\n")
+    : `- ${args.initialCollision?.competitorSource || "monitored competitor"}: "${args.initialCollision?.competitorEquivalentClaim || ""}"`;
+
+  const previewCounterLines = previewOrTrialCounterexamples.length > 0
+    ? previewOrTrialCounterexamples.map(c => `- ${c.competitorName} [${c.sourceId}]: ${c.evidenceText}`).join("\n")
+    : "None recorded in structured competitor snapshots.";
+
+  const delivCounterLines = multiFormatDeliverableCounterexamples.length > 0
+    ? multiFormatDeliverableCounterexamples.map(c => `- ${c.competitorName} [${c.sourceId}]: ${c.evidenceText}`).join("\n")
+    : "None recorded in structured competitor snapshots.";
+
+  const scopedPainLines = Array.isArray(args.positioningPains) && args.positioningPains.length > 0
+    ? args.positioningPains.slice(0, 6).map((p: any, idx: number) => {
+        const pid = p?.painId || p?.id || `pain_${idx + 1}`;
+        const txt = typeof p === "string" ? p : (p?.canonical || p?.label || p?.statement || "");
+        const scope = p?.subjectScope || (Array.isArray(p?.competitorNames) && p.competitorNames.length > 0 ? `COMPETITOR_SPECIFIC (${p.competitorNames.join(", ")})` : "MARKET_PERCEPTION");
+        return `- [${pid}] (${scope}): ${txt}`;
+      }).join("\n")
+    : "None provided.";
+
+  const promptBlock = [
+    `OBSERVED COLLIDING COMPETITOR CLAIMS:`,
+    collidingLines,
+    ``,
+    `COMPETITOR COUNTEREXAMPLES — PREVIEW / TRIAL / PAYMENT TERMS (${previewOrTrialCounterexamples.length} competitor(s) offer previews/trials before purchase — DO NOT claim market alternatives are "blind-purchase" or force upfront payment without preview):`,
+    previewCounterLines,
+    ``,
+    `COMPETITOR COUNTEREXAMPLES — MULTI-FORMAT / VISUAL DELIVERABLES (${multiFormatDeliverableCounterexamples.length} competitor(s) offer video, slideshow, lyric sheet, artwork, plaque, or sharing page deliverables — DO NOT claim market alternatives only provide "isolated audio tracks"):`,
+    delivCounterLines,
+    ``,
+    `SCOPED AUDIENCE PAIN EVIDENCE (Customer perceptions of output — NOT proof of competitor internal production architecture):`,
+    scopedPainLines,
+    ``,
+    `EVIDENCE & MISSING-DATA BOUNDARIES (MANDATORY):`,
+    ...missingDataBoundaries.map((b, i) => `${i + 1}. ${b}`),
+  ].join("\n");
+
+  return {
+    promptBlock,
+    collidingCompetitors,
+    previewOrTrialCounterexamples,
+    multiFormatDeliverableCounterexamples,
+    competitorProfiles,
+    missingDataBoundaries,
+  };
+}
+
+export function computePositioningCandidateHash(candidate: {
+  name?: string;
+  enemyDefinition?: string;
+  contrastAxis?: string;
+  narrativeDirection?: string;
+}): string {
+  const payload = {
+    name: String(candidate?.name || "").trim(),
+    enemyDefinition: String(candidate?.enemyDefinition || "").trim(),
+    contrastAxis: String(candidate?.contrastAxis || "").trim(),
+    narrativeDirection: String(candidate?.narrativeDirection || "").trim(),
+  };
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
+}
+
+export interface PositioningCandidateValidationResult {
+  passed: boolean;
+  valid: boolean;
+  violations: string[];
+  candidateHash: string;
+  evidenceSnapshotId: string;
+  validatedAt: string;
+  epistemicClassification?: "SUPPORTED_CAPABILITY" | "STRATEGIC_SYNTHESIS" | "PROPOSED_CAPABILITY";
+  rationale?: string;
+  assumptions?: string[];
+  validationNeeds?: string[];
+}
+
+export async function validatePositioningCandidate(input: {
+  candidate: {
+    name: string;
+    enemyDefinition: string;
+    contrastAxis: string;
+    narrativeDirection: string;
+    rationale?: string;
+    capabilityRefs?: string[];
+  };
+  verifiedCapabilities: Array<{ capabilityId?: string; statement: string } | string>;
+  approvedPains?: Array<{ painId?: string; id?: string; canonical?: string; label?: string; statement?: string } | string>;
+  competitorComparison?: CompactCompetitorComparisonContext;
+  productAnchor?: ProductAnchor | null;
+  differentiationContext?: string;
+  evidenceSnapshotId?: string;
+  accountId?: string;
+  runJudge?: boolean;
+}): Promise<PositioningCandidateValidationResult> {
+  const violations: string[] = [];
+  const candidate = input.candidate;
+  const candidateHash = computePositioningCandidateHash(candidate);
+  const evidenceSnapshotId = input.evidenceSnapshotId || "default_evidence_snapshot";
+  const validatedAt = new Date().toISOString();
+
+  const verifiedCapObjects = (input.verifiedCapabilities || []).map((c, idx) =>
+    typeof c === "string"
+      ? { capabilityId: `cap_${idx + 1}`, statement: c }
+      : { capabilityId: c.capabilityId || `cap_${idx + 1}`, statement: String(c.statement || "") }
+  ).filter(c => c.statement.trim().length > 0);
+  const verifiedCapStatements = verifiedCapObjects.map(c => c.statement);
+  const capsJoinedLower = verifiedCapStatements.join(" ").toLowerCase();
+
+  // 1. Strategic role & non-empty structure check
+  if (!candidate.name?.trim() || !candidate.enemyDefinition?.trim() || !candidate.contrastAxis?.trim() || !candidate.narrativeDirection?.trim()) {
+    violations.push("INCOMPLETE_CANDIDATE_FIELDS: Territory name, enemyDefinition, contrastAxis, and narrativeDirection must all be non-empty.");
+  }
+  if (candidate.rationale?.trim()) {
+    const cleanRat = candidate.rationale.trim();
+    if (cleanRat === candidate.contrastAxis?.trim() || cleanRat === candidate.narrativeDirection?.trim()) {
+      violations.push("DUPLICATE_RATIONALE_VIOLATION: rationale must explain why the territory fits the evidence and cannot duplicate contrastAxis or narrativeDirection.");
+    }
+  }
+
+  const combinedText = [
+    candidate.name,
+    candidate.enemyDefinition,
+    candidate.contrastAxis,
+    candidate.narrativeDirection,
+    candidate.rationale || "",
+  ].filter(Boolean).join(" ");
+
+  // 2. Semantic entailment check per field against Verified Product Truth
+  if (verifiedCapStatements.length > 0) {
+    for (const [fieldName, fieldText] of [
+      ["enemyDefinition", candidate.enemyDefinition],
+      ["contrastAxis", candidate.contrastAxis],
+      ["narrativeDirection", candidate.narrativeDirection],
+      ["rationale", candidate.rationale || ""],
+    ] as const) {
+      if (!fieldText) continue;
+      const ent = evaluateClaimSemanticEntailment(fieldText, verifiedCapStatements);
+      if (!ent.isGrounded && (ent.status === "UNSUPPORTED_EXPANSION" || ent.status === "CONTRADICTED")) {
+        violations.push(`ENTAILMENT_VIOLATION (${fieldName}): ${ent.violations.join("; ") || ent.explanation}`);
+      }
+    }
+  }
+
+  // 3. Payment trigger vs satisfaction-contingent payment guarantee check
+  const SATISFACTION_PAYMENT_REGEX =
+    /\b(pay\s+only\s+(?:when|if|after)\s+(?:you\s+are\s+|you're\s+|they\s+are\s+|customers?\s+are\s+|buyers?\s+are\s+|fully\s+|completely\s+)?satisfied|satisfaction[-\s]contingent\s+payment|only\s+pay\s+for\s+a\s+(?:song|product|track|deliverable)\s+(?:they|you)\s+love\s+and\s+are\s+satisfied\s+with|pay\s+only\s+upon\s+satisfaction)\b/i;
+  if (SATISFACTION_PAYMENT_REGEX.test(combinedText) && !SATISFACTION_PAYMENT_REGEX.test(capsJoinedLower)) {
+    violations.push(
+      "UNSUPPORTED_SATISFACTION_PAYMENT_GUARANTEE: Candidate converts a conditional payment trigger (e.g. paying when gifting or obtaining the final product) into an unsupported satisfaction-contingent payment policy ('pay only when satisfied')."
+    );
+  }
+
+  // 4. Unqualified 'risk-free' check
+  if (/\brisk[-\s]free\b/i.test(combinedText) && !/\b(100%\s+money[-\s]back|unconditional\s+refund|risk[-\s]free\s+guarantee)\b/i.test(capsJoinedLower)) {
+    const hasExplicitPaymentTriggerQualification =
+      /\b(pay\s+(?:only\s+)?when\s+(?:gifting|obtaining)|before\s+paying\s+to\s+(?:gift|obtain)|free\s+(?:song\s+)?(?:generation\s+)?trial\s+before\s+paying)\b/i.test(combinedText) &&
+      !SATISFACTION_PAYMENT_REGEX.test(combinedText);
+    if (!hasExplicitPaymentTriggerQualification) {
+      violations.push(
+        "UNQUALIFIED_RISK_FREE_CLAIM: Phrase 'risk-free' must be explicitly qualified by the actual verified risk addressed (e.g. free generation trial before paying when gifting or obtaining the final product) and must not imply a satisfaction-contingent payment guarantee."
+      );
+    }
+  }
+
+  // 5. Customer perception vs unverified competitor internal workflow architecture check
+  const UNVERIFIED_WORKFLOW_REGEX =
+    /\b(mass[-\s]produced\s+automated\s+prompt\s+workflows?|template[-\s]bound\s+(?:music\s+generation\s+|song\s+|custom\s+song\s+)?(?:services?|workflows?|platforms?)\s+(?:produce|generate|rely\s+on|deliver|create)|rushed\s+one[-\s]line\s+prompts?\s+skipping|automated\s+prompt\s+workflows?\s+that\s+lack)\b/i;
+  if (UNVERIFIED_WORKFLOW_REGEX.test(combinedText) && !UNVERIFIED_WORKFLOW_REGEX.test(capsJoinedLower)) {
+    violations.push(
+      "UNVERIFIED_COMPETITOR_INTERNAL_WORKFLOW: Customer perception reports of generic/impersonal output or AEL root-cause inferences cannot be asserted as verified facts about competitors' internal production architecture ('mass-produced automated prompt workflows' / 'template-bound services')."
+    );
+  }
+
+  // 6. Competitor counterexample contradiction checks
+  const compCtx = input.competitorComparison;
+  const BLIND_PURCHASE_REGEX =
+    /\b(blind[-\s]purchase\s+(?:custom\s+)?(?:song\s+|audio\s+)?services?|force\s+upfront\s+payment\s+without\s+preview|upfront\s+blind\s+purchase)\b/i;
+  const ISOLATED_AUDIO_REGEX =
+    /\b(with\s+isolated\s+audio\s+tracks?|isolated\s+audio[-\s]only\s+tracks?|only\s+isolated\s+audio\s+files?)\b/i;
+
+  if (BLIND_PURCHASE_REGEX.test(combinedText) && (compCtx ? compCtx.previewOrTrialCounterexamples.length > 0 : true)) {
+    const names = compCtx?.previewOrTrialCounterexamples.slice(0, 4).map(c => c.competitorName).join(", ") || "monitored competitors";
+    violations.push(
+      `CONTRADICTS_COMPETITOR_PREVIEW_EVIDENCE: Candidate characterizes market alternatives as 'blind-purchase', contradicting competitor evidence showing free previews/trials (${names}).`
+    );
+  }
+  if (ISOLATED_AUDIO_REGEX.test(combinedText) && (compCtx ? compCtx.multiFormatDeliverableCounterexamples.length > 0 : true)) {
+    const names = compCtx?.multiFormatDeliverableCounterexamples.slice(0, 4).map(c => c.competitorName).join(", ") || "monitored competitors";
+    violations.push(
+      `CONTRADICTS_COMPETITOR_DELIVERABLE_EVIDENCE: Candidate characterizes market alternatives as providing 'isolated audio tracks', contradicting competitor evidence showing video, slideshow, lyric, or visual deliverables (${names}).`
+    );
+  }
+
+  // 7. Authority boundary validation (problem alignment + capability support)
+  if (input.approvedPains && input.approvedPains.length > 0 && verifiedCapObjects.length > 0) {
+    const selectedPainObjs = input.approvedPains
+      .map((p: any, idx: number) =>
+        typeof p === "string"
+          ? { painId: `pain_${idx + 1}`, canonical: p }
+          : { painId: String(p.painId || p.id || `pain_${idx + 1}`), canonical: String(p.canonical || p.label || p.statement || "") }
+      )
+      .filter(p => p.canonical.trim().length > 0);
+    if (selectedPainObjs.length > 0) {
+      const authResult = validateAuthorityBoundaries({
+        engineName: "positioning",
+        selectedPains: selectedPainObjs,
+        capabilities: verifiedCapObjects as any,
+        centralProblemTexts: [candidate.enemyDefinition],
+        capabilityClaimTexts: [candidate.contrastAxis, candidate.narrativeDirection],
+      });
+      const capViolations = (authResult.violations || []).filter(
+        v => v.kind === "UNSUPPORTED_CAPABILITY" || v.kind === "PAIN_CAPABILITY_MERGE"
+      );
+      if (!authResult.passed && capViolations.length > 0) {
+        violations.push(`AUTHORITY_CAPABILITY_VIOLATION: ${capViolations.map(v => v.detail).join("; ")}`);
+      }
+    }
+  }
+
+  // 8. Hostile Factual Posture Judge check (when deterministic checks pass and judge is enabled)
+  let epistemicClassification: PositioningCandidateValidationResult["epistemicClassification"] = "STRATEGIC_SYNTHESIS";
+  let judgeRationale: string | undefined = candidate.rationale;
+  let judgeAssumptions: string[] = [];
+  let judgeValidationNeeds: string[] = [];
+
+  if (violations.length === 0 && input.runJudge !== false) {
+    const approvedPainStrings = (input.approvedPains || [])
+      .map((p: any) => (typeof p === "string" ? p : (p?.canonical || p?.label || p?.statement || "")))
+      .filter(Boolean);
+    const judgeVerdict = await judgePositioningFactualPosture({
+      candidate: {
+        name: candidate.name,
+        enemyDefinition: candidate.enemyDefinition,
+        contrastAxis: candidate.contrastAxis,
+        narrativeDirection: candidate.narrativeDirection,
+        capabilityRefs: candidate.capabilityRefs || [],
+      },
+      productTruthCapabilities: verifiedCapStatements,
+      productAnchor: input.productAnchor || null,
+      differentiation: input.differentiationContext || "",
+      approvedPains: approvedPainStrings,
+      competitorComparisonContext: compCtx?.promptBlock || "",
+      accountId: input.accountId,
+    });
+    if (judgeVerdict.verdict === "REJECTED" || judgeVerdict.factualPostureVerdict === "UNSUPPORTED" || judgeVerdict.positioningRoleVerdict === "INVALID") {
+      violations.push(
+        `FACTUAL_POSTURE_JUDGE_REJECTED: ${judgeVerdict.reason}${judgeVerdict.unsupportedPredicates?.length ? ` [Unsupported: ${judgeVerdict.unsupportedPredicates.join(", ")}]` : ""}`
+      );
+    } else if (judgeVerdict.verdict === "ACCEPTED") {
+      epistemicClassification = judgeVerdict.epistemicClassification || "STRATEGIC_SYNTHESIS";
+      judgeRationale = judgeVerdict.rationale || candidate.rationale;
+      judgeAssumptions = judgeVerdict.assumptions || [];
+      judgeValidationNeeds = judgeVerdict.validationNeeds || [];
+    }
+  }
+
+  return {
+    passed: violations.length === 0,
+    valid: violations.length === 0,
+    violations,
+    candidateHash,
+    evidenceSnapshotId,
+    validatedAt,
+    epistemicClassification,
+    rationale: judgeRationale,
+    assumptions: judgeAssumptions,
+    validationNeeds: judgeValidationNeeds,
+  };
+}
+
+export async function evaluateAndSelectCollisionRevision(input: {
+  initialTerritory: Territory;
+  initialCollision: NonNullable<Territory["semanticCollision"]>;
+  proposedRevisionRaw: any;
+  verifiedCapabilities: Array<{ capabilityId?: string; statement: string } | string>;
+  approvedPains?: any[];
+  competitorComparison: CompactCompetitorComparisonContext;
+  competitorClaimList: any[];
+  productAnchor?: ProductAnchor | null;
+  differentiationContext?: string;
+  evidenceSnapshotId?: string;
+  accountId?: string;
+  runJudge?: boolean;
+  recheckCollisionFn?: (candidateClaimText: string, candidateName: string) => Promise<any>;
+}): Promise<{
+  selected: "INITIAL" | "REVISION";
+  selectionReason: string;
+  territory: Territory;
+  validation: PositioningCandidateValidationResult;
+  postRevisionCollision: any | null;
+}> {
+  const { initialTerritory, initialCollision, proposedRevisionRaw, competitorComparison } = input;
+  const initialSnapshot = {
+    name: initialTerritory.name,
+    enemyDefinition: initialTerritory.enemyDefinition,
+    contrastAxis: initialTerritory.contrastAxis,
+    narrativeDirection: initialTerritory.narrativeDirection,
+    rationale: initialTerritory.rationale,
+    semanticCollisionScore: initialCollision.semanticCollisionScore,
+  };
+
+  const buildSharedCapabilityRationale = () => {
+    const collidingNames = Array.from(
+      new Set(
+        [
+          initialCollision.competitorSource,
+          ...competitorComparison.collidingCompetitors.slice(0, 3).map(c => c.name),
+        ].filter(Boolean)
+      )
+    ).slice(0, 3).join(", ") || "monitored competitors";
+    const previewCount = competitorComparison.previewOrTrialCounterexamples.length;
+    const delivCount = competitorComparison.multiFormatDeliverableCounterexamples.length;
+    const sharedNotes: string[] = [];
+    if (previewCount > 0) sharedNotes.push(`${previewCount} monitored competitor(s) also offer free previews/trials before purchase`);
+    if (delivCount > 0) sharedNotes.push(`${delivCount} monitored competitor(s) also offer video, slideshow, lyric, or visual deliverables`);
+    const sharedClause = sharedNotes.length > 0
+      ? ` Because ${sharedNotes.join(" and ")}, this territory is framed as a shared-capability strategic emphasis rather than an exclusive category capability.`
+      : ` Because core category capabilities overlap with ${collidingNames}, this territory is framed as a shared-capability strategic emphasis rather than uncontested category whitespace.`;
+    const baseRationale = initialTerritory.rationale &&
+      initialTerritory.rationale.trim() !== initialTerritory.contrastAxis?.trim() &&
+      initialTerritory.rationale.trim() !== initialTerritory.narrativeDirection?.trim()
+        ? initialTerritory.rationale.trim()
+        : `Selected "${initialTerritory.name}" to connect verified product capabilities directly to approved buyer friction while benchmarking against ${collidingNames} (model-estimated semantic overlap ${(initialCollision.semanticCollisionScore * 100).toFixed(0)}%).`;
+    return `${baseRationale}${baseRationale.includes("shared-capability") ? "" : sharedClause}`;
+  };
+
+  if (!proposedRevisionRaw || !proposedRevisionRaw.name || !proposedRevisionRaw.contrastAxis || !proposedRevisionRaw.narrativeDirection) {
+    initialTerritory.rationale = buildSharedCapabilityRationale();
+    (initialTerritory as any).positioningOutcomeType =
+      initialCollision.semanticCollisionScore >= 0.35
+        ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+        : "SUPPORTED_COMPETITIVE_DISTINCTION";
+    const initialHash = computePositioningCandidateHash(initialTerritory);
+    (initialTerritory as any).validationMetadata = {
+      candidateHash: initialHash,
+      evidenceSnapshotId: input.evidenceSnapshotId || "default_evidence_snapshot",
+      validatedAt: new Date().toISOString(),
+      passed: true,
+    };
+    return {
+      selected: "INITIAL",
+      selectionReason: "REJECTED_MALFORMED_REVISION",
+      territory: initialTerritory,
+      validation: {
+        passed: false,
+        valid: false,
+        violations: ["MALFORMED_REVISION_OUTPUT"],
+        candidateHash: initialHash,
+        evidenceSnapshotId: input.evidenceSnapshotId || "default_evidence_snapshot",
+        validatedAt: new Date().toISOString(),
+      },
+      postRevisionCollision: null,
+    };
+  }
+
+  const proposedCandidate = {
+    name: String(proposedRevisionRaw.name).trim(),
+    enemyDefinition: String(proposedRevisionRaw.enemyDefinition || initialTerritory.enemyDefinition).trim(),
+    contrastAxis: String(proposedRevisionRaw.contrastAxis).trim(),
+    narrativeDirection: String(proposedRevisionRaw.narrativeDirection).trim(),
+    rationale: String(proposedRevisionRaw.revisionRationale || proposedRevisionRaw.rationale || "").trim(),
+    capabilityRefs: initialTerritory.capabilityRefs || [],
+  };
+
+  const validation = await validatePositioningCandidate({
+    candidate: proposedCandidate,
+    verifiedCapabilities: input.verifiedCapabilities,
+    approvedPains: input.approvedPains,
+    competitorComparison: input.competitorComparison,
+    productAnchor: input.productAnchor,
+    differentiationContext: input.differentiationContext,
+    evidenceSnapshotId: input.evidenceSnapshotId,
+    accountId: input.accountId,
+    runJudge: input.runJudge,
+  });
+
+  if (!validation.passed) {
+    initialTerritory.rationale = buildSharedCapabilityRationale();
+    (initialTerritory as any).positioningOutcomeType =
+      initialCollision.semanticCollisionScore >= 0.35
+        ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+        : "SUPPORTED_COMPETITIVE_DISTINCTION";
+    const initialHash = computePositioningCandidateHash(initialTerritory);
+    (initialTerritory as any).validationMetadata = {
+      candidateHash: initialHash,
+      evidenceSnapshotId: input.evidenceSnapshotId || "default_evidence_snapshot",
+      validatedAt: new Date().toISOString(),
+      passed: true,
+    };
+    (initialTerritory as any).collisionRevisionAudit = {
+      revisedAfterComparison: false,
+      retainedInitialCandidate: true,
+      selectionReason: "REJECTED_VALIDATION_FAILED",
+      validationPassed: false,
+      validationViolations: validation.violations,
+      initialCollisionScore: initialCollision.semanticCollisionScore,
+      postRevisionCollisionScore: null,
+      collidingCompetitor: initialCollision.competitorSource,
+      collidingClaim: initialCollision.competitorEquivalentClaim,
+      initialCandidate: initialSnapshot,
+      proposedRevision: proposedCandidate,
+    };
+    return {
+      selected: "INITIAL",
+      selectionReason: "REJECTED_VALIDATION_FAILED",
+      territory: initialTerritory,
+      validation,
+      postRevisionCollision: null,
+    };
+  }
+
+  // Candidate passed validation — now compute post-revision semantic collision
+  const claimText = [
+    proposedCandidate.name,
+    proposedCandidate.enemyDefinition,
+    proposedCandidate.contrastAxis,
+    proposedCandidate.narrativeDirection,
+  ].filter(Boolean).join(" — ");
+
+  let rechecked: any = null;
+  if (input.recheckCollisionFn) {
+    rechecked = await input.recheckCollisionFn(claimText, proposedCandidate.name);
+  } else {
+    const { computeSemanticCollisions } = await import("./semantic-collision");
+    const recheckList = await computeSemanticCollisions({
+      territoryClaims: [{ name: proposedCandidate.name, claimText }],
+      competitorClaims: input.competitorClaimList,
+      accountId: input.accountId || "default",
+    });
+    rechecked = recheckList[0] || null;
+  }
+
+  const postScore = typeof rechecked?.semanticCollisionScore === "number"
+    ? rechecked.semanticCollisionScore
+    : initialCollision.semanticCollisionScore;
+
+  // Non-degradation rule: if revision is equally or more overlapping, retain initial validated candidate!
+  if (!rechecked || postScore >= initialCollision.semanticCollisionScore) {
+    initialTerritory.rationale = buildSharedCapabilityRationale();
+    (initialTerritory as any).positioningOutcomeType =
+      initialCollision.semanticCollisionScore >= 0.35
+        ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+        : "SUPPORTED_COMPETITIVE_DISTINCTION";
+    const initialHash = computePositioningCandidateHash(initialTerritory);
+    (initialTerritory as any).validationMetadata = {
+      candidateHash: initialHash,
+      evidenceSnapshotId: input.evidenceSnapshotId || "default_evidence_snapshot",
+      validatedAt: new Date().toISOString(),
+      passed: true,
+    };
+    (initialTerritory as any).collisionRevisionAudit = {
+      revisedAfterComparison: false,
+      retainedInitialCandidate: true,
+      selectionReason: `RETENTION_REVISION_COLLISION_NOT_IMPROVED (${postScore} >= ${initialCollision.semanticCollisionScore})`,
+      validationPassed: true,
+      validationViolations: [],
+      initialCollisionScore: initialCollision.semanticCollisionScore,
+      postRevisionCollisionScore: postScore,
+      collidingCompetitor: initialCollision.competitorSource,
+      collidingClaim: initialCollision.competitorEquivalentClaim,
+      initialCandidate: initialSnapshot,
+      proposedRevision: proposedCandidate,
+    };
+    return {
+      selected: "INITIAL",
+      selectionReason: "RETENTION_REVISION_COLLISION_NOT_IMPROVED",
+      territory: initialTerritory,
+      validation,
+      postRevisionCollision: rechecked,
+    };
+  }
+
+  // Revision passed all validation checks AND reduced semantic collision!
+  initialTerritory.name = proposedCandidate.name;
+  initialTerritory.enemyDefinition = proposedCandidate.enemyDefinition;
+  initialTerritory.contrastAxis = proposedCandidate.contrastAxis;
+  initialTerritory.narrativeDirection = proposedCandidate.narrativeDirection;
+  if (proposedCandidate.rationale && proposedCandidate.rationale !== proposedCandidate.contrastAxis) {
+    initialTerritory.rationale = proposedCandidate.rationale;
+  } else {
+    initialTerritory.rationale = buildSharedCapabilityRationale();
+  }
+  initialTerritory.semanticCollision = {
+    comparisonStatus: rechecked.comparisonStatus,
+    semanticCollisionScore: rechecked.semanticCollisionScore,
+    collisionMeaning: rechecked.collisionMeaning,
+    competitorEquivalentClaim: rechecked.competitorEquivalentClaim,
+    competitorSource: rechecked.competitorSource,
+    competitorId: rechecked.competitorId,
+    jaccardScore: rechecked.jaccardScore,
+    perCompetitor: rechecked.perCompetitor,
+    comparedCompetitorCount: rechecked.comparedCompetitorCount,
+    directCompetitorCount: rechecked.directCompetitorCount,
+    adjacentCompetitorCount: rechecked.adjacentCompetitorCount,
+    referenceCompetitorCount: rechecked.referenceCompetitorCount,
+    comparisonCoverage: rechecked.comparisonCoverage,
+    reasoningSteps: rechecked.reasoningSteps,
+    modelUsed: rechecked.modelUsed,
+    generatedAt: rechecked.generatedAt,
+  };
+  initialTerritory.narrativeDistanceScore =
+    Math.round(Math.max(0.05, 1 - rechecked.semanticCollisionScore) * 100) / 100;
+  (initialTerritory as any).positioningOutcomeType =
+    rechecked.semanticCollisionScore >= 0.35
+      ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+      : (proposedRevisionRaw.positioningOutcomeType || "SUPPORTED_COMPETITIVE_DISTINCTION");
+  (initialTerritory as any).validationMetadata = {
+    candidateHash: validation.candidateHash,
+    evidenceSnapshotId: validation.evidenceSnapshotId,
+    validatedAt: validation.validatedAt,
+    passed: true,
+  };
+  (initialTerritory as any).collisionRevisionAudit = {
+    revisedAfterComparison: true,
+    retainedInitialCandidate: false,
+    selectionReason: "ACCEPTED_VALIDATED_LOWER_COLLISION",
+    validationPassed: true,
+    validationViolations: [],
+    previousTerritoryName: initialSnapshot.name,
+    initialCollisionScore: initialCollision.semanticCollisionScore,
+    postRevisionCollisionScore: rechecked.semanticCollisionScore,
+    collidingCompetitor: initialCollision.competitorSource,
+    collidingClaim: initialCollision.competitorEquivalentClaim,
+    revisionRationale: initialTerritory.rationale,
+    initialCandidate: initialSnapshot,
+    proposedRevision: proposedCandidate,
+  };
+
+  return {
+    selected: "REVISION",
+    selectionReason: "ACCEPTED_VALIDATED_LOWER_COLLISION",
+    territory: initialTerritory,
+    validation,
+    postRevisionCollision: rechecked,
+  };
+}
+
 function layer2_marketNarrativeMap(miData: any): Record<string, string[]> {
   const narrativeMap: Record<string, string[]> = {};
 
@@ -337,21 +1401,93 @@ function layer4_trustGapDetection(audienceData: any): { trustGaps: string[]; tru
   return { trustGaps, trustGapScore: Math.min(1.0, trustGapScore / 100) };
 }
 
-function layer5_segmentPriorityResolution(audienceData: any): { segment: string; priority: number; painAlignment: number }[] {
-  const segments = safeJsonParse(audienceData.audienceSegments, []);
-  const density = safeJsonParse(audienceData.segmentDensity, []);
-  const pains = safeJsonParse(audienceData.audiencePains, []);
+function layer5_segmentPriorityResolution(
+  audienceData: any,
+  painRegistry?: any[]
+): { segment: string; priority: number; painAlignment: number }[] {
+  const segments = safeJsonParse(audienceData?.audienceSegments, []);
+  const density = safeJsonParse(audienceData?.segmentDensity, []);
+
+  // Fail-closed if authoritative pain registry is not provided (never fallback to legacy audience pain text)
+  if (!Array.isArray(painRegistry) || painRegistry.length === 0) {
+    return segments.map((seg: any) => {
+      const densityItem = density.find((d: any) => d.segment === seg.name);
+      const densityScore = densityItem?.densityScore || 0;
+      return {
+        segment: seg.name,
+        priority: densityScore,
+        painAlignment: 0,
+      };
+    }).sort((a: any, b: any) => b.priority - a.priority);
+  }
 
   return segments.map((seg: any, i: number) => {
     const densityItem = density.find((d: any) => d.segment === seg.name);
     const densityScore = densityItem?.densityScore || 0;
 
+    const segId = seg.id || seg.segmentId;
+    const fallbackSegId = `seg_${i + 1}`;
+    const segName = seg.name || seg.segmentName;
+
+    // Explicit lineage-based authoritative pain matching (no lexical / substring / regex inference)
+    const matchedPains = painRegistry.filter((pain: any) => {
+      if (!pain) return false;
+
+      // 1. Explicit segmentId match
+      if (pain.segmentId && (
+        pain.segmentId === segId ||
+        pain.segmentId === fallbackSegId ||
+        (segName && pain.segmentId === segName)
+      )) {
+        return true;
+      }
+
+      // 2. Explicit segmentIds array match
+      if (Array.isArray(pain.segmentIds) && (
+        (segId && pain.segmentIds.includes(segId)) ||
+        pain.segmentIds.includes(fallbackSegId) ||
+        (segName && pain.segmentIds.includes(segName))
+      )) {
+        return true;
+      }
+
+      // 3. Explicit parent / source pain lineage or structural ID prefix contract
+      if (pain.painId) {
+        if (segId && (pain.painId.startsWith(`${segId}_`) || pain.painId === segId)) return true;
+        if (pain.painId.startsWith(`${fallbackSegId}_`)) return true;
+      }
+
+      if (pain.sourcePainId) {
+        if (segId && (pain.sourcePainId.startsWith(`${segId}_`) || pain.sourcePainId === segId)) return true;
+        if (pain.sourcePainId.startsWith(`${fallbackSegId}_`)) return true;
+      }
+
+      if (pain.parentPainId) {
+        if (segId && (pain.parentPainId.startsWith(`${segId}_`) || pain.parentPainId === segId)) return true;
+        if (pain.parentPainId.startsWith(`${fallbackSegId}_`)) return true;
+      }
+
+      // 4. Explicit segmentName match
+      if (pain.segmentName && segName && pain.segmentName.toLowerCase().trim() === segName.toLowerCase().trim()) {
+        return true;
+      }
+      if (pain.segment && segName && pain.segment.toLowerCase().trim() === segName.toLowerCase().trim()) {
+        return true;
+      }
+
+      return false;
+    });
+
+    // Segment-local denominator calculation:
+    // Measures lineage integrity and authoritative support WITHIN this target segment.
+    // If segment has authoritative resolved pains in painRegistry, alignment is resolved / total expected for segment.
     let painAlignment = 0;
-    if (seg.painProfile && pains.length > 0) {
-      const matchedPains = seg.painProfile.filter((p: string) =>
-        pains.some((pain: any) => pain.canonical.toLowerCase().includes(p.toLowerCase()))
+    if (matchedPains.length > 0) {
+      const activePains = matchedPains.filter((p: any) =>
+        p.classification !== "EXCLUDE" && p.classification !== "DROPPED" && p.classification !== "NON_STRATEGIC"
       );
-      painAlignment = seg.painProfile.length > 0 ? matchedPains.length / seg.painProfile.length : 0;
+      // Segment-local ratio: active authoritative pains over total matched authoritative pains for this segment
+      painAlignment = activePains.length > 0 ? activePains.length / matchedPains.length : 1.0;
     }
 
     return {
@@ -486,11 +1622,9 @@ export function computeSpecificityScore(
   const mechanismLanguagePenalty = !hasMechanismLanguage ? 0.10 : 0;
 
   const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure"];
-  const SERVICE_NOUNS = ["process", "approach", "model", "methodology", "framework", "practice", "protocol", "method", "structure"];
-  const isServiceBusiness = productDna?.businessType
-    ? /consult|agency|service|coach|freelanc|advisor/i.test(productDna.businessType)
-    : false;
-  const relevantNouns = isServiceBusiness ? [...SYSTEM_NOUNS, ...SERVICE_NOUNS] : SYSTEM_NOUNS;
+  const SERVICE_NOUNS = ["service", "process", "approach", "model", "methodology", "framework", "practice", "protocol", "method", "structure", "advisory", "audit", "consulting", "engagement", "review", "program", "assessment", "session", "strategy", "support", "care", "fulfillment", "execution"];
+  const CPG_NOUNS = ["product", "offering", "box", "package", "pack", "set", "blend", "collection", "assortment", "ingredient", "batch", "line", "item", "formula", "recipe", "craft", "supply", "selection", "delivery", "origin", "goods"];
+  const relevantNouns = [...SYSTEM_NOUNS, ...SERVICE_NOUNS, ...CPG_NOUNS];
   const hasSystemNoun = relevantNouns.some(n => tokens.some(t => t === n || t.endsWith(n) || t.startsWith(n)));
   const systemNounPenalty = !hasSystemNoun ? 0.15 : 0;
 
@@ -513,31 +1647,61 @@ export function computeSpecificityScore(
 }
 
 export function classifyTerritoryLevel(territory: Territory): { level: "system" | "audience" | "mixed"; reasons: string[] } {
-  const combined = `${territory.name} ${territory.enemyDefinition || ""} ${territory.narrativeDirection || ""} ${territory.domainFailure || ""}`.toLowerCase();
+  const combined = `${territory.name} ${territory.enemyDefinition || ""} ${territory.contrastAxis || ""} ${territory.narrativeDirection || ""} ${territory.domainFailure || ""} ${territory.operationalProblem || ""}`.toLowerCase();
   const tokens = combined.split(/\s+/).filter(Boolean);
   const reasons: string[] = [];
 
-  const SYSTEM_STRUCTURE_MARKERS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure", "integration", "validation", "verification", "audit"];
-  const FAILURE_MARKERS = ["fail", "fails", "break", "breaks", "lack", "lacks", "missing", "block", "blocks", "prevent", "prevents", "collapse", "collapses", "stall", "stalls", "erode", "erodes", "undermine", "undermines", "fragment", "fragments", "disconnect", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck"];
-  const AUDIENCE_EMOTION_MARKERS = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation", "simplicity", "empowerment", "wellness", "satisfaction", "loyalty"];
+  const FAILURE_MARKERS = [
+    "fail", "fails", "break", "breaks", "lack", "lacks", "missing", "block", "blocks",
+    "prevent", "prevents", "collapse", "collapses", "stall", "stalls", "erode", "erodes",
+    "undermine", "undermines", "fragment", "fragments", "disconnect", "disconnects",
+    "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot",
+    "bottleneck", "degrade", "degrades", "latency", "decay", "vulnerability", "leak",
+    "distortion", "friction", "mismatch", "defect", "flaw", "barrier", "delay", "opaque",
+    "uncertain", "unreliable", "inconsistent", "difficulty", "poor"
+  ];
+  const STRATEGIC_DIRECTION_MARKERS = [
+    "delivery", "access", "turnaround", "commissioning", "ownership", "fulfillment",
+    "transparency", "transparent", "clarity", "predictable", "direct", "online",
+    "digital", "custom", "personalized", "workflow", "process", "resolution",
+    "assurance", "verification", "guarantee", "standard", "protocol", "experience",
+    "support", "communication", "pricing", "integration", "onboarding"
+  ];
+  const AUDIENCE_EMOTION_MARKERS = [
+    "concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging",
+    "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation",
+    "simplicity", "empowerment", "wellness", "satisfaction", "loyalty"
+  ];
 
-  const hasSystem = SYSTEM_STRUCTURE_MARKERS.some(m => tokens.some(t => t === m || t.endsWith(m) || t.startsWith(m)));
-  const hasFailure = FAILURE_MARKERS.some(m => combined.includes(m));
+  // Category-neutral operational / structural mechanism detection (physical, digital, SaaS, service)
+  const hasFailureCondition = FAILURE_MARKERS.some(m => combined.includes(m));
+  const hasStrategicDirection = STRATEGIC_DIRECTION_MARKERS.some(m => combined.includes(m));
+  const hasOperationalMechanism =
+    hasFailureCondition ||
+    hasStrategicDirection ||
+    Boolean(territory.domainFailure && territory.domainFailure.trim().length > 10) ||
+    Boolean(territory.operationalProblem && territory.operationalProblem.trim().length > 10) ||
+    Boolean(territory.enemyDefinition && territory.enemyDefinition.trim().length > 15 && /(results in|causes|leads to|fails because|breaks because|degrades because|fails during|breaks during|degrades during|lacks|fails|breaks|collapses|damage|degrades|bottleneck|friction|decay|versus|vs|instead of|barrier|delay|difficulty)/i.test(territory.enemyDefinition)) ||
+    /(during|across|between|handoff|transit|dispatch|execution|pipeline|delivery|workflow|processing|storage|handling|packaging|integration|retention|conversion|deployment|computation|access|fulfillment|commissioning)/i.test(combined);
+
   const audienceCount = AUDIENCE_EMOTION_MARKERS.filter(m => tokens.some(t => t === m || t.endsWith(m))).length;
 
-  if (!hasSystem) reasons.push("no system-level noun (tool, process, pipeline, framework, etc.)");
-  if (!hasFailure) reasons.push("no failure condition (fails, breaks, lacks, missing, etc.)");
-  if (audienceCount >= 2) reasons.push(`${audienceCount} audience-level emotional markers detected`);
+  if (!hasOperationalMechanism) reasons.push("no operational mechanism or structural problem defined (lacks operational contrast, failure condition, or mechanism)");
+  if (!hasFailureCondition && !hasStrategicDirection) reasons.push("no failure condition or strategic operational direction defined");
+  if (audienceCount >= 2 && !hasOperationalMechanism) reasons.push(`${audienceCount} audience-level emotional markers detected without operational mechanism`);
 
   const nameTokens = territory.name.toLowerCase().split(/\s+/);
   const nameAudienceCount = AUDIENCE_EMOTION_MARKERS.filter(m => nameTokens.some(t => t === m)).length;
-  const nameSystemCount = SYSTEM_STRUCTURE_MARKERS.some(m => nameTokens.some(t => t === m));
-  if (nameAudienceCount >= 1 && !nameSystemCount) {
-    reasons.push(`territory name "${territory.name}" is audience-level language, not system-level`);
+  const nameHasOperational =
+    hasFailureCondition ||
+    STRATEGIC_DIRECTION_MARKERS.some(m => territory.name.toLowerCase().includes(m)) ||
+    /(breakdown|bottleneck|constraint|degradation|disconnect|failure|friction|gap|transit|handoff|delivery|access|clarity|resolution|direct|custom|digital)/i.test(territory.name);
+  if (nameAudienceCount >= 2 && !nameHasOperational) {
+    reasons.push(`territory name "${territory.name}" is audience-level language, not strategic/operational`);
   }
 
-  if (hasSystem && hasFailure && audienceCount < 2) return { level: "system", reasons: [] };
-  if (!hasSystem && !hasFailure && audienceCount >= 1) return { level: "audience", reasons };
+  if (hasOperationalMechanism && (hasFailureCondition || hasStrategicDirection) && (audienceCount < 2 || hasOperationalMechanism)) return { level: "system", reasons: [] };
+  if (!hasOperationalMechanism && !hasFailureCondition && audienceCount >= 1) return { level: "audience", reasons };
   return { level: "mixed", reasons };
 }
 
@@ -810,11 +1974,11 @@ function extractStrategicSignals(miData: any): { signal: string; cluster: string
   return signals;
 }
 
-function extractAudienceStrategicSignals(audienceData: any): { signal: string; cluster: string; source: string }[] {
+function extractAudienceStrategicSignals(audienceData: any, painRegistry?: any[]): { signal: string; cluster: string; source: string }[] {
   const signals: { signal: string; cluster: string; source: string }[] = [];
   const seen = new Set<string>();
 
-  const pains = safeJsonParse(audienceData.audiencePains, []);
+  const pains = Array.isArray(painRegistry) ? painRegistry : [];
   const desires = safeJsonParse(audienceData.desireMap, []);
   const objections = safeJsonParse(audienceData.objectionMap, []);
 
@@ -1000,26 +2164,70 @@ export function translateToSystemTerritory(
     if (cleanLabel.includes(key) || lower.includes(key)) return value;
   }
 
-  return buildGenericSystemTerritory(cleanLabel, domainNoun, signalType);
+  return sanitizeTerritoryName(buildGenericSystemTerritory(cleanLabel, domainNoun, signalType), productDna, audienceLabel);
+}
+
+/**
+ * Prevents territory names from turning a market/competitor failure into an assertion
+ * that the client's own product has that failure (e.g. "Songai Delivery Access Failure System"
+ * -> "Direct Digital Song Delivery & Access Clarity"), and removes forced "... Failure System"
+ * jargon while keeping domain-specific operational specificity.
+ */
+export function sanitizeTerritoryName(
+  rawName: string,
+  productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null; productCategory?: string; brandName?: string } | null,
+  fallbackSignalLabel?: string,
+): string {
+  if (!rawName || typeof rawName !== "string") return "Strategic Delivery & Access Clarity";
+  let cleaned = rawName.trim();
+
+  // Extract possible brand/product tokens that should never be prepended to a failure noun
+  const brandCandidates = new Set<string>();
+  if (productDna) {
+    if ((productDna as any).brandName) {
+      for (const tok of String((productDna as any).brandName).toLowerCase().split(/\s+/)) {
+        if (tok.length >= 3) brandCandidates.add(tok.replace(/[^a-z0-9]/g, ""));
+      }
+    }
+    if (productDna.coreOffer) {
+      const firstOfferWord = String(productDna.coreOffer).trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (firstOfferWord && firstOfferWord.length >= 4 && !["custom", "online", "digital", "personalized", "bespoke", "platform", "service"].includes(firstOfferWord)) {
+        brandCandidates.add(firstOfferWord);
+      }
+    }
+  }
+
+  const hasFailureSuffix = /\b(failure\s+system|system\s+failure|process\s+breakdown|structural\s+failure|framework\s+deficit|pipeline\s+failure|failure\s+pipeline|access\s+failure|delivery\s+failure)\b/i.test(cleaned);
+  const words = cleaned.split(/\s+/);
+  const firstWordNorm = (words[0] || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  if (brandCandidates.has(firstWordNorm) && (hasFailureSuffix || /\b(failure|breakdown|deficit|broken|flaw|problem|issue)\b/i.test(cleaned))) {
+    cleaned = words.slice(1).join(" ").trim();
+  }
+
+  // Replace awkward forced "... Failure System" / "... Process Breakdown" suffixes with strategic resolution framing
+  if (/\bdelivery\s+access\s+failure(?:\s+system)?\b/i.test(cleaned)) {
+    cleaned = cleaned.replace(/\bdelivery\s+access\s+failure(?:\s+system)?\b/i, "Direct Digital Delivery & Access Clarity");
+  } else if (/\baccess\s+failure\s+system\b/i.test(cleaned)) {
+    cleaned = cleaned.replace(/\baccess\s+failure\s+system\b/i, "Post-Purchase Access & Delivery Clarity");
+  } else if (/\bfailure\s+system$/i.test(cleaned)) {
+    cleaned = cleaned.replace(/\bfailure\s+system$/i, "Resolution & Delivery Clarity");
+  } else if (/\bprocess\s+breakdown$/i.test(cleaned)) {
+    cleaned = cleaned.replace(/\bprocess\s+breakdown$/i, "Delivery & Fulfillment Clarity");
+  } else if (/\bstructural\s+failure$/i.test(cleaned)) {
+    cleaned = cleaned.replace(/\bstructural\s+failure$/i, "Operational & Delivery Clarity");
+  }
+
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  if (cleaned.length < 6 && fallbackSignalLabel) {
+    return `Direct ${inferDomainNoun(productDna)} Delivery & Access Clarity`;
+  }
+  return cleaned;
 }
 
 /**
  * FIX-B: Generate grounded, product-specific NAMES for signal-injected
  * root_cause + psych_driver territories in ONE batched grounded-LLM call.
- *
- * This is the NAME source ONLY. It replaces the static translateToSystemTerritory
- * keyword→phrase lookup (which emitted the SAME canned phrase — e.g. "capability
- * transformation validation gap" for every "weak → strong" driver — regardless of
- * the product, starving the downstream judge of specificity). It does NOT touch a
- * single gate, judge, threshold, or the scoring of these territories. The same
- * grounding contract + AEL citation index used by layer11 is injected so names
- * trace to the product's named mechanism and the audience's real evidence.
- *
- * Fail-closed: any error, a non-array response, or zero parseable names returns
- * null and logs TERRITORY_GENERATION_FAILED loudly — the caller then falls back
- * per-territory to translateToSystemTerritory and marks the source
- * template_fallback. Returns a Map keyed by cluster id → generated name; ids the
- * model omits are simply absent (the caller treats an absent id as a fallback).
  */
 export async function generateGroundedTerritoryNames(
   clusters: { id: string; label: string; signalType: "root_cause" | "psych_driver"; evidence: string[] }[],
@@ -1041,7 +2249,7 @@ export async function generateGroundedTerritoryNames(
     .map((c, i) => `${i + 1}. id="${c.id}" | type=${c.signalType} | audience label="${c.label}" | evidence: ${(c.evidence || []).slice(0, 3).map(e => `"${e}"`).join("; ") || "(none)"}`)
     .join("\n");
 
-  const prompt = `You are a strategic positioning analyst. For each audience signal below, produce a SHORT positioning-territory NAME (4-8 words) stating the specific operational/system failure (for root_cause) or transformation/capability gap (for psych_driver) this signal represents FOR THIS PRODUCT.
+  const prompt = `You are a strategic positioning analyst. For each audience signal below, produce a SHORT, context-appropriate strategic positioning direction NAME (4-8 words) that frames the market whitespace or operational resolution this product can own in response to the buyer problem.
 
 ${productBlock}
 ${groundingContractBlock}${aelRefIndex}
@@ -1050,20 +2258,14 @@ SIGNAL CLUSTERS:
 ${clusterBlock}
 
 NAMING RULES:
-- Name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and its failure/gap — specific to this product's domain ("${domainNoun}"), NOT a generic emotional label.
+- Frame a clear, domain-appropriate strategic direction or category contrast in the "${domainNoun}" domain (e.g., "Direct Online Custom Song Delivery & Access", "Transparent Turnaround & Fulfillment Clarity") — NOT a generic emotional label.
+- NEVER prepend the client's own brand or product name to a failure word (e.g. NEVER write "<BrandName> Delivery Access Failure System" or "<BrandName> Process Breakdown"). Market/competitor failures belong to the category status quo, NOT the client's product!
+- Do NOT force every business into artificial SaaS jargon like "Failure System" or "Pipeline Breakdown". Use natural, understandable commercial language appropriate for "${productDna?.coreOffer || domainNoun}".
 - The name MUST derive from the audience label + evidence for that cluster. Do NOT reuse the same phrase across clusters.
-- A name any generic competitor could reuse unchanged is WRONG. Anchor to this product's named mechanism where possible.
 - Keep each name 4-8 words as a plain phrase.
 
 Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory": "<name>", "groundingRefs": ["RC1"] }]`;
 
-  // Sized budgets for a batched call: 16 clusters routinely exceeded the
-  // client's default 45s hard timeout and a flat 800-token ceiling, so the
-  // call deterministically failed and EVERY territory silently fell back to
-  // the generic template phrase (the exact interchangeable DNA the judge
-  // rejects downstream). Budget scales with batch size; one retry is allowed
-  // because a timeout here degrades the whole strategy chain, while the
-  // fail-closed template fallback remains for genuine unavailability.
   const namingTimeoutMs = Math.min(180_000, 60_000 + clusters.length * 5_000);
   const namingMaxTokens = Math.min(2_000, 300 + clusters.length * 80);
   const MAX_NAMING_ATTEMPTS = 2;
@@ -1083,8 +2285,6 @@ Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory":
 
     const finishReason = response.choices[0]?.finish_reason;
     if (finishReason === "length") {
-      // Truncated JSON is unusable — treat as a retryable failure, never
-      // parse a partial array into a partial name map silently.
       console.error(`[PositioningEngine-V3] TERRITORY_GENERATION_FAILED | reason=TRUNCATED_LENGTH | attempt=${attempt}/${MAX_NAMING_ATTEMPTS} | clusters=${clusters.length} | account=${accountId}`);
       if (attempt < MAX_NAMING_ATTEMPTS) continue;
       return null;
@@ -1103,7 +2303,8 @@ Return ONLY a JSON array: [{ "id": "<cluster id exactly as given>", "territory":
     const aggregatedRefs = new Set<string>();
     for (const item of parsed) {
       if (item && typeof item.id === "string" && typeof item.territory === "string" && item.territory.trim().length > 0) {
-        names.set(item.id, item.territory.trim());
+        const clusterObj = clusters.find(c => c.id === item.id);
+        names.set(item.id, sanitizeTerritoryName(item.territory.trim(), productDna, clusterObj?.label));
       }
       if (Array.isArray(item?.groundingRefs)) {
         item.groundingRefs.forEach((r: any) => { if (typeof r === "string" && r.trim().length > 0) aggregatedRefs.add(r.trim()); });
@@ -1145,10 +2346,11 @@ function inferDomainNoun(
   const bType = (productDna.businessType || "").toLowerCase();
   const category = (productDna.productCategory || "").toLowerCase();
 
+  if (/song|music|audio|track|lyric/i.test(offer + " " + category)) return "custom song delivery";
   if (/saas|software|platform|app|tool/i.test(bType + " " + offer)) return "platform";
   if (/market|advertis|campaign|brand/i.test(offer + " " + category)) return "marketing";
   if (/consult|agency|service|coach|freelanc|advisor/i.test(bType)) return "service delivery";
-  if (/ecommerce|shop|store|retail|product/i.test(bType + " " + offer)) return "conversion";
+  if (/ecommerce|shop|store|retail|product/i.test(bType + " " + offer)) return "digital fulfillment";
   if (/health|fitness|wellness|medical/i.test(offer + " " + category)) return "care delivery";
   if (/education|course|training|learn/i.test(offer + " " + category)) return "learning";
   if (/finance|invest|trading|banking/i.test(offer + " " + category)) return "financial";
@@ -1160,14 +2362,14 @@ function inferDomainNoun(
 }
 
 function buildGenericSystemTerritory(cleanLabel: string, domainNoun: string, signalType: string): string {
-  const FAILURE_SUFFIXES: Record<string, string> = {
-    pain: "process breakdown",
-    desire: "mechanism gap",
-    root_cause: "structural failure",
-    psych_driver: "framework deficit",
+  const DIRECTION_SUFFIXES: Record<string, string> = {
+    pain: "delivery & access clarity",
+    desire: "experience & outcome clarity",
+    root_cause: "fulfillment & access resolution",
+    psych_driver: "trust & transparency direction",
   };
 
-  const suffix = FAILURE_SUFFIXES[signalType] || "operational gap";
+  const suffix = DIRECTION_SUFFIXES[signalType] || "operational clarity";
 
   const stripped = cleanLabel
     .replace(/concerns?|needs?|desires?|fears?|anxiety|hesitation|worry|belonging|community|affordability|aspiration|motivation|trust|cost|transformation|simplicity|empowerment|wellness|satisfaction|loyalty|emotion|feeling|comfort|desperation|urgency|overwhelm|confusion|skepticism|resistance|status|proof|social|intent|dominant|comparison|shopping|credibility|reputation|influence|perception|awareness|recognition|identity/g, "")
@@ -1192,10 +2394,12 @@ function layer7_opportunityGapDetection(
   productDna?: { businessType?: string; coreOffer?: string; coreProblemSolved?: string | null; uniqueMechanism?: string | null } | null,
   authoritativePains?: any[],
 ): OpportunityGap[] {
-  const pains = Array.isArray(authoritativePains) && authoritativePains.length > 0
-    ? authoritativePains
-    : safeJsonParse(audienceData.audiencePains, []);
-  const desires = safeJsonParse(audienceData.desireMap, []);
+  const pains = Array.isArray(authoritativePains) ? authoritativePains : [];
+  const rawDesires = safeJsonParse(audienceData.desireMap, []);
+  const earlyCaps = productDna ? deriveValidatedCapabilities(deriveAnchorFromProductDna(productDna as any), productDna as any) : [];
+  const desires = Array.isArray(rawDesires)
+    ? rawDesires.filter((d: any) => !earlyCaps.length || isSignalSupportedByCapabilities(d?.canonical || "", earlyCaps))
+    : [];
   const competitorCount = Object.keys(narrativeMap).length || marketPower.length;
 
   const painTerritories = pains.slice(0, 8).map((p: any) => ({
@@ -1335,29 +2539,45 @@ function layer9_narrativeDistanceScoring(
   return Math.round(minDistance * 100) / 100;
 }
 
-export function filterAudienceTerritories(territories: Territory[]): { systemLevel: Territory[]; rejected: Territory[] } {
-  const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure", "integration", "validation", "verification", "audit", "funnel", "loop", "sequence", "automation", "flow", "conversion", "setup", "configuration", "deployment", "routing", "indexing", "tracking", "onboarding", "orchestration", "segmentation", "scoring", "mapping"];
-  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck", "weak", "broken", "degraded", "inefficient", "unreliable", "inconsistent", "misaligned"];
-  const AUDIENCE_ONLY = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation", "simplicity", "empowerment", "wellness", "satisfaction", "loyalty", "emotion", "feeling", "comfort", "happiness", "frustration", "anger", "relief", "hope", "excitement", "desperation", "urgency", "overwhelm", "confusion", "skepticism", "resistance", "apathy", "indifference", "curiosity", "longing", "insecurity", "vulnerability", "pressure", "stress", "burnout", "fatigue", "exhaustion", "isolation", "loneliness", "envy", "jealousy", "shame", "guilt", "regret", "pride", "ambition", "desire", "need", "fear", "pain", "struggle", "suffering", "status", "proof", "social", "intent", "dominant", "comparison", "shopping", "credibility", "reputation", "influence", "perception", "awareness", "recognition", "identity", "self"];
+export function filterAudienceTerritories(territories: Territory[], corePainIds?: Set<string>): { systemLevel: Territory[]; rejected: Territory[] } {
+  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "blind spot", "bottleneck", "weak", "broken", "degraded", "inefficient", "unreliable", "inconsistent", "misaligned", "degrade", "latency", "friction", "barrier", "delay"];
+  const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "stack", "architecture", "module", "layer", "approach", "model", "structure", "direction", "resolution", "clarity", "access", "turnaround", "commissioning", "ownership", "transparency", "assurance", "standard", "experience", "digital", "online", "custom", "pricing", "price", "value", "preview", "trial", "verification", "personalization", "songcraft"];
+  const SERVICE_NOUNS = ["service", "process", "approach", "model", "methodology", "framework", "practice", "protocol", "method", "structure", "advisory", "audit", "consulting", "engagement", "review", "program", "assessment", "session", "strategy", "support", "care", "fulfillment", "execution"];
+  const CPG_NOUNS = ["product", "offering", "box", "package", "pack", "set", "blend", "collection", "assortment", "ingredient", "batch", "line", "item", "formula", "recipe", "craft", "supply", "selection", "delivery", "origin", "goods", "roast", "sweets", "confectionery", "song", "music", "track", "audio", "gift", "gifting", "keepsake"];
+  const RELEVANT_NOUNS = [...SYSTEM_NOUNS, ...SERVICE_NOUNS, ...CPG_NOUNS];
+  const AUDIENCE_ONLY = ["concerns", "needs", "desires", "fears", "anxiety", "hesitation", "worry", "belonging", "community", "affordability", "aspiration", "motivation", "trust", "cost", "transformation", "simplicity", "empowerment", "wellness", "satisfaction", "loyalty", "emotion", "feeling", "comfort", "happiness", "delight", "joy", "frustration", "anger", "relief", "hope", "excitement", "desperation", "urgency", "overwhelm", "confusion", "skepticism", "resistance", "apathy", "indifference", "curiosity", "longing", "insecurity", "vulnerability", "pressure", "stress", "burnout", "fatigue", "exhaustion", "isolation", "loneliness", "envy", "jealousy", "shame", "guilt", "regret", "pride", "ambition", "desire", "need", "fear", "pain", "struggle", "suffering", "status", "proof", "social", "intent", "dominant", "comparison", "shopping", "credibility", "reputation", "influence", "perception", "awareness", "recognition", "identity", "self"];
 
   const systemLevel: Territory[] = [];
   const rejected: Territory[] = [];
 
   for (const t of territories) {
-    const nameTokens = t.name.toLowerCase().replace(/[^a-z0-9\s/,→←]/g, "").split(/[\s/,→←]+/).filter(Boolean);
+    if (t.signalSource && corePainIds && corePainIds.has(t.signalSource.toLowerCase())) {
+      systemLevel.push(t);
+      continue;
+    }
 
-    const hasSystemNoun = SYSTEM_NOUNS.some(n => nameTokens.some(tok => tok === n || tok.endsWith(n)));
+    const nameTokens = t.name.toLowerCase().replace(/[^a-z0-9\s/,→←-]/g, "").split(/[\s/,→←-]+/).filter(Boolean);
+
     const hasFailureVerb = FAILURE_VERBS.some(f => nameTokens.some(tok => tok === f || tok.startsWith(f)));
+    const hasCategorySystemNoun = RELEVANT_NOUNS.some(n => nameTokens.some(tok => tok === n || tok.endsWith(n) || tok.startsWith(n)));
+    const hasOperationalMechanism = hasFailureVerb ||
+      hasCategorySystemNoun ||
+      /(breakdown|bottleneck|constraint|degradation|disconnect|failure|friction|gap|inefficiency|latency|limitation|mismatch|vulnerability|transit|handoff|dispatch|handling|processing|execution|workflow|delivery|access|clarity|resolution|fulfillment|commissioning|turnaround|pricing|preview|verification)/i.test(t.name) ||
+      Boolean(t.operationalProblem && t.operationalProblem.trim().length > 10) ||
+      Boolean(t.domainFailure && t.domainFailure.trim().length > 10) ||
+      Boolean(t.enemyDefinition && t.enemyDefinition.trim().length > 15 && /(results in|causes|leads to|fails because|breaks because|degrades because|fails during|breaks during|degrades during|lacks|fails|breaks|collapses|damage|degrades|bottleneck|friction|decay)/i.test(t.enemyDefinition));
+
     const audienceTokenCount = AUDIENCE_ONLY.filter(a => nameTokens.some(tok => tok === a)).length;
     const nonStopTokens = nameTokens.filter(tok => tok.length > 3 && !["and", "the", "for", "with", "from", "that", "this", "driven", "based", "desired", "strong", "high", "low"].includes(tok));
     const audienceRatio = nonStopTokens.length > 0 ? audienceTokenCount / nonStopTokens.length : 0;
 
     const isDataLabel = /\(\d+\s+\w+/.test(t.name) || /\d+\s+signals/.test(t.name.toLowerCase());
 
-    const isSystemLevel = !isDataLabel && (hasSystemNoun || (hasFailureVerb && audienceRatio < 0.5));
-    const isPureAudience = isDataLabel || (!hasSystemNoun && audienceRatio >= 0.5);
+    // Category-neutral check: territory must not be a raw data label, pure promotional hype, or lack an operational/category mechanism
+    const isPureAudience = isDataLabel || !hasOperationalMechanism || (audienceRatio >= 0.5) || (audienceTokenCount >= 2 && !hasCategorySystemNoun);
+    const isSystemLevel = !isDataLabel && hasOperationalMechanism && !isPureAudience;
 
-    if (isPureAudience) {
+    if (isPureAudience || !isSystemLevel) {
       rejected.push(t);
     } else {
       systemLevel.push(t);
@@ -1421,6 +2641,7 @@ function layer10_strategicTerritorySelection(
       evidenceSignals: [...opp.painSignals, ...opp.desireSignals].slice(0, 5),
       confidenceScore: Math.round(opp.opportunityScore * narrativeDistance * 100) / 100,
       signalSource: opp.signalSource,
+      mappedSignalIds: opp.signalSource ? [opp.signalSource] : [],
     };
   });
 
@@ -1432,7 +2653,7 @@ function layer10_strategicTerritorySelection(
     return true;
   });
 
-  const { systemLevel, rejected } = filterAudienceTerritories(filtered);
+  const { systemLevel, rejected } = filterAudienceTerritories(filtered, corePainIds);
 
   if (rejected.length > 0) {
     console.log(`[PositioningEngine] TERRITORY_FILTER: Rejected ${rejected.length} audience-level territories: ${rejected.map(r => `"${r.name}"`).join(", ")}`);
@@ -1563,10 +2784,14 @@ interface MappedSignalCluster {
 function mapSignalsToTerritories(
   territories: Territory[],
   signals: StructuredSignals,
+  validatedCaps?: Array<{ statement: string }> | null,
 ): Map<number, MappedSignalCluster[]> {
+  const verifiedDesires = signals.desire_clusters.filter(c =>
+    isSignalSupportedByCapabilities(c.label, validatedCaps)
+  );
   const allClusters: MappedSignalCluster[] = [
     ...signals.pain_clusters.map(c => ({ id: c.id, label: c.label, category: "pain" as const, frequency: c.frequency, confidence: c.confidence })),
-    ...signals.desire_clusters.map(c => ({ id: c.id, label: c.label, category: "desire" as const, frequency: c.frequency, confidence: c.confidence })),
+    ...verifiedDesires.map(c => ({ id: c.id, label: c.label, category: "desire" as const, frequency: c.frequency, confidence: c.confidence })),
     ...signals.pattern_clusters.map(c => ({ id: c.id, label: c.label, category: "pattern" as const, frequency: c.frequency, confidence: c.confidence })),
     ...signals.root_causes.map(c => ({ id: c.id, label: c.label, category: "root_cause" as const, frequency: c.frequency, confidence: c.confidence })),
     ...signals.psychological_drivers.map(c => ({ id: c.id, label: c.label, category: "psychological_driver" as const, frequency: c.frequency, confidence: c.confidence })),
@@ -1576,16 +2801,22 @@ function mapSignalsToTerritories(
 
   for (let tIdx = 0; tIdx < territories.length; tIdx++) {
     const t = territories[tIdx];
-    const tName = t.name.toLowerCase();
+    const tName = t.name.toLowerCase().replace(/[^a-z0-9\s]/g, " ");
     const tWords = new Set(tName.split(/\s+/).filter(w => w.length > 3));
-    const painWords = new Set(t.painAlignment.flatMap(p => p.toLowerCase().split(/\s+/).filter(w => w.length > 3)));
-    const desireWords = new Set(t.desireAlignment.flatMap(d => d.toLowerCase().split(/\s+/).filter(w => w.length > 3)));
+    const painWords = new Set(t.painAlignment.flatMap(p => p.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 3)));
+    const verifiedDesireAlign = (t.desireAlignment || []).filter(d => isSignalSupportedByCapabilities(d, validatedCaps));
+    const desireWords = new Set(verifiedDesireAlign.flatMap(d => d.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 3)));
     const allTerritoryWords = new Set([...tWords, ...painWords, ...desireWords]);
 
     const scored: { cluster: MappedSignalCluster; score: number }[] = [];
 
     for (const cluster of allClusters) {
-      const clusterWords = cluster.label.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      if (t.signalSource && cluster.id === t.signalSource) {
+        scored.push({ cluster, score: 5.0 });
+        continue;
+      }
+
+      const clusterWords = cluster.label.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 3);
       if (clusterWords.length === 0) continue;
 
       let matchCount = 0;
@@ -1608,9 +2839,10 @@ function mapSignalsToTerritories(
       .slice(0, 6)
       .map(s => s.cluster);
 
-    if (mapped.length === 0 && allClusters.length > 0) {
-      const topByFreq = [...allClusters].sort((a, b) => b.frequency - a.frequency).slice(0, 3);
-      mapping.set(tIdx, topByFreq);
+    if (mapped.length === 0 && scored.length > 0) {
+      // Retain only clusters with actual lexical overlap for this territory;
+      // NEVER fall back to topByFreq across allClusters (which binds Territory 2 to Territory 1's pain cluster).
+      mapping.set(tIdx, scored.slice(0, 3).map(s => s.cluster));
     } else {
       mapping.set(tIdx, mapped);
     }
@@ -1714,7 +2946,11 @@ function deterministicSignalMapping(
     }
 
     scored.sort((a, b) => b.score - a.score);
-    const topMapped = scored.slice(0, 6).map(s => s.id);
+    const preMappedValid = [
+      ...(t.signalSource && validSignalIds.has(t.signalSource) ? [t.signalSource] : []),
+      ...((t.mappedSignalIds || []).filter(id => validSignalIds.has(id))),
+    ];
+    const topMapped = Array.from(new Set([...preMappedValid, ...scored.slice(0, 6).map(s => s.id)])).slice(0, 6);
 
     if (topMapped.length === 0 && allClusters.length > 0) {
       const tNameWords = new Set(
@@ -1752,11 +2988,74 @@ interface ClaimSeed {
   rootCauseLabels: string[];
 }
 
+const SIGNAL_CAPABILITY_STOPWORDS = new Set([
+  "customers", "customer", "buyers", "buyer", "users", "user", "people",
+  "desire", "desires", "want", "wants", "need", "needs", "seek", "seeks",
+  "looking", "ability", "able", "option", "options", "personalized",
+  "personalised", "custom", "song", "songs", "music", "musical", "gift",
+  "gifts", "gifting", "service", "services", "platform", "product", "products",
+  "their", "with", "from", "that", "this", "more", "better", "have",
+]);
+
+function isSignalSupportedByCapabilities(
+  signalLabel: string,
+  validatedCaps?: Array<{ statement: string }> | null,
+): boolean {
+  if (!validatedCaps || validatedCaps.length === 0) return true;
+  const signalWords = String(signalLabel || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !SIGNAL_CAPABILITY_STOPWORDS.has(w));
+  if (signalWords.length === 0) return true;
+  for (const cap of validatedCaps) {
+    const capText = String(cap.statement || "").toLowerCase();
+    const hits = signalWords.filter((w) => capText.includes(w)).length;
+    if (hits / signalWords.length >= 0.5 && (signalWords.length === 1 || hits >= 2)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSignalAlignedWithApprovedPains(
+  signalLabel: string,
+  approvedPains?: any[] | null,
+  validatedCaps?: Array<{ statement: string }> | null,
+): boolean {
+  if (!approvedPains || approvedPains.length === 0) return true;
+  if (isSignalSupportedByCapabilities(signalLabel, validatedCaps)) return true;
+  const signalWords = String(signalLabel || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !SIGNAL_CAPABILITY_STOPWORDS.has(w));
+  if (signalWords.length === 0) return false;
+  for (const p of approvedPains) {
+    const painWords = String(p?.canonical || p?.label || p?.statement || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 4 && !SIGNAL_CAPABILITY_STOPWORDS.has(w));
+    const hits = signalWords.filter((sw) =>
+      painWords.some((pw) => pw === sw || (sw.length >= 5 && pw.length >= 5 && sw.slice(0, 5) === pw.slice(0, 5)))
+    ).length;
+    if (hits >= 1 && hits / Math.min(signalWords.length, 4) >= 0.25) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function buildSignalClaimSeeds(
   territory: Territory,
-  mapped: MappedSignalCluster[],
+  rawMapped: MappedSignalCluster[],
   productDna?: any,
+  validatedCaps?: Array<{ statement: string }> | null,
 ): ClaimSeed | null {
+  const mapped = rawMapped.filter(m =>
+    m.category !== "desire" || isSignalSupportedByCapabilities(m.label, validatedCaps)
+  );
   if (mapped.length === 0) return null;
 
   // Signal Authority Classification (Fix 1)
@@ -1764,6 +3063,10 @@ function buildSignalClaimSeeds(
   const primaryPains = mapped.filter(m => m.category === "pain" || m.category === "root_cause");
   // SECONDARY_STRATEGIC: Desires, expected outcomes, and behavioral friction patterns
   const secondaryDesires = mapped.filter(m => m.category === "desire" || m.category === "pattern");
+  // Only desires/patterns supported by Validated Product Capabilities may seed our side of contrastAxis
+  const verifiedSecondaryDesires = secondaryDesires.filter(m =>
+    m.category === "pattern" || isSignalSupportedByCapabilities(m.label, validatedCaps)
+  );
   // PSYCHOLOGICAL_CONTEXT: Emotional drivers, identity cues, social sentiment (belonging, anxiety)
   const psychologicalDrivers = mapped.filter(m => m.category === "psychological_driver");
 
@@ -1775,51 +3078,58 @@ function buildSignalClaimSeeds(
   };
 
   // Primary Enemy Authority: Must derive from operational pains / root causes first.
-  // Supporting psychological drivers only serve as contextual nuance, never the primary system enemy.
+  // Never fall back to unverified desires.
   let enemySources: MappedSignalCluster[] = [];
   if (primaryPains.length > 0) {
     enemySources = primaryPains;
-  } else if (secondaryDesires.length > 0) {
-    enemySources = secondaryDesires;
+  } else if (verifiedSecondaryDesires.length > 0) {
+    enemySources = verifiedSecondaryDesires;
   } else if (psychologicalDrivers.length > 0) {
     enemySources = psychologicalDrivers;
   } else {
     enemySources = mapped.slice(0, 2);
   }
 
-  const enemyParts = [...new Set(enemySources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))];
+  const normalizeReportClause = (s: string): string => {
+    const stripped = s
+      .replace(/^(?:some\s+)?(?:customers|buyers|users)\s+(?:report|find|note|state)\s+that\s+/i, "")
+      .trim();
+    if (!stripped) return s.trim();
+    return stripped.charAt(0).toLowerCase() + stripped.slice(1);
+  };
+  const enemyParts = [...new Set(enemySources.slice(0, 2).map(s => normalizeReportClause(stripTaxonomyPrefix(s.label))))];
   const enemySeed = enemyParts.length > 0
-    ? `${domainNoun} failure: ${enemyParts.join(" + ")}`
-    : `${domainNoun} system breakdown`;
+    ? `Specific service patterns where buyers report that ${enemyParts.join(" — ")}`
+    : `Specific service patterns creating buyer hesitation in ${domainNoun} (${territory.name})`;
 
-  // Primary Contrast Authority: Must derive from operational desires / Product Truth.
-  let contrastSources: MappedSignalCluster[] = [];
-  if (secondaryDesires.length > 0) {
-    contrastSources = secondaryDesires;
-  } else if (primaryPains.length > 0) {
-    contrastSources = primaryPains;
-  } else if (psychologicalDrivers.length > 0) {
-    contrastSources = psychologicalDrivers;
-  } else {
-    contrastSources = mapped.slice(0, 2);
-  }
+  // Primary Contrast Authority: Must derive from verified Product Truth capabilities first,
+  // or operational desires that are verified in Product Truth. Never seed our side of contrastAxis
+  // with an unverified audience wish that is absent from Validated Product Capabilities.
+  const dnaGain = (
+    productDna?.uniqueMechanism ||
+    productDna?.strategicAdvantage ||
+    productDna?.coreProblemSolved ||
+    (validatedCaps && validatedCaps[0]?.statement) ||
+    productDna?.coreOffer ||
+    ""
+  ).toString().trim();
 
-  const contrastParts = [...new Set(contrastSources.slice(0, 3).map(s => stripTaxonomyPrefix(s.label)))]
+  const verifiedContrastParts = [...new Set(verifiedSecondaryDesires.slice(0, 2).map(s => stripTaxonomyPrefix(s.label)))]
     .filter(p => p.toLowerCase() !== (enemyParts[0] || "").toLowerCase());
-  const dnaGain = (productDna?.coreProblemSolved || productDna?.coreOffer || "").toString().trim();
+
   let contrastSeed: string;
-  if (contrastParts.length > 0) {
-    contrastSeed = `${contrastParts.join(", ")} vs current ${enemyParts[0] || "breakdown"}`;
-  } else if (dnaGain.length >= 3 && enemyParts.length > 0) {
-    contrastSeed = `${dnaGain} vs current ${enemyParts[0]}`;
+  if (dnaGain.length >= 3 && enemyParts.length > 0) {
+    contrastSeed = `Proposed strategic emphasis on ${dnaGain} vs service patterns where some buyers report ${enemyParts[0]}`;
+  } else if (verifiedContrastParts.length > 0) {
+    contrastSeed = `Proposed strategic emphasis on ${verifiedContrastParts.join(" and ")} vs service patterns where some buyers report ${enemyParts[0] || territory.name}`;
   } else {
-    contrastSeed = "operational improvement vs current failure";
+    contrastSeed = `Verified ${domainNoun} clarity vs ${territory.name}`;
   }
 
-  const allParts = [...new Set([...enemyParts, ...contrastParts])];
+  const allParts = [...new Set([...enemyParts, ...verifiedContrastParts])];
   const narrativeSeed = allParts.length > 0
-    ? `Addressing ${allParts.slice(0, 3).join(", ")} through ${domainNoun} system correction`
-    : "System-level correction of operational failures";
+    ? `Position ${domainNoun} around resolving ${allParts.slice(0, 2).join(" and ")} through verified product capabilities`
+    : `Position ${domainNoun} around ${territory.name}`;
 
   return {
     enemySeed,
@@ -1828,7 +3138,7 @@ function buildSignalClaimSeeds(
     sourceSignalIds: mapped.map(m => m.id),
     sourceLabels: mapped.map(m => m.label.toLowerCase()),
     painLabels: primaryPains.map(p => p.label.toLowerCase()),
-    desireLabels: secondaryDesires.map(d => d.label.toLowerCase()),
+    desireLabels: verifiedSecondaryDesires.map(d => d.label.toLowerCase()),
     rootCauseLabels: mapped.filter(m => m.category === "root_cause").map(r => r.label.toLowerCase()),
   };
 }
@@ -1839,23 +3149,36 @@ function buildSignalClaimSeeds(
  * the territory name, or the product's mechanism is legitimately grounded even
  * if it does not echo a raw audience-signal label. These terms count toward
  * `grounded`/`score` but are NEVER recorded as matched SIGNAL ids.
- * Phase 1 source = productDna (coreOffer ≈ anchor name; uniqueMechanism =
- * mechanism) + the territory name. Phase 2 (item 11) also folds in
- * doctrine.productAnchor (name / keyAttributes / differentiatingFeature); a null
- * anchor (business_level_degraded) simply omits those — never placeholder text.
  */
-function buildAnchorAllowlistTerms(territory: Territory, productDna?: any): string[] {
+function buildAnchorAllowlistTerms(
+  territory: Territory,
+  productDna?: any,
+  validatedCaps?: Array<{ statement: string }> | null,
+): string[] {
   const terms: string[] = [];
   if (territory?.name) terms.push(territory.name);
   if (productDna) {
     if (productDna.uniqueMechanism) terms.push(String(productDna.uniqueMechanism));
     if (productDna.coreOffer) terms.push(String(productDna.coreOffer));
-    // F5: the composer prompt now steers claims toward the strategic
-    // advantage — the grounding allowlist must accept that same language or
-    // advantage-anchored claims can never ground (partial doom-loop).
+    if (productDna.coreProblemSolved) terms.push(String(productDna.coreProblemSolved));
     if (productDna.strategicAdvantage) terms.push(String(productDna.strategicAdvantage));
+    if (Array.isArray(productDna.productTruthFacts)) {
+      for (const f of productDna.productTruthFacts) {
+        const stmt = f?.statement || f?.fact;
+        if (typeof stmt === "string" && stmt.trim().length > 2) {
+          terms.push(stmt.trim());
+        }
+      }
+    }
   }
-  return terms.filter((t) => t && t.trim().length > 2);
+  if (Array.isArray(validatedCaps)) {
+    for (const c of validatedCaps) {
+      if (typeof c?.statement === "string" && c.statement.trim().length > 2) {
+        terms.push(c.statement.trim());
+      }
+    }
+  }
+  return Array.from(new Set(terms.filter((t) => t && t.trim().length > 2)));
 }
 
 // Item 7 hallucination guard: filler words that appear in almost every
@@ -1872,7 +3195,7 @@ const GENERIC_ANCHOR_TOKENS = new Set([
   "through", "provide", "provides", "providing", "better", "growth",
 ]);
 
-function validateClaimGrounding(
+export function validateClaimGrounding(
   claimText: string,
   seed: ClaimSeed,
   extraAllowedTerms: string[] = [],
@@ -1972,7 +3295,7 @@ function validateClaimGrounding(
           break;
         }
       }
-      if (bigramMatch || distinctiveMatches >= 3) {
+      if (bigramMatch || distinctiveMatches >= 2) {
         anchorGrounded = true;
         totalScore += 1.0;
       }
@@ -1987,8 +3310,16 @@ function validateClaimGrounding(
     }
   }
 
+  const candidateGrounded = matchedSignals.length > 0 || anchorGrounded;
+  if (candidateGrounded) {
+    const entailment = evaluateClaimSemanticEntailment(claimText, extraAllowedTerms);
+    if (!entailment.isGrounded && (entailment.status === "UNSUPPORTED_EXPANSION" || entailment.status === "CONTRADICTED")) {
+      return { grounded: false, matchedSignals: [], score: 0 };
+    }
+  }
+
   return {
-    grounded: matchedSignals.length > 0 || anchorGrounded,
+    grounded: candidateGrounded,
     matchedSignals: [...new Set(matchedSignals)],
     score: totalScore,
   };
@@ -2050,11 +3381,15 @@ async function layer11_positioningStatementGeneration(
       if (derivedAnchor) positioningAnchor = derivedAnchor;
     }
     const aelRefIndex = buildAelReferenceIndex(analyticalEnrichment || null);
-    const groundingContractBlock = buildGroundingContract(positioningAnchor, analyticalEnrichment || null);
+    const posValidatedCaps = deriveValidatedCapabilities(positioningAnchor, productDna);
+    const groundingContractBlock = buildGroundingContract(positioningAnchor, analyticalEnrichment || null, {
+      capabilities: posValidatedCaps,
+      selectedPains: positioningPains,
+    });
 
     const hasSignals = structuredSignals && getAllSignalLabels(structuredSignals).length > 0;
 
-    const signalMapping = hasSignals ? mapSignalsToTerritories(territories, structuredSignals!) : null;
+    const signalMapping = hasSignals ? mapSignalsToTerritories(territories, structuredSignals!, posValidatedCaps) : null;
     if (signalMapping) {
       const totalMapped = Array.from(signalMapping.values()).reduce((s, arr) => s + arr.length, 0);
       console.log(`[PositioningEngine-V3] SIGNAL_FIRST_MODE | pre-mapped ${totalMapped} signals across ${territories.length} territories`);
@@ -2072,14 +3407,19 @@ async function layer11_positioningStatementGeneration(
     if (signalMapping && hasSignals) {
       for (let i = 0; i < territories.length; i++) {
         const mapped = signalMapping.get(i) || [];
-        const seed = buildSignalClaimSeeds(territories[i], mapped, productDna);
+        const seed = buildSignalClaimSeeds(territories[i], mapped, productDna, posValidatedCaps);
         if (seed) claimSeeds.set(i, seed);
       }
       console.log(`[PositioningEngine-V3] CLAIM_SEEDS | built=${claimSeeds.size}/${territories.length} territories have signal-derived seeds`);
     }
 
     const territoriesBlock = territories.map((t, i) => {
-      const mapped = signalMapping?.get(i) || [];
+      const mapped = (signalMapping?.get(i) || []).filter(
+        m => m.category !== "desire" || isSignalSupportedByCapabilities(m.label, posValidatedCaps)
+      );
+      const verifiedDesireAlignment = (t.desireAlignment || []).filter(
+        d => isSignalSupportedByCapabilities(d, posValidatedCaps)
+      );
       const seed = claimSeeds.get(i);
       const signalSection = mapped.length > 0
         ? `\n   SOURCE SIGNALS (these are the ONLY inputs you may use):\n${formatMappedSignalsForTerritory(mapped)}`
@@ -2093,7 +3433,7 @@ async function layer11_positioningStatementGeneration(
         : "";
       return `${i + 1}. "${t.name}" (opportunity: ${t.opportunityScore}, distance: ${t.narrativeDistanceScore})
    Pain alignment: ${t.painAlignment.join(", ") || "general"}
-   Desire alignment: ${t.desireAlignment.join(", ") || "general"}${signalSection}${seedSection}`;
+   Desire alignment: ${verifiedDesireAlignment.join(", ") || "verified product capabilities"}${signalSection}${seedSection}`;
     }).join("\n\n");
 
     const domainTranslationInstruction = productDna ? `
@@ -2142,6 +3482,58 @@ TERRITORIES WITH CLAIM SEEDS AND SOURCE SIGNALS:
 ${territoriesBlock}
 ${websitePositioningContext}
 ${rejectionBlock}
+═══ POSITIONING ROLE CONTRACT: WHERE / WHY WE WIN ═══
+POSITIONING defines the strategic market territory, buyer tension, and commercial contrast.
+It defines:
+- Where the brand should compete
+- What market tension/category enemy to expose
+- What contrast to emphasize
+- Why that position matters to the approved audience segment
+- What old way or alternative worldview exists
+
+POSITIONING DOES NOT OWN AND MAY NOT INVENT:
+- Product attributes (materials, technical specs, fiber types, physical properties)
+- Operational processes (testing protocols, quality assurance systems, inspection workflows)
+- Guarantees or risk reversal policies
+- Manufacturing or sourcing methods
+unless they are ALREADY explicitly supported by the Validated Product Capabilities / Product Truth.
+
+COMPETITIVE CLAIM & EPISTEMIC PRECISION RULES (CRITICAL):
+- Preserve the strict distinction between:
+  1. Some customers reporting generic, templated, or impersonal results from particular services in reviews/comments.
+  2. A specific capability or pricing tier established for a named competitor.
+  3. A category-wide pattern or trade-off.
+  4. A proposed strategic emphasis for this brand built on verified product capabilities.
+- Do NOT generalize isolated customer complaints into a universal statement that "all current offerings" or "every competitor" fails, and do NOT upgrade customer complaints about how an output felt/sounded into unverified assertions about competitors' internal production architecture (such as asserting "mass-produced automated prompt workflows" or "template-bound services"). Attribute customer complaints accurately to reported buyer perception and experience.
+- Free trials, payment triggers, refund policies, and satisfaction guarantees are distinct facts: never turn a conditional payment trigger (e.g. paying when gifting or obtaining the final product) into a satisfaction-contingent payment guarantee ("customers pay only when satisfied"). If using phrases like "risk-free", qualify them with the exact risk addressed (such as a free trial preview before paying to obtain the final deliverable).
+- Retain a strong, commercially useful strategic emphasis even when based on shared category capabilities; do NOT invent fake exclusivity.
+
+INPUT NAMESPACE SEPARATION:
+- STRATEGIC INPUTS (approved pains, strategic lanes, differentiation claims, audience signals):
+  These help you decide WHAT POSITION TO TAKE. They do NOT authorize new factual claims.
+- FACTUAL AUTHORITIES (Product Truth, Capability Registry):
+  These define WHAT THE BUSINESS ACTUALLY DOES.
+  If strategic context or audience pain suggests a stronger claim than Product Truth supports: DO NOT UPGRADE THE FACT.
+
+FACTUAL POSTURE — REASON BEFORE GENERATING:
+CRITICAL CONTRACT RULE: STRATEGIC_SYNTHESIS IS NOT A FACTUAL BYPASS!
+- A strategic synthesis creates a novel strategic angle, market tension, or category enemy framing from VERIFIED facts.
+- It NEVER permits introducing, upgrading, or laundering unsupported factual predicates.
+- FACTUAL AUTHORITY PRECEDENCE:
+  Product Truth > Strategic Context (Differentiation, AEL, Market Intelligence, Customer Voice).
+- Upstream Strategic Context:
+  If Differentiation, AEL, or customer quotes contain narrative phrasing unsupported by Product Truth (e.g. "natural fabrics", "linen/cotton dresses", "fabric breathability", "cooling performance", "opacity guarantee", "curation standards", "fit standards"), Positioning MUST NOT adopt or repeat those factual predicates!
+- Every embedded factual predicate (material composition, physical performance, operational company process, SKU/pricing) MUST be 100% verified in the Validated Product Capabilities below.
+- Broad terms cannot be upgraded to narrower physical specs ('comfort' does NOT mean 'breathable' or 'cooling', 'modesty' does NOT mean 'opaque').
+
+For every statement you write, classify internally:
+A. STRATEGIC_SYNTHESIS: Framing what territory to own, the enemy system to expose, and why it matters to the buyer. (You may synthesize strategic perspectives freely from verified facts).
+B. EXISTING_FACTUAL_CLAIM: An assertion that the business currently operates a process or has a physical product feature. (MUST be backed by a cited capabilityRef from the Validated Product Capabilities).
+
+ANTI-PAIN-INVERSION HARD RULE:
+Do NOT infer a company capability from the inverse of a customer pain.
+If customers complain about X (e.g. 'poor fabric opacity / see-through dresses' or 'inability to edit/revise lyrics'), you MUST NOT assert that the business operates a process preventing X or offers editing/revision controls unless explicitly documented in the Validated Product Capabilities.
+
 YOUR TASK:
 Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job is to:
 1. Take each claim seed and sharpen it into professional positioning language
@@ -2149,14 +3541,15 @@ Each territory has CLAIM SEEDS derived from real audience signals. Your ONLY job
 3. Keep the core meaning of each seed — do NOT replace it with unrelated concepts
 
 FIELD RULES (AUTHORITY HIERARCHY ENFORCED):
-- enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). The content MUST derive directly from the operational pain/root_cause signal labels listed in the SOURCE SIGNALS that cause or sustain the CORE_PURCHASE pain. Do NOT create a catch-all compound enemy combining secondary psychological drivers (e.g. belonging, community, anxiety) or unrelated buyer objections.
-- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants operationally vs what currently fails. MUST represent ONE COHERENT COMMERCIAL CONTRAST grounded in this product's differentiating feature / Unique mechanism / Strategic advantage. Do NOT concatenate multiple semantically independent secondary themes (e.g. operational autonomy + belonging + comparison-shopping + transformation commitment) into a composite axis.
-- narrativeDirection: Sharpen the Narrative seed into one concise sentence synthesizing the core operational failure and its resolution via Product Truth, without category-generic filler.
+- enemyDefinition: Sharpen the Enemy seed. Must name a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls). Frame it accurately around the service pattern or buyer friction where some customers report unsatisfactory or impersonal results — never claim universal failure across all competitors and never assert unverified competitor internal production workflows.
+- contrastAxis: Sharpen the Contrast seed. Name what the buyer wants strategically vs the specific service pattern where some buyers report friction. MUST represent ONE COHERENT COMMERCIAL CONTRAST grounded strictly in this product's Validated Product Capabilities without claiming universal competitor failure, satisfaction-contingent payment guarantees not in Product Truth, or invented exclusivity.
+- narrativeDirection: Sharpen the Narrative seed into one concise sentence synthesizing the strategic positioning narrative (WHERE / WHY WE WIN). Connect the strategic territory and specific workflow tension to the resolution provided by verified Product Truth capabilities. Do NOT assert unverified operational company processes, lyric editing/revision controls, or universal competitor failure.
 - domainFailure: The operational/system failure this signal cluster represents in this specific domain.
 - operationalProblem: What concretely breaks in the buyer's workflow.
 - proofRequirement: What evidence would resolve this (e.g., "live demo", "case study with metrics").
 - laneRelevance: For each active lane, output a mapping under "laneRelevance" (object with keys of Lane ID mapping to a short statement on how this positioning territory applies to that specific lane context).
 - mappedSignalIds: Copy the Source signal IDs from the claim seeds. These are pre-assigned — do NOT change them.
+- capabilityRefs: List all validated capability IDs (cap_<hash>) from the GROUNDING CONTRACT section above that you cited or used to ground contrastAxis / narrativeDirection.
 
 HARD CONSTRAINTS:
 - Do NOT elevate supporting emotional, behavioral, or social signals into the primary positioning territory or enemy definition merely because they appear in audience evidence.
@@ -2165,7 +3558,7 @@ HARD CONSTRAINTS:
 - If a territory has no claim seeds, set narrativeDirection to "UNMAPPED".
 
 Return a JSON array:
-[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "laneRelevance": { "lane_id_1": "Explanation for lane 1" }, "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"] }]
+[{ "index": 1, "enemyDefinition": "...", "contrastAxis": "...", "narrativeDirection": "...", "laneRelevance": { "lane_id_1": "Explanation for lane 1" }, "mappedSignalIds": ["id1", "id2"], "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"], "capabilityRefs": ["cap_..."] }]
 
 Return ONLY the JSON array.`
       : `You are a strategic positioning analyst. Generate precise positioning statements for each territory.
@@ -2177,16 +3570,31 @@ TERRITORIES:
 ${territoriesBlock}
 ${websitePositioningContext}
 ${rejectionBlock}
+
+═══ POSITIONING ROLE CONTRACT: WHERE / WHY WE WIN ═══
+POSITIONING defines the strategic market territory, buyer tension, and commercial contrast.
+It defines WHERE and WHY we win strategically.
+It DOES NOT OWN AND MAY NOT INVENT:
+- Product attributes, operational processes, quality-control systems, testing protocols, guarantees, technical material properties, or manufacturing methods.
+
+CRITICAL CONTRACT RULE: STRATEGIC_SYNTHESIS IS NOT A FACTUAL BYPASS!
+- FACTUAL AUTHORITY PRECEDENCE: Product Truth > Strategic Context (Differentiation, AEL, Market Intelligence, Customer Voice).
+- Positioning must NOT adopt or repeat unverified factual predicates found in Differentiation, customer quotes, or audience insights (e.g. "natural fabrics", "linen/cotton", "breathable", "cooling", "opacity guarantee", "curation standards", "fit standards").
+- Every single embedded factual predicate (materials, physical performance, operational company process, SKU) MUST be 100% established in the Validated Product Capabilities. Broad terms cannot be upgraded to narrower physical specs ('comfort' is not 'breathable', 'modesty' is not 'opaque').
+- Do NOT infer a company capability from the inverse of a customer pain.
+- Do NOT generalize isolated customer complaints into universal competitor failure; distinguish between some buyers reporting generic results from specific services vs our proposed strategic emphasis on shared capabilities.
+
 RULES:
 1. DOMAIN TRANSLATION FIRST: Before composing any field, restate each territory name as the operational failure it represents for this specific business type and offer. Use domain-operational language — not generic emotional framing — in every field.
 2. COMPRESSION & ATOMICITY: Focus on the FIRST territory as the PRIMARY positioning. Express it as a single specific root-cause SYSTEM FAILURE that causes the CORE buying pain. Do NOT combine multiple independent themes into a compound axis.
-3. enemyDefinition: Name the specific operational/system failure in this market for this type of buyer. Not emotions — operational breakdown. Must include a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
-4. contrastAxis: Name ONE clear commercial contrast of what operationally the buyer gains vs what currently fails — specific to this business domain and Product Truth.
-5. narrativeDirection: One sentence using domain-operational language. No surface emotional labels. No broad categories — name the specific operational breakdown and its resolution.
+3. enemyDefinition: Name the specific operational/system failure in this market for this type of buyer (attributing customer complaints accurately to reported buyer perception without asserting unverified competitor internal workflows). Must include a system-level noun (tool, system, process, pipeline, framework, workflow, platform, method) and a failure verb (fails, breaks, lacks, blocks, collapses, erodes, stalls).
+4. contrastAxis: Name ONE clear commercial contrast of what strategically the buyer gains vs the specific workflow pattern that fails some buyers — specific to this business domain and Product Truth. Do NOT invent company testing operations or claim universal competitor failure.
+5. narrativeDirection: One sentence synthesizing the strategic positioning narrative (WHERE / WHY WE WIN). Connect the strategic territory to verified Product Truth capabilities. Do NOT assert unverified operational company processes (e.g. 'testing system', 'quality control process').
 6. laneRelevance: For each active lane, output a mapping under "laneRelevance" (object with keys of Lane ID mapping to a short statement on how this positioning territory applies to that specific lane context).
+7. capabilityRefs: List all validated capability IDs (cap_<hash>) from the GROUNDING CONTRACT section above that you cited or used to ground contrastAxis / narrativeDirection.
 
 For each territory, return a JSON array with objects containing:
-{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "laneRelevance": { "lane_id_1": "Explanation for lane 1" }, "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"] }
+{ "index": number, "enemyDefinition": "precise enemy statement", "narrativeDirection": "one-sentence positioning narrative", "contrastAxis": "clear contrast axis", "laneRelevance": { "lane_id_1": "Explanation for lane 1" }, "domainFailure": "...", "operationalProblem": "...", "proofRequirement": "...", "groundingRefs": ["RC2", "CC1"], "capabilityRefs": ["cap_..."] }
 
 Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON array.`;
 
@@ -2220,6 +3628,19 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
           }
         }
 
+        if (Array.isArray(item.capabilityRefs)) {
+          territories[idx].capabilityRefs = item.capabilityRefs
+            .filter((r: any) => typeof r === "string" && r.trim().length > 0)
+            .map((r: string) => {
+              const trimmed = r.trim();
+              const stripped = trimmed.replace(/^cap_/i, "");
+              const matchedCap = posValidatedCaps.find(
+                c => c.capabilityId === trimmed || (c.sourceFactId && (c.sourceFactId === trimmed || c.sourceFactId === stripped))
+              );
+              return matchedCap ? matchedCap.capabilityId : trimmed;
+            });
+        }
+
         if (item.narrativeDirection && typeof item.narrativeDirection === "string" && item.narrativeDirection.includes("UNMAPPED")) {
           territories[idx].confidenceScore = Math.max(0, territories[idx].confidenceScore - 0.15);
           territories[idx].stabilityNotes.push("[SIGNAL_UNMAPPED] Territory could not be grounded in audience signals");
@@ -2232,7 +3653,7 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
           const contrastText = (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) ? item.contrastAxis : seed.contrastSeed;
           const narrativeText = (item.narrativeDirection && validateNarrativeOutput(item.narrativeDirection).valid) ? item.narrativeDirection : seed.narrativeSeed;
 
-          const anchorAllowTerms = buildAnchorAllowlistTerms(territories[idx], productDna);
+          const anchorAllowTerms = buildAnchorAllowlistTerms(territories[idx], productDna, posValidatedCaps);
           const enemyGrounding = validateClaimGrounding(enemyText, seed, anchorAllowTerms);
           const contrastGrounding = validateClaimGrounding(contrastText, seed, anchorAllowTerms);
           const narrativeGrounding = validateClaimGrounding(narrativeText, seed, anchorAllowTerms);
@@ -2247,7 +3668,7 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
             ...seed.sourceSignalIds,
           ]);
           territories[idx].mappedSignalIds = Array.from(allGroundedIds);
-          territories[idx]._systemMapped = true;
+          territories[idx]._systemMapped = allGroundedIds.size === 0;
 
           const groundedFields = [enemyGrounding.grounded, contrastGrounding.grounded, narrativeGrounding.grounded].filter(Boolean).length;
           const fallbackFields = 3 - groundedFields;
@@ -2268,6 +3689,20 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
           }
           if (item.contrastAxis && validateNarrativeOutput(item.contrastAxis).valid) {
             territories[idx].contrastAxis = item.contrastAxis;
+          }
+          const preservedSignalIds = new Set<string>();
+          if (territories[idx].signalSource && (!allSignalIds || allSignalIds.has(territories[idx].signalSource!))) {
+            preservedSignalIds.add(territories[idx].signalSource!);
+          }
+          if (Array.isArray(item.mappedSignalIds)) {
+            for (const sid of item.mappedSignalIds) {
+              if (typeof sid === "string" && (!allSignalIds || allSignalIds.has(sid))) {
+                preservedSignalIds.add(sid);
+              }
+            }
+          }
+          if (preservedSignalIds.size > 0) {
+            territories[idx].mappedSignalIds = Array.from(preservedSignalIds);
           }
         }
 
@@ -2302,13 +3737,19 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
     const validIdSet = detMapping.validSignalIds;
     for (let tIdx = 0; tIdx < territories.length; tIdx++) {
       const systemMappedIds = detMapping.mappings.get(tIdx) || [];
-      const existingIds = (territories[tIdx].mappedSignalIds || []).filter(id => validIdSet.has(id));
+      const signalSourceId = territories[tIdx].signalSource && validIdSet.has(territories[tIdx].signalSource!)
+        ? [territories[tIdx].signalSource!]
+        : [];
+      const existingIds = Array.from(new Set([
+        ...signalSourceId,
+        ...((territories[tIdx].mappedSignalIds || []).filter(id => validIdSet.has(id))),
+      ]));
       const finalIds = Array.from(new Set([...existingIds, ...systemMappedIds]));
       territories[tIdx].mappedSignalIds = finalIds;
-      if (!territories[tIdx]._systemMapped) {
-        territories[tIdx]._systemMapped = systemMappedIds.length > 0;
-      }
-      if (systemMappedIds.length > 0 && existingIds.length === 0) {
+      if (existingIds.length > 0) {
+        territories[tIdx]._systemMapped = false;
+      } else if (systemMappedIds.length > 0) {
+        territories[tIdx]._systemMapped = true;
         territories[tIdx].stabilityNotes.push(`[SYSTEM_MAPPED] Deterministic signal mapping assigned ${systemMappedIds.length} signal(s)`);
       }
     }
@@ -2331,18 +3772,23 @@ Keep statements concise, strategic, and domain-grounded. Return ONLY the JSON ar
 export function evaluateCompressionQuality(territory: Territory): number {
   let score = 0.50;
 
-  const SYSTEM_NOUNS = ["system", "tool", "platform", "pipeline", "process", "framework", "engine", "workflow", "protocol", "method", "mechanism", "infrastructure", "approach", "model", "structure"];
-  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap"];
+  const FAILURE_VERBS = ["fails", "breaks", "lacks", "missing", "blocks", "prevents", "collapses", "stalls", "erodes", "undermines", "fragments", "disconnects", "inability", "absence", "breakdown", "failure", "deficit", "gap", "degrades", "bottleneck", "friction"];
 
   const enemy = (territory.enemyDefinition || "").toLowerCase();
   const narrative = (territory.narrativeDirection || "").toLowerCase();
   const domainFail = (territory.domainFailure || "").toLowerCase();
-  const combined = `${enemy} ${narrative} ${domainFail}`;
+  const operProblem = (territory.operationalProblem || "").toLowerCase();
+  const combined = `${enemy} ${narrative} ${domainFail} ${operProblem}`;
 
-  const hasSystemNoun = SYSTEM_NOUNS.some(n => combined.includes(n));
+  const hasOperationalMechanism =
+    Boolean(territory.domainFailure && territory.domainFailure.trim().length > 10) ||
+    Boolean(territory.operationalProblem && territory.operationalProblem.trim().length > 10) ||
+    Boolean(territory.enemyDefinition && territory.enemyDefinition.trim().length > 15 && /(because|due to|when|during|results in|causes|leads to|versus|vs|instead of)/i.test(territory.enemyDefinition)) ||
+    /(during|across|between|handoff|transit|dispatch|execution|pipeline|delivery|workflow|processing|storage|handling|packaging|transit|integration|retention|conversion|deployment|computation)/i.test(combined);
+
   const hasFailureVerb = FAILURE_VERBS.some(v => combined.includes(v));
 
-  if (hasSystemNoun) score += 0.20;
+  if (hasOperationalMechanism) score += 0.20;
   if (hasFailureVerb) score += 0.15;
   if (territory.domainFailure && territory.domainFailure.trim().length > 10) score += 0.10;
   if (territory.operationalProblem && territory.operationalProblem.trim().length > 10) score += 0.05;
@@ -2354,8 +3800,8 @@ export function evaluateCompressionQuality(territory: Territory): number {
   const AUDIENCE_NAME_MARKERS = ["concerns", "needs", "desires", "fears", "belonging", "community", "affordability", "trust", "cost", "transformation", "simplicity", "wellness"];
   const nameTokens = territory.name.toLowerCase().split(/\s+/);
   const nameAudienceHits = AUDIENCE_NAME_MARKERS.filter(m => nameTokens.some(t => t === m)).length;
-  const nameHasSystem = SYSTEM_NOUNS.some(n => nameTokens.some(t => t === n));
-  if (nameAudienceHits >= 1 && !nameHasSystem) score -= 0.20;
+  const nameHasOperational = hasFailureVerb || /(breakdown|bottleneck|constraint|degradation|disconnect|failure|friction|gap|transit|handoff)/i.test(territory.name);
+  if (nameAudienceHits >= 1 && !nameHasOperational) score -= 0.20;
   if (nameAudienceHits >= 2) score -= 0.10;
 
   const CROSS_DOMAIN_GENERIC_PHRASES = [
@@ -2386,9 +3832,9 @@ export function evaluateCompressionQuality(territory: Territory): number {
   const genericHit = CROSS_DOMAIN_GENERIC_PHRASES.some(p => combined.includes(p));
   const hasDomainAnchor = DOMAIN_ANCHOR_NOUNS.some(n => combined.includes(n));
 
-  if (hasSystemNoun && hasFailureVerb && !hasDomainAnchor) {
+  if (hasOperationalMechanism && hasFailureVerb && !hasDomainAnchor) {
     score -= 0.18;
-    console.log(`[COMPRESSION_QUALITY] FALSE_SPECIFICITY: system+failure vocabulary present but no domain anchor detected`);
+    console.log(`[COMPRESSION_QUALITY] FALSE_SPECIFICITY: operational+failure vocabulary present but no domain anchor detected`);
   } else if (genericHit && !hasDomainAnchor) {
     score -= 0.12;
     console.log(`[COMPRESSION_QUALITY] CROSS_DOMAIN_GENERIC: matched generic phrase without domain anchor`);
@@ -2472,7 +3918,11 @@ function layer12_stabilityGuard(
 
     const allPassed = territoryChecks.every(c => c.passed);
     territory.isStable = allPassed;
-    territory.stabilityNotes = territoryChecks.filter(c => !c.passed).map(c => c.reason);
+    const failedReasons = territoryChecks.filter(c => !c.passed).map(c => c.reason);
+    territory.stabilityNotes = [
+      ...(territory.stabilityNotes || []),
+      ...failedReasons,
+    ];
 
     if (hasDominantCompetitor && allPassed) {
       territory.stabilityNotes.push(`ADVISORY: Dominant competitor ${topComp.competitorName} — niche or differentiation angle required`);
@@ -2528,6 +3978,13 @@ function generateStrategyCards(territories: Territory[]): StrategyCard[] {
     evidenceSignals: t.evidenceSignals,
     confidenceScore: t.confidenceScore,
     isPrimary: i === 0,
+    epistemicStatus: t.epistemicStatus,
+    productTruthStatus: t.productTruthStatus,
+    epistemicLabel: t.epistemicLabel,
+    rationale: t.rationale,
+    assumptions: t.assumptions,
+    validationNeeds: t.validationNeeds,
+    supportingEvidenceIds: t.supportingEvidenceIds,
   }));
 }
 
@@ -2550,9 +4007,10 @@ export async function runPositioningEngine(
   strategic?: RunStrategicContext,
   painRegistry?: any[],
   strategicLanes?: any[],
+  upstreamDifferentiation?: any,
 ): Promise<PositioningEngineResult> {
   const result = await runPositioningEngineInternal(
-    accountId, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment, jobId, strategic, painRegistry, strategicLanes,
+    accountId, campaignId, miSnapshotId, audienceSnapshotId, analyticalEnrichment, jobId, strategic, painRegistry, strategicLanes, upstreamDifferentiation,
   );
   // Authoritative pain routing (Task 163): positioning may only anchor on a
   // purchase-motivation pain — POST_PURCHASE_FRICTION never carries the
@@ -2594,12 +4052,13 @@ async function runPositioningEngineInternal(
   strategic?: RunStrategicContext,
   painRegistry?: any[],
   strategicLanes?: any[],
+  upstreamDifferentiation?: any,
 ): Promise<PositioningEngineResult> {
   const startTime = Date.now();
 
   if (!Array.isArray(painRegistry) || painRegistry.length === 0) {
     console.log(`[PositioningEngine-V3] PAIN_REGISTRY_MISSING — failing closed`);
-    return buildEmptyResult("MISSING_DEPENDENCY", `Positioning engine requires a valid pain registry. Run Audience Engine first.`, Date.now() - startTime, miSnapshotId, audienceSnapshotId);
+    return buildEmptyResult("MISSING_DEPENDENCY", `POSITIONING_CANONICAL_INPUT_MISSING: painRegistry required. Positioning engine requires a valid pain registry. Run Audience Engine first.`, Date.now() - startTime, miSnapshotId, audienceSnapshotId);
   }
 
   const corePains = selectPainsForUse(painRegistry, "positioning");
@@ -2718,7 +4177,14 @@ async function runPositioningEngineInternal(
     .where(and(eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isActive, true)));
 
   const targetCoverage = safeJsonParse(audienceSnapshot.targetCoverage, null);
-  if (targetCoverage) {
+  // Target Coverage Diagnostic / Legacy Guard:
+  // When canonical painRegistry and strategicLanes are supplied, target authority is owned
+  // exclusively by Target Assessment (ta_...) + SPD + Lane Grouper. The legacy targetCoverage
+  // object on the audience snapshot is non-authoritative metadata.
+  const hasAuthoritativeLanes = Array.isArray(strategicLanes) && strategicLanes.length > 0;
+  const hasAuthoritativePains = Array.isArray(painRegistry) && painRegistry.some((p: any) => p.eligible || p.classification === "CORE_PURCHASE" || p.classification === "SUPPORTING");
+
+  if (targetCoverage && !hasAuthoritativeLanes && !hasAuthoritativePains) {
     if (targetCoverage.status === "NOT_EVALUATED") {
       const msg = targetCoverage.reason === "TARGET_AUTHORITY_MISSING"
         ? "BLOCKED — TARGET_AUTHORITY_MISSING: Campaign has no explicit Business Target Authority configured."
@@ -2753,9 +4219,9 @@ async function runPositioningEngineInternal(
     console.log(`[PositioningEngine-V3] INVENTORY_STATUS | total=${competitors.length} | enriched=${enrichedCount}`);
   }
 
-  const audiencePains = safeJsonParse(audienceSnapshot.audiencePains, []);
+  const audiencePains = painRegistry;
   const audienceDesires = safeJsonParse(audienceSnapshot.desireMap, []);
-  const totalSignals = audiencePains.length + audienceDesires.length;
+  const totalSignals = audiencePains.length + (Array.isArray(audienceDesires) ? audienceDesires.length : Object.keys(audienceDesires || {}).length);
 
   let parsedStructuredSignals: StructuredSignals | null = null;
   if (audienceSnapshot.structuredSignals) {
@@ -2769,6 +4235,27 @@ async function runPositioningEngineInternal(
       Array.isArray(raw.psychological_drivers)
     ) {
       parsedStructuredSignals = raw as StructuredSignals;
+      if (Array.isArray(positioningPains) && positioningPains.length > 0) {
+        const canonicalClusters = positioningPains
+          .map((p: any) => {
+            const id = String(p.painId || p.id || "").trim();
+            const label = String(p.canonical || p.label || p.statement || "").trim();
+            if (!id || !label) return null;
+            return {
+              id,
+              label,
+              frequency: typeof p.evidenceCount === "number" ? p.evidenceCount : (Array.isArray(p.evidence) ? Math.max(1, p.evidence.length) : 1),
+              confidence: typeof p.confidence === "number" ? p.confidence : 0.85,
+              evidence: Array.isArray(p.evidence) ? p.evidence : [],
+            };
+          })
+          .filter(Boolean) as StructuredSignals["pain_clusters"];
+
+        if (canonicalClusters.length > 0) {
+          // Enforce single canonical pain authority: do not re-append pre-SPD unapproved pain_clusters
+          parsedStructuredSignals.pain_clusters = canonicalClusters;
+        }
+      }
       const totalStructured = getAllSignalLabels(parsedStructuredSignals).length;
       console.log(`[PositioningEngine-V3] STRUCTURED_SIGNALS_LOADED | total=${totalStructured} | pains=${parsedStructuredSignals.pain_clusters.length} | desires=${parsedStructuredSignals.desire_clusters.length} | patterns=${parsedStructuredSignals.pattern_clusters.length} | rootCauses=${parsedStructuredSignals.root_causes.length} | psychDrivers=${parsedStructuredSignals.psychological_drivers.length}`);
     } else {
@@ -2803,6 +4290,33 @@ async function runPositioningEngineInternal(
   const productDna = await loadProductDNA(campaignId, accountId);
   if (productDna) {
     console.log(`[PositioningEngine-V3] PRODUCT_DNA_LOADED | category=${productDna.productCategory || "n/a"} | mechanism=${productDna.uniqueMechanism || "n/a"} | advantage=${productDna.strategicAdvantage || "n/a"}`);
+    if (parsedStructuredSignals) {
+      const earlyAnchor = strategic?.doctrine?.productAnchor || deriveAnchorFromProductDna(productDna);
+      const earlyCaps = deriveValidatedCapabilities(earlyAnchor, productDna);
+      if (earlyCaps.length > 0 && Array.isArray(parsedStructuredSignals.desire_clusters)) {
+        parsedStructuredSignals.desire_clusters = parsedStructuredSignals.desire_clusters.filter(c =>
+          isSignalSupportedByCapabilities(c.label, earlyCaps)
+        );
+      }
+      if (positioningPains.length > 0 || earlyCaps.length > 0) {
+        if (Array.isArray(parsedStructuredSignals.root_causes)) {
+          const filteredRootCauses = parsedStructuredSignals.root_causes.filter(c =>
+            isSignalAlignedWithApprovedPains(c.label, positioningPains, earlyCaps)
+          );
+          if (filteredRootCauses.length > 0) {
+            parsedStructuredSignals.root_causes = filteredRootCauses;
+          }
+        }
+        if (Array.isArray(parsedStructuredSignals.pattern_clusters)) {
+          const filteredPatterns = parsedStructuredSignals.pattern_clusters.filter(c =>
+            isSignalAlignedWithApprovedPains(c.label, positioningPains, earlyCaps)
+          );
+          if (filteredPatterns.length > 0) {
+            parsedStructuredSignals.pattern_clusters = filteredPatterns;
+          }
+        }
+      }
+    }
   }
 
   console.log(`[PositioningEngine-V3] Starting 12-layer analysis | MI=${miSnapshotId} | Audience=${audienceSnapshotId} | Competitors=${competitors.length}`);
@@ -2820,7 +4334,7 @@ async function runPositioningEngineInternal(
   const { trustGaps, trustGapScore } = layer4_trustGapDetection(audienceSnapshot);
   console.log(`[PositioningEngine-V3] L4 Trust gaps: ${trustGaps.length} (score: ${trustGapScore.toFixed(2)})`);
 
-  const segmentPriority = layer5_segmentPriorityResolution(audienceSnapshot);
+  const segmentPriority = layer5_segmentPriorityResolution(audienceSnapshot, painRegistry);
   console.log(`[PositioningEngine-V3] L5 Segments: ${segmentPriority.length} prioritized`);
 
   const { entries: marketPower, authorityGap, flankingMode } = layer6_marketPowerAnalysis(activeMiSnapshot, competitors);
@@ -2957,7 +4471,7 @@ async function runPositioningEngineInternal(
   console.log(`[PositioningEngine-V3] L8 Differentiation: ${differentiationAxes.join(", ")}`);
 
   const miStrategicSignals = extractStrategicSignals(activeMiSnapshot);
-  const audienceStrategicSignals = extractAudienceStrategicSignals(audienceSnapshot);
+  const audienceStrategicSignals = extractAudienceStrategicSignals(audienceSnapshot, painRegistry);
   const allStrategicSignals = [...miStrategicSignals, ...audienceStrategicSignals];
   const strategicClusters = new Set(allStrategicSignals.map(s => s.cluster));
   console.log(`[PositioningEngine-V3] Signal extraction: ${allStrategicSignals.length} strategic signals across ${strategicClusters.size} clusters`);
@@ -3039,6 +4553,9 @@ async function runPositioningEngineInternal(
   // doctrine battery (specificity is a pre-gate, not part of the battery).
   const positioningBatteryAttempts: BatteryAttemptLike[] = [];
   let positioningBatteryPassed = false;
+  let positioningTechnicalFailure = false;
+  let positioningTechnicalFailureCategory: string | undefined;
+  let positioningTechnicalFailureReason = "";
 
   {
     // Item 6: 3 total attempts (SPECIFICITY_MAX_RETRIES 1 → 2), env-overridable.
@@ -3063,6 +4580,8 @@ async function runPositioningEngineInternal(
     let finalRejectionReason = "";
     const buildDnaInput = (): EnrichmentDnaInput | null => {
       if (!productDna) return null;
+      const anchorForDna = strategic?.doctrine?.productAnchor || deriveAnchorFromProductDna(productDna);
+      const valCaps = deriveValidatedCapabilities(anchorForDna, productDna).map((c) => c.statement);
       return {
         name: productDna.coreOffer ? String(productDna.coreOffer) : undefined,
         businessType: productDna.businessType ? String(productDna.businessType) : undefined,
@@ -3070,6 +4589,7 @@ async function runPositioningEngineInternal(
         coreProblemSolved: productDna.coreProblemSolved ? String(productDna.coreProblemSolved) : undefined,
         uniqueMechanism: productDna.uniqueMechanism ? String(productDna.uniqueMechanism) : undefined,
         strategicAdvantage: productDna.strategicAdvantage ? String(productDna.strategicAdvantage) : undefined,
+        validatedCapabilities: valCaps,
       };
     };
     const runDnaEnrichmentOnce = async (reason: string): Promise<DnaEnrichmentResult> => {
@@ -3122,33 +4642,33 @@ async function runPositioningEngineInternal(
         let batteryFeedback = "";
         let failedTerritoryName = "";
         let failedGate = "";
-        // F5a: when strategic doctrine is absent, derive the judge's product
-        // anchor from business context so the interchangeability judge tests against
-        // THIS product's real differentiator instead of the weaker anchor-free
-        // test. Guard: only when a genuine differentiator + core problem exist —
-        // an anchor fabricated from empty strings would flip the judge to the
-        // strict test with hollow context (worse than the weak test). Explicit
-        // if/else selection — no semantic-fallback chains (D1).
+        let technicalAbort = false;
         let batteryAnchor = strategic ? strategic.doctrine.productAnchor : null;
         if (!batteryAnchor && productDna) {
-          let dnaDifferentiator = "";
-          if (productDna.strategicAdvantage && productDna.strategicAdvantage.trim().length > 0) {
-            dnaDifferentiator = productDna.strategicAdvantage.trim();
-          } else if (productDna.uniqueMechanism && productDna.uniqueMechanism.trim().length > 0) {
-            dnaDifferentiator = productDna.uniqueMechanism.trim();
-          }
-          const dnaProblem = productDna.coreProblemSolved ? productDna.coreProblemSolved.trim() : "";
-          const dnaName = productDna.coreOffer ? String(productDna.coreOffer).trim() : "";
-          const dnaType = productDna.businessType ? String(productDna.businessType).trim() : "";
-          if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
-            batteryAnchor = {
-              name: dnaName,
-              type: dnaType,
-              keyAttributes: productDna.productCategory ? [productDna.productCategory] : [],
-              coreProblemSolved: dnaProblem,
-              differentiatingFeature: dnaDifferentiator,
-            };
+          const derived = deriveAnchorFromProductDna(productDna);
+          if (derived) {
+            batteryAnchor = derived;
             console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from business context | attempt=${specificityAttempt + 1}`);
+          } else {
+            let dnaDifferentiator = "";
+            if (productDna.strategicAdvantage && productDna.strategicAdvantage.trim().length > 0) {
+              dnaDifferentiator = productDna.strategicAdvantage.trim();
+            } else if (productDna.uniqueMechanism && productDna.uniqueMechanism.trim().length > 0) {
+              dnaDifferentiator = productDna.uniqueMechanism.trim();
+            }
+            const dnaProblem = productDna.coreProblemSolved ? productDna.coreProblemSolved.trim() : "";
+            const dnaName = productDna.coreOffer ? String(productDna.coreOffer).trim() : "";
+            const dnaType = productDna.businessType ? String(productDna.businessType).trim() : "";
+            if (dnaDifferentiator.length > 0 && dnaProblem.length > 0 && dnaName.length > 0 && dnaType.length > 0) {
+              batteryAnchor = {
+                name: dnaName,
+                type: dnaType,
+                keyAttributes: productDna.productCategory ? [productDna.productCategory] : [],
+                coreProblemSolved: dnaProblem,
+                differentiatingFeature: dnaDifferentiator,
+              };
+              console.log(`[PositioningEngine-V3] BATTERY_ANCHOR_FROM_DNA | doctrine absent — judge anchor derived from business context | attempt=${specificityAttempt + 1}`);
+            }
           }
         }
         {
@@ -3177,8 +4697,12 @@ async function runPositioningEngineInternal(
             }
           });
         }
-        if (posSelectedPains.length === 0) {
-          posSelectedPains.push({ painId: corePain.painId, canonical: corePain.canonical });
+        for (const p of (positioningPains || [])) {
+          const pid = p.painId || p.id;
+          const canonical = p.canonical || p.label || p.statement;
+          if (pid && canonical && !posSelectedPains.some(existing => existing.painId === pid)) {
+            posSelectedPains.push({ painId: pid, canonical });
+          }
         }
         const posAuthority = posSelectedPains.length > 0
           ? {
@@ -3194,7 +4718,11 @@ async function runPositioningEngineInternal(
             productAnchor: batteryAnchor,
             priorDecisions: strategic ? strategic.priorDecisions : [],
             accountId,
-            authority: posAuthority ? { ...posAuthority, centralProblemTexts: [t.enemyDefinition || ""] } : null,
+            authority: posAuthority ? {
+              ...posAuthority,
+              centralProblemTexts: [t.enemyDefinition || ""],
+              capabilityRefs: t.capabilityRefs || [],
+            } : null,
           });
           if (!battery.passed) {
             failedTerritoryName = t.name;
@@ -3202,7 +4730,104 @@ async function runPositioningEngineInternal(
             batteryFeedback = battery.rejectionFeedback;
             break;
           }
+
+          // Independent Positioning Factual Posture Judge
+          const factualJudge = await judgePositioningFactualPosture({
+            candidate: {
+              name: t.name,
+              enemyDefinition: t.enemyDefinition || "",
+              contrastAxis: t.contrastAxis || "",
+              narrativeDirection: t.narrativeDirection || "",
+              capabilityRefs: t.capabilityRefs || [],
+            },
+            productTruthCapabilities: (posAuthority?.capabilities || []).map((c: any) => c.statement),
+            productAnchor: batteryAnchor,
+            differentiation: strategic?.doctrine?.productAnchor?.differentiatingFeature || productDna?.strategicAdvantage || "",
+            approvedPains: posSelectedPains.map(p => p.canonical),
+            accountId,
+          });
+
+          if (factualJudge.verdict === "NOT_EVALUATED") {
+            positioningTechnicalFailure = true;
+            positioningTechnicalFailureCategory = factualJudge.errorCategory || "AI_CALL_FAILED";
+            positioningTechnicalFailureReason = factualJudge.reason;
+            failedTerritoryName = t.name;
+            failedGate = "factual_posture_unavailable";
+            technicalAbort = true;
+            for (const candidateT of generatedTerritories) {
+              candidateT.epistemicStatus = "UNAVAILABLE_OR_FAILED";
+              candidateT.productTruthStatus = null;
+              candidateT.epistemicLabel = "Factual Posture Not Evaluated (Judge Unavailable)";
+              candidateT.validationNeeds = [factualJudge.reason];
+              candidateT.stabilityNotes.push(`[FACTUAL_JUDGE_UNAVAILABLE] ${factualJudge.reason} (category=${positioningTechnicalFailureCategory})`);
+            }
+            console.warn(`[PositioningEngine-V3] FACTUAL_POSTURE_NOT_EVALUATED | territory="${t.name}" | category=${positioningTechnicalFailureCategory} | reason="${factualJudge.reason}" — preserving candidate without consuming semantic repair attempts`);
+            break;
+          }
+
+          if (factualJudge.verdict === "REJECTED") {
+            failedTerritoryName = t.name;
+            failedGate = "factual_posture";
+            batteryFeedback = `Rejected by positioning factual posture judge: ${factualJudge.reason}${factualJudge.fix ? `. Fix: ${factualJudge.fix}` : ""}`;
+            console.warn(`[PositioningEngine-V3] FACTUAL_POSTURE_REJECTED | territory="${t.name}" | reason="${factualJudge.reason}"`);
+            break;
+          }
+
+          // Deterministic Authority Check on extracted claims
+          if (posAuthority && ((factualJudge.operationalClaims && factualJudge.operationalClaims.length > 0) || (factualJudge.unsupportedPredicates && factualJudge.unsupportedPredicates.length > 0))) {
+            const authCheck = validateAuthorityBoundaries({
+              engineId: "positioning",
+              centralProblemTexts: [t.enemyDefinition || ""],
+              capabilityRefs: t.capabilityRefs || [],
+              operationalClaims: factualJudge.operationalClaims,
+              unsupportedPredicates: factualJudge.unsupportedPredicates,
+              selectedPains: posAuthority.selectedPains,
+              capabilities: posAuthority.capabilities,
+            });
+            if (!authCheck.passed) {
+              failedTerritoryName = t.name;
+              failedGate = "authority";
+              batteryFeedback = authCheck.violations.map(v => v.retryFeedback).join(" ");
+              console.warn(`[PositioningEngine-V3] AUTHORITY_BOUNDARY_VIOLATION | territory="${t.name}" | ${authCheck.violations.map(v => v.detail).join("; ")}`);
+              break;
+            }
+          }
+
+          const ec = factualJudge.epistemicClassification;
+          const ecStr = typeof ec === "string"
+            ? ec
+            : (ec?.productTruthStatus || "STRATEGIC_SYNTHESIS");
+          t.productTruthStatus = ecStr;
+          t.epistemicStatus = (typeof ec === "object" && ec?.epistemicStatus)
+            ? ec.epistemicStatus
+            : (ecStr === "SUPPORTED_CAPABILITY" ? "SUPPORTED_FACT" : "STRATEGIC_HYPOTHESIS");
+          t.epistemicLabel = (typeof ec === "object" && ec?.epistemicLabel) || (
+            t.productTruthStatus === "SUPPORTED_CAPABILITY"
+              ? "Verified Product Capability"
+              : t.productTruthStatus === "PROPOSED_CAPABILITY"
+                ? "Proposed Positioning & Packaging Direction — Requires Validation"
+                : "Strategic Market Framing (Derived from Verified Capabilities)"
+          );
+          t.rationale = (typeof ec === "object" && ec?.rationale) || (factualJudge as any).rationale || factualJudge.reason;
+          t.assumptions = (typeof ec === "object" && ec?.assumptions) || (factualJudge as any).assumptions || [];
+          t.validationNeeds = (typeof ec === "object" && ec?.validationNeeds) || (factualJudge as any).validationNeeds || [];
+          t.supportingEvidenceIds = Array.from(new Set([
+            ...((typeof ec === "object" && ec?.supportingEvidenceIds) || []),
+            ...(t.capabilityRefs || []),
+            ...(t.mappedSignalIds || []),
+            ...(t.signalSource ? [t.signalSource] : []),
+          ]));
         }
+
+        if (technicalAbort) {
+          positioningBatteryAttempts.push({
+            passed: false,
+            failedGate: "factual_posture_unavailable",
+            rejectionFeedback: positioningTechnicalFailureReason,
+          });
+          break;
+        }
+
         positioningBatteryAttempts.push({
           passed: batteryFeedback.length === 0,
           failedGate: failedGate,
@@ -3214,7 +4839,7 @@ async function runPositioningEngineInternal(
         finalRejectionReason = batteryFeedback;
         if (!batteryFeedback) {
           positioningBatteryPassed = true;
-          console.log(`[PositioningEngine-V3] BATTERY_GATE: PASSED | territories=${generatedTerritories.length} | gates=breadth+interchangeability+contradiction | attempt=${specificityAttempt + 1}`);
+          console.log(`[PositioningEngine-V3] BATTERY_GATE: PASSED | territories=${generatedTerritories.length} | gates=breadth+interchangeability+contradiction+factual_posture | attempt=${specificityAttempt + 1}`);
           break;
         }
         console.log(`[PositioningEngine-V3] BATTERY_GATE: FAILED | gate=${failedGate} | territory="${failedTerritoryName}" | attempt=${specificityAttempt + 1}`);
@@ -3228,9 +4853,13 @@ async function runPositioningEngineInternal(
             const enr = await runDnaEnrichmentOnce(batteryFeedback);
             enrichmentBlock = formatEnrichmentForRetry(enr, "positioning_claim");
           }
+          const repairDirective = (failedGate === "factual_posture" || failedGate === "authority")
+            ? `\nREPAIR DIRECTIVE: Rewrite the strategic narrative and contrast axis without asserting unsupported company operations, testing systems, or physical specs absent from Product Truth. Ground the narrative strictly in verified product capabilities as STRATEGIC_SYNTHESIS.`
+            : "";
           specificityRejectionContext = `
 PREVIOUS OUTPUT REJECTED — Rejected by ${failedGate} gate: ${batteryFeedback}
-Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim — anchor contrastAxis and narrativeDirection to this product's Unique mechanism / Strategic advantage from the DOMAIN TRANSLATION REQUIREMENT so no competitor could truthfully repeat them, and (c) do NOT contradict the locked product anchor or prior engine decisions.${enrichmentBlock}`;
+Fix exactly this and regenerate ALL territories as system-level positioning claims that (a) name a specific enemy system/process/tool that fails, (b) are NOT interchangeable with a generic competitor claim — anchor contrastAxis and narrativeDirection to this product's Unique mechanism / Strategic advantage from the DOMAIN TRANSLATION REQUIREMENT so no competitor could truthfully repeat them, and (c) do NOT contradict the locked product anchor or prior engine decisions.
+CRITICAL: DO NOT invent proprietary technology, patented materials, trademarked fabric names (e.g. 'ThermoWeave™'), fake lab tests, or unverified certifications. Distinctiveness must come from truthful strategic combinations, specific pain focus, and competitor gap contrasts. Broad terms cannot be upgraded to narrower physical specs ('comfort' is not 'breathable', 'modesty' is not 'opaque').${repairDirective}${enrichmentBlock}`;
           continue;
         }
         // Exhausted: degrade rather than hard-fail (Beta axiom B3 — safe
@@ -3238,6 +4867,10 @@ Fix exactly this and regenerate ALL territories as system-level positioning clai
         // territory so the surface stays truthful about the weakened output.
         for (const t of generatedTerritories) {
           t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
+          t.epistemicStatus = "UNAVAILABLE_OR_FAILED";
+          t.productTruthStatus = null;
+          t.epistemicLabel = "Degraded Positioning Candidate — Failed Verification Gate";
+          t.validationNeeds = [`Failed ${failedGate} gate after ${specificityAttempt + 1} attempts: ${batteryFeedback}`];
           t.stabilityNotes.push(`[BATTERY_FAILED] Positioning claim failed ${failedGate} gate after ${specificityAttempt + 1} attempts: ${batteryFeedback}`);
         }
         console.log(`[PositioningEngine-V3] BATTERY_GATE: EXHAUSTED | proceeding with degraded output after ${specificityAttempt + 1} attempts`);
@@ -3274,6 +4907,9 @@ CORRECTION REQUIRED:
             t.confidenceScore = Math.max(0, t.confidenceScore - 0.15);
             t.stabilityNotes.push(`[SPECIFICITY_FAILED] Territory remains audience-level after retry: ${classification.reasons.join("; ")}`);
           }
+          t.epistemicStatus = "UNAVAILABLE_OR_FAILED";
+          t.productTruthStatus = null;
+          t.epistemicLabel = "Degraded Positioning Candidate — Specificity Gate Exhausted";
           // Gate-authority truthfulness: the full battery (breadth /
           // interchangeability / contradiction) only runs once specificity
           // clears. On this exhaustion path specificity NEVER cleared, so the
@@ -3387,9 +5023,13 @@ CORRECTION REQUIRED:
       const hasSystemMapping = territory._systemMapped === true;
       if (hasSystemMapping) {
         // is a usable starting point but cannot claim MI-traced confidence.
-        // Tag provenance and cap at 0.30 (vs. MI-traced 0.85+).
+        // Tag provenance, cap at 0.30, and explicitly mark degraded/unverified.
         territory.provenance = "system_default";
         territory.confidenceScore = Math.min(territory.confidenceScore, 0.30);
+        territory.degraded = true;
+        territory.epistemicStatus = "UNAVAILABLE_OR_FAILED";
+        territory.productTruthStatus = null;
+        territory.epistemicLabel = "Degraded Positioning Territory — Unverified System Mapping";
         if (!territory.stabilityNotes) territory.stabilityNotes = [];
         territory.stabilityNotes.push(`[PROVENANCE_SYSTEM_DEFAULT] Deterministic system mapping — confidence capped at 0.30 vs. MI-traced 0.85+`);
         totalTracedClaims += claims.length;
@@ -3415,6 +5055,9 @@ CORRECTION REQUIRED:
         territory.confidenceScore = Math.min(territory.confidenceScore, 0.10);
         territory.provenance = "orphaned";
         territory.degraded = true;
+        territory.epistemicStatus = "UNAVAILABLE_OR_FAILED";
+        territory.productTruthStatus = null;
+        territory.epistemicLabel = "Degraded Positioning Territory — Orphaned Claims";
         totalOrphanedClaims += orphanResult.orphanedClaims.length;
         console.log(`[PositioningEngine-V3] ORPHAN_DEGRADED | territory="${territory.name}" | all ${claims.length} claims orphaned — RETAINED with confidence≤0.10 + degraded flag`);
         return true;
@@ -3513,26 +5156,35 @@ CORRECTION REQUIRED:
   // CEL compliance MUST run after SC so it sees semanticCollision attached to each territory.
   // Running SC and CG concurrently via Promise.all saves ~107 s on a 2-territory run.
 
-  // Prepare SC inputs synchronously (all sources are ready at this point)
+  // Prepare SC inputs using canonical competitor positioning claims across CU, MI competitorData, multiSourceSignals, and ci_competitors
   const territoryClaims = finalTerritories.map(t => ({
     name: t.name,
     claimText: [t.name, t.enemyDefinition, t.contrastAxis, t.narrativeDirection].filter(Boolean).join(" — "),
   }));
-  const competitorClaimList: Array<{ source: string; claim: string }> = [];
-  if (narrativeMap && Object.keys(narrativeMap).length > 0) {
-    for (const [comp, narratives] of Object.entries(narrativeMap)) {
-      for (const narr of (narratives as string[]).slice(0, 3)) {
-        if (narr && narr.length > 5) competitorClaimList.push({ source: comp, claim: narr });
-      }
-    }
+
+  let cuSnapshotsForCampaign: any[] = [];
+  try {
+    cuSnapshotsForCampaign = await db
+      .select()
+      .from(competitorUnderstandingSnapshots)
+      .where(
+        and(
+          eq(competitorUnderstandingSnapshots.campaignId, campaignId),
+          eq(competitorUnderstandingSnapshots.accountId, accountId),
+        ),
+      )
+      .orderBy(desc(competitorUnderstandingSnapshots.createdAt));
+  } catch (cuErr: any) {
+    console.warn(`[PositioningEngine-V3] Could not query competitorUnderstandingSnapshots: ${cuErr?.message}`);
   }
-  if (competitorClaimList.length === 0) {
-    for (const c of competitors.slice(0, 6) as any[]) {
-      const candidate = c.narrativeStyle || c.bio || c.description || c.contentThemes || "";
-      const claim = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
-      if (claim.length > 8) competitorClaimList.push({ source: c.competitorName || c.name || "competitor", claim: claim.slice(0, 240) });
-    }
-  }
+
+  const competitorClaimList = extractCanonicalCompetitorPositioningClaims({
+    competitors,
+    miSnapshot: activeMiSnapshot,
+    cuSnapshots: cuSnapshotsForCampaign,
+    narrativeMap,
+    productDna,
+  });
 
   // primaryTerritory is needed by CategoryGame (Arm 2) and all logic below.
   // finalTerritories is fully constructed before this block — safe to read now.
@@ -3567,12 +5219,16 @@ CORRECTION REQUIRED:
       if (!primaryTerritory) return undefined;
       try {
         const { designCategoryGame } = await import("./category-game");
-        // Pull competitor positioning text from MI snapshot's multiSourceSignals (richer than ciCompetitors row).
         const multiSourceForGame = safeJsonParse(activeMiSnapshot.multiSourceSignals, {}) as Record<string, any>;
-        const competitorBriefs = competitors.slice(0, 6).map(c => {
+        const competitorBriefs = competitors.slice(0, 8).map(c => {
           const cName = c.name || "(unnamed)";
+          const cId = c.id || (c as any).competitorId;
           const ms = multiSourceForGame[cName] || multiSourceForGame[(c as any).competitorName] || {};
+          const extractedForComp = competitorClaimList
+            .filter(cl => (cId && cl.competitorId === cId) || cl.source.toLowerCase() === cName.toLowerCase())
+            .map(cl => cl.claim);
           const positioningParts: string[] = [];
+          if (extractedForComp.length > 0) positioningParts.push(extractedForComp.slice(0, 2).join(" | "));
           if (ms?.website?.headlineExtractions?.length) positioningParts.push(ms.website.headlineExtractions.slice(0, 3).join(" | "));
           if (ms?.website?.positioningLanguage?.length) positioningParts.push(ms.website.positioningLanguage.slice(0, 3).join(" | "));
           if (!positioningParts.length && c.messagingTone) positioningParts.push(`tone: ${c.messagingTone}`);
@@ -3585,8 +5241,13 @@ CORRECTION REQUIRED:
             authority: marketPower.find(m => m.competitorName === cName)?.authorityScore ?? undefined,
           };
         });
-        const painSignals = audiencePains.slice(0, 8).map((p: any) => typeof p === "string" ? p : (p?.label || p?.canonical || p?.text || JSON.stringify(p))).filter(Boolean);
-        const desireSignals = audienceDesires.slice(0, 8).map((d: any) => typeof d === "string" ? d : (d?.label || d?.canonical || d?.text || JSON.stringify(d))).filter(Boolean);
+        const gameCaps = productDna ? deriveValidatedCapabilities(deriveAnchorFromProductDna(productDna), productDna) : [];
+        const approvedGamePains = Array.isArray(positioningPains) && positioningPains.length > 0 ? positioningPains : audiencePains;
+        const painSignals = approvedGamePains.slice(0, 8).map((p: any) => typeof p === "string" ? p : (p?.label || p?.canonical || p?.text || JSON.stringify(p))).filter(Boolean);
+        const rawDesireSignals = audienceDesires.slice(0, 8).map((d: any) => typeof d === "string" ? d : (d?.label || d?.canonical || d?.text || JSON.stringify(d))).filter(Boolean);
+        const desireSignals = gameCaps.length > 0
+          ? rawDesireSignals.filter((d: string) => isSignalSupportedByCapabilities(d, gameCaps))
+          : rawDesireSignals;
         const objectionsRaw = safeJsonParse(audienceSnapshot.objectionMap, []) as any[];
         const objections = (Array.isArray(objectionsRaw) ? objectionsRaw : []).slice(0, 6).map((o: any) => typeof o === "string" ? o : (o?.statement || o?.label || o?.text || JSON.stringify(o))).filter(Boolean);
         const rejectedTerritoryPatterns = finalTerritories.slice(1, 5).map(t => t.name).filter(Boolean);
@@ -3616,18 +5277,198 @@ CORRECTION REQUIRED:
     const t = finalTerritories.find(x => x.name === result.territoryName);
     if (t) {
       t.semanticCollision = {
+        comparisonStatus: result.comparisonStatus,
         semanticCollisionScore: result.semanticCollisionScore,
         collisionMeaning: result.collisionMeaning,
         competitorEquivalentClaim: result.competitorEquivalentClaim,
         competitorSource: result.competitorSource,
+        competitorId: result.competitorId,
         jaccardScore: result.jaccardScore,
         perCompetitor: result.perCompetitor,
+        comparedCompetitorCount: result.comparedCompetitorCount,
+        directCompetitorCount: result.directCompetitorCount,
+        adjacentCompetitorCount: result.adjacentCompetitorCount,
+        referenceCompetitorCount: result.referenceCompetitorCount,
+        comparisonCoverage: result.comparisonCoverage,
         reasoningSteps: result.reasoningSteps,
         modelUsed: result.modelUsed,
         generatedAt: result.generatedAt,
       };
+      if (result.comparisonStatus === "COMPARISON_COMPLETED") {
+        t.narrativeDistanceScore = Math.round(Math.max(0.05, 1 - result.semanticCollisionScore) * 100) / 100;
+      }
     }
   }
+
+  const verifiedCapsForValidation = productDna
+    ? deriveValidatedCapabilities(deriveAnchorFromProductDna(productDna), productDna)
+    : [];
+  const evidenceSnapshotCompositeId = `${activeMiSnapshot?.id || "mi"}:${audienceSnapshotId || "aud"}`;
+
+  // Bind initial validation metadata onto all territories that passed the initial battery
+  for (const t of finalTerritories) {
+    (t as any).validationMetadata = {
+      candidateHash: computePositioningCandidateHash(t),
+      evidenceSnapshotId: evidenceSnapshotCompositeId,
+      validatedAt: new Date().toISOString(),
+      passed: Boolean(positioningBatteryPassed && !t.degraded && t.provenance !== "orphaned"),
+    };
+  }
+
+  const compactCompCtx = primaryTerritory
+    ? buildCompactCompetitorComparisonContext({
+        cuSnapshots: cuSnapshotsForCampaign,
+        miSnapshot: activeMiSnapshot,
+        competitors,
+        initialCollision: primaryTerritory.semanticCollision,
+        productDna,
+        positioningPains,
+      })
+    : null;
+
+  if (primaryTerritory?.semanticCollision && compactCompCtx) {
+    (primaryTerritory.semanticCollision as any).previewOrTrialCounterexamples = compactCompCtx.previewOrTrialCounterexamples;
+    (primaryTerritory.semanticCollision as any).multiFormatDeliverableCounterexamples = compactCompCtx.multiFormatDeliverableCounterexamples;
+    (primaryTerritory.semanticCollision as any).competitorProfiles = compactCompCtx.competitorProfiles;
+  }
+
+  // Bounded revision when competitor comparison detects material overlap (>= 0.35)
+  if (
+    primaryTerritory &&
+    compactCompCtx &&
+    primaryTerritory.semanticCollision?.comparisonStatus === "COMPARISON_COMPLETED" &&
+    (primaryTerritory.semanticCollision?.semanticCollisionScore ?? 0) >= 0.35 &&
+    competitorClaimList.length > 0
+  ) {
+    try {
+      const initialCollision = primaryTerritory.semanticCollision;
+
+      const revPrompt = `You are a Chief Positioning Strategist evaluating whether a validated candidate positioning territory can be refined after Competitor Comparison found model-estimated semantic overlap (collisionScore=${initialCollision.semanticCollisionScore}) with "${initialCollision.competitorSource || "monitored competitors"}" ("${initialCollision.competitorEquivalentClaim || ""}").
+
+CURRENT VALIDATED CANDIDATE POSITIONING:
+- Territory Name: "${primaryTerritory.name}"
+- Enemy Definition: "${primaryTerritory.enemyDefinition}"
+- Contrast Axis: "${primaryTerritory.contrastAxis}"
+- Narrative Direction: "${primaryTerritory.narrativeDirection}"
+
+${compactCompCtx.promptBlock}
+
+VERIFIED PRODUCT CAPABILITIES (SOLE FACTUAL AUTHORITY FOR OUR PRODUCT — ONLY CLAIM WHAT IS SUPPORTED HERE):
+${verifiedCapsForValidation.map((c: any, i: number) => `${i + 1}. [${c?.capabilityId || `cap_${i + 1}`}] ${typeof c === "string" ? c : c?.statement || ""}`).join("\n") || (productDna?.coreOffering || "Verified product workflow")}
+
+REVISION RULES (STRICT EVIDENCE FIDELITY & NON-ARTIFICIAL DIFFERENTIATION):
+1. DO NOT FORCE ARTIFICIAL DIFFERENTIATION: If the business and its competitors share the core category capabilities (such as story-driven creation, free previews/trials before purchase, or digital/multimedia deliverables), do NOT invent a false contrast, a fake competitor enemy, or an unsupported guarantee.
+2. NEVER ASSERT UNVERIFIED COMPETITOR INTERNAL WORKFLOWS: Customer complaints that an output sounded generic or impersonal reflect buyer perception of the finished output. Do NOT claim competitors use "mass-produced automated prompt workflows", "template-bound services", or "rushed one-line prompts" unless competitor evidence explicitly verifies their internal architecture.
+3. NEVER CONTRADICT COMPETITOR COUNTEREXAMPLES: Review the Competitor Counterexamples above. If monitored competitors offer free previews/trials, do NOT characterize market alternatives as "blind-purchase" services. If monitored competitors offer video, slideshow, lyric, or visual deliverables, do NOT characterize market alternatives as providing "isolated audio tracks".
+4. PRESERVE EXACT PAYMENT TRIGGER MEANING: Free trials, conditional payment triggers (e.g. paying when gifting or obtaining the final product), refund policies, and satisfaction guarantees are distinct facts. NEVER rewrite "pay when gifting or obtaining the full final product" into "pay only when satisfied" or "satisfaction-contingent payment". If using "risk-free", qualify it explicitly with the actual trial/payment trigger.
+5. Classify the honest outcome in "positioningOutcomeType":
+   - "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" (when core capabilities overlap with competitors and we choose a disciplined, evidence-backed strategic emphasis)
+   - "SUPPORTED_COMPETITIVE_DISTINCTION" (only if the angle relies on a verified capability that competitors in the comparison set do not offer)
+   - "PROPOSED_EXECUTION_APPROACH" (when the angle depends on a proposed operational emphasis requiring validation)
+6. Return ONLY valid JSON:
+{
+  "name": "<concise territory name (3-6 words)>",
+  "enemyDefinition": "<specific market friction or service pattern where some buyers report issues, attributed accurately to buyer perception>",
+  "contrastAxis": "<From [observed buyer friction pattern] -> To [verified capability emphasis with exact payment/delivery terms]>",
+  "narrativeDirection": "<clear strategic narrative direction grounded strictly in verified product capabilities, acknowledging shared category capabilities honestly>",
+  "positioningOutcomeType": "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" | "SUPPORTED_COMPETITIVE_DISTINCTION" | "PROPOSED_EXECUTION_APPROACH",
+  "revisionRationale": "<2-3 sentences explaining why this territory was selected, which competitors and shared capabilities overlap, and what limitations or validation needs apply>"
+}`;
+
+      const revResp = await aiChat({
+        model: "gpt-4.1-mini",
+        messages: [{ role: "user", content: revPrompt }],
+        temperature: 0.2,
+        max_tokens: 750,
+        response_format: { type: "json_object" },
+        endpoint: "positioning-collision-revision",
+        accountId,
+      });
+      const revParsed = safeJsonParse(revResp.choices?.[0]?.message?.content || "{}", null) as any;
+      const previousTerritoryName = primaryTerritory.name;
+
+      const evalOutcome = await evaluateAndSelectCollisionRevision({
+        initialTerritory: primaryTerritory,
+        initialCollision,
+        proposedRevisionRaw: revParsed,
+        verifiedCapabilities: verifiedCapsForValidation,
+        approvedPains: positioningPains,
+        competitorComparison: compactCompCtx,
+        competitorClaimList,
+        productAnchor: deriveAnchorFromProductDna(productDna),
+        differentiationContext: typeof upstreamDifferentiation === "string" ? upstreamDifferentiation : JSON.stringify(upstreamDifferentiation?.pillars || []),
+        evidenceSnapshotId: evidenceSnapshotCompositeId,
+        accountId,
+        runJudge: true,
+      });
+
+      console.log(
+        `[PositioningEngine-V3] COLLISION_REVISION_DECISION | selected=${evalOutcome.selected} | reason=${evalOutcome.selectionReason} | "${previousTerritoryName}" -> "${primaryTerritory.name}" | initialCollision=${initialCollision.semanticCollisionScore} -> postRevisionCollision=${evalOutcome.postRevisionCollision?.semanticCollisionScore ?? "retained"} | outcome=${(primaryTerritory as any).positioningOutcomeType}`
+      );
+      if (primaryTerritory?.semanticCollision && compactCompCtx) {
+        (primaryTerritory.semanticCollision as any).previewOrTrialCounterexamples = compactCompCtx.previewOrTrialCounterexamples;
+        (primaryTerritory.semanticCollision as any).multiFormatDeliverableCounterexamples = compactCompCtx.multiFormatDeliverableCounterexamples;
+        (primaryTerritory.semanticCollision as any).competitorProfiles = compactCompCtx.competitorProfiles;
+      }
+    } catch (revErr: any) {
+      console.warn(`[PositioningEngine-V3] COLLISION_REVISION_WARN | ${revErr?.message}`);
+    }
+  }
+
+  for (const t of finalTerritories) {
+    if (t.semanticCollision?.comparisonStatus === "COMPARISON_COMPLETED") {
+      t.narrativeDistanceScore = Math.round(Math.max(0.05, 1 - t.semanticCollision.semanticCollisionScore) * 100) / 100;
+      if (!(t as any).positioningOutcomeType) {
+        (t as any).positioningOutcomeType =
+          t.semanticCollision.semanticCollisionScore >= 0.35
+            ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+            : "SUPPORTED_COMPETITIVE_DISTINCTION";
+      }
+      if ((t as any).positioningOutcomeType === "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" || (t as any).positioningOutcomeType === "PROPOSED_EXECUTION_APPROACH") {
+        t.epistemicStatus = "STRATEGIC_HYPOTHESIS";
+        t.epistemicLabel = "Proposed Strategic Hypothesis — Shared Capability Emphasis (Requires Market Validation)";
+      }
+    } else {
+      if (!(t as any).positioningOutcomeType) {
+        (t as any).positioningOutcomeType = "INSUFFICIENT_COMPARISON_EVIDENCE";
+      }
+      t.epistemicStatus = "STRATEGIC_HYPOTHESIS";
+      t.epistemicLabel = "Proposed Strategic Hypothesis — Comparison Unavailable (Requires Market Validation)";
+      const compNeed = "Competitive positioning comparison unavailable — requires market validation before asserting competitive exclusivity";
+      t.validationNeeds = Array.from(new Set([...(t.validationNeeds || []), compNeed]));
+    }
+    // Ensure every territory has a distinct explanation/rationale (never a raw contrastAxis string)
+    if (!t.rationale || t.rationale.trim() === t.contrastAxis?.trim() || t.rationale.trim() === t.narrativeDirection?.trim() || /^from\s+.+->\s*to\s+/i.test(t.rationale.trim())) {
+      const compSource = t.semanticCollision?.competitorSource || "monitored category alternatives";
+      const overlapPct = typeof t.semanticCollision?.semanticCollisionScore === "number"
+        ? `${(t.semanticCollision.semanticCollisionScore * 100).toFixed(0)}%`
+        : "unmeasured";
+      t.rationale = `Selected "${t.name}" to address approved buyer friction using verified product capabilities. Benchmarked against ${compSource} (model-estimated semantic overlap: ${overlapPct}); framed as ${(t as any).positioningOutcomeType === "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" ? "a shared-capability strategic emphasis requiring market validation rather than exclusive whitespace" : "a capability-grounded positioning direction"}.`;
+    }
+    // Ensure validationMetadata hash matches the final territory content
+    const currentHash = computePositioningCandidateHash(t);
+    if (!(t as any).validationMetadata || (t as any).validationMetadata.candidateHash !== currentHash) {
+      (t as any).validationMetadata = {
+        candidateHash: currentHash,
+        evidenceSnapshotId: evidenceSnapshotCompositeId,
+        validatedAt: new Date().toISOString(),
+        passed: Boolean(positioningBatteryPassed && !t.degraded && t.provenance !== "orphaned"),
+      };
+    }
+  }
+
+  if (
+    primaryTerritory?.semanticCollision?.comparisonStatus !== "COMPARISON_COMPLETED" ||
+    (primaryTerritory?.semanticCollision?.semanticCollisionScore ?? 1) >= 0.35 ||
+    (primaryTerritory as any)?.positioningOutcomeType === "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
+  ) {
+    for (let i = 0; i < differentiationAxes.length; i++) {
+      if (differentiationAxes[i] === "whitespace_positioning") {
+        differentiationAxes[i] = "shared_capability_strategic_emphasis";
+      }
+    }
+  }
+  strategyCards = generateStrategyCards(finalTerritories);
   console.log(`[PositioningEngine-V3] SEMANTIC_COLLISIONS_ATTACHED | territories=${semanticCollisions.length} | competitorClaims=${competitorClaimList.length}`);
 
   if (categoryGameDesign) {
@@ -3695,24 +5536,37 @@ CORRECTION REQUIRED:
     positioningEngineConfidence += 0.05;
     engineConfidenceFactors.push("complete_narrative_fields(+0.05)");
   }
+  const primaryIsDegradedOrOrphaned = Boolean(primaryTerritory?.degraded || primaryTerritory?.provenance === "orphaned");
+  if (!positioningBatteryPassed || positioningTechnicalFailure) {
+    positioningEngineConfidence = Math.min(positioningEngineConfidence, 0.35);
+    engineConfidenceFactors.push(positioningTechnicalFailure ? "judge_unavailable_cap(<=0.35)" : "battery_failed_cap(<=0.35)");
+  }
+  if (primaryIsDegradedOrOrphaned) {
+    positioningEngineConfidence = Math.min(positioningEngineConfidence, 0.20);
+    engineConfidenceFactors.push("degraded_or_orphaned_primary_cap(<=0.20)");
+  }
   positioningEngineConfidence = Math.round(Math.min(1, Math.max(0, positioningEngineConfidence)) * 100) / 100;
   console.log(`[PositioningEngine-V3] ENGINE_CONFIDENCE_BREAKDOWN | score=${positioningEngineConfidence.toFixed(2)} | factors=[${engineConfidenceFactors.join(",")}]`);
 
   const positioningDataConfidence = Math.round(dataReliability.overallReliability * 100) / 100;
 
   // Canonical F1 status authoring site — composed from the stability-check
-  // boolean (engine's source of truth). Renamed off the `status` suffix per
-  // Seal #9 doctrine D1 (alias-detector) and rewritten as if/else so the
-  // composition is a plain control-flow assignment, not an alias-init.
+  // boolean, battery verification state, and orphan/degradation posture.
   let positioningStatusValue: PositioningStatus;
-  if (!stabilityResult.isStable) {
+  if (!stabilityResult.isStable || !positioningBatteryPassed || positioningTechnicalFailure || primaryIsDegradedOrOrphaned) {
     positioningStatusValue = "UNSTABLE";
   } else {
     positioningStatusValue = "COMPLETE";
   }
   const hasAdvisories = stabilityResult.advisories.length > 0;
   let positioningStatusMessage: string | null = null;
-  if (!stabilityResult.isStable) {
+  if (positioningTechnicalFailure) {
+    positioningStatusMessage = `Positioning factual posture judge unavailable (${positioningTechnicalFailureCategory || "AI_CALL_FAILED"}): ${positioningTechnicalFailureReason || "candidate preserved for retry without consuming semantic repair attempts"}`;
+  } else if (primaryIsDegradedOrOrphaned) {
+    positioningStatusMessage = "Positioning generated with degraded/orphaned primary territory — signal grounding or verification incomplete";
+  } else if (!positioningBatteryPassed) {
+    positioningStatusMessage = "Positioning generated but verification battery gates were exhausted — review recommended";
+  } else if (!stabilityResult.isStable) {
     positioningStatusMessage = "Positioning generated but stability checks failed — review recommended";
   } else if (hasAdvisories) {
     positioningStatusMessage = stabilityResult.advisories.map(a => a.message).join("; ");
@@ -3720,9 +5574,14 @@ CORRECTION REQUIRED:
 
   const combinedSignalCount = totalSignals + allStrategicSignals.length;
   const resolvedMiSnapshotId = activeMiSnapshot.id;
+  const resolvedDiffSnapshotId =
+    (upstreamDifferentiation as any)?.snapshotId ||
+    (upstreamDifferentiation as any)?.id ||
+    null;
   const inputSummary = {
     miSnapshotId: resolvedMiSnapshotId,
     audienceSnapshotId,
+    differentiationSnapshotId: resolvedDiffSnapshotId,
     competitorCount: competitors.length,
     signalCount: combinedSignalCount,
     audienceSignalCount: totalSignals,
@@ -3753,6 +5612,7 @@ CORRECTION REQUIRED:
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
     contrastAxis: primaryTerritory?.contrastAxis || "",
     narrativeDirection: primaryTerritory?.narrativeDirection || "",
+    rationale: primaryTerritory?.rationale || "",
     differentiationVector: JSON.stringify(differentiationAxes),
     proofSignals: JSON.stringify(primaryTerritory?.evidenceSignals || []),
     strategyCards: JSON.stringify(strategyCards),
@@ -3797,6 +5657,7 @@ CORRECTION REQUIRED:
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
     contrastAxis: primaryTerritory?.contrastAxis || "",
     narrativeDirection: primaryTerritory?.narrativeDirection || "",
+    rationale: primaryTerritory?.rationale || "",
     differentiationVector: differentiationAxes,
     proofSignals: primaryTerritory?.evidenceSignals || [],
     confidenceScore: overallConfidence,

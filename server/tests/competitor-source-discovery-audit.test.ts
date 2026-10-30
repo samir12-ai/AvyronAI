@@ -260,7 +260,6 @@ describe("Avyron Competitor Source Discovery Audit (15-Point Suite)", { timeout:
     expect(webOnlyAvailability.primarySource).toBe("website");
 
     const multiSourceAvailability = computeSourceAvailability({
-      profileLink: "https://instagram.com/realbrand",
       postsCollected: 25,
       websiteUrl: "https://realbrand.com",
       websiteEnrichmentStatus: "COMPLETE",
@@ -335,6 +334,6 @@ describe("Avyron Competitor Source Discovery Audit (15-Point Suite)", { timeout:
     });
 
     expect(competitor.platform).toBe("website");
-    expect(competitor.profileLink).not.toContain("instagram.com/pureb2bsoftware");
+    // profileLink removed from competitor entity
   });
 });

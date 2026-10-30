@@ -8,6 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { ShellTheme } from '@/constants/ShellTheme';
 import type { AudiencePositioningViewModel } from '@/types/audience-positioning';
 
@@ -16,9 +17,32 @@ interface Props {
 }
 
 export default function PositioningIntelligenceView({ data }: Props) {
+  const router = useRouter();
   const [showDecisionHistory, setShowDecisionHistory] = useState(false);
 
   const { positioning } = data;
+
+  if (!data.hasPositioning || !positioning?.umbrellaPosition) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+        <View style={styles.emptyStateCard}>
+          <Feather name="compass" size={32} color="#6B7280" style={{ marginBottom: 12 }} />
+          <Text style={styles.emptyStateTitle}>No Positioning Intelligence Generated</Text>
+          <Text style={styles.emptyStateSubtitle}>
+            No Positioning Intelligence has been generated for this campaign yet. Run the Strategy engine to establish market positioning, strategic narratives, and differentiation vectors.
+          </Text>
+          <Pressable
+            style={{ marginTop: 16, backgroundColor: '#8B5CF6', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+            onPress={() => router.push('/(tabs)/strategy-plan')}
+          >
+            <Feather name="zap" size={14} color="#FFFFFF" />
+            <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>Open Strategy Plan</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+    );
+  }
+
   const { reasoningJourney, brandSpine, validation, decisionHistory } = positioning;
 
   return (
@@ -30,9 +54,32 @@ export default function PositioningIntelligenceView({ data }: Props) {
             <Feather name="compass" size={12} color="#A78BFA" style={{ marginRight: 5 }} />
             <Text style={styles.badgePrimaryText}>YOUR MARKET POSITION</Text>
           </View>
-          <View style={styles.statusPill}>
-            <View style={styles.statusDot} />
-            <Text style={styles.statusText}>Approved Strategy</Text>
+          <View style={[
+            styles.statusPill,
+            positioning.epistemicStatus === 'UNAVAILABLE_OR_FAILED' || positioning.positioningStatus === 'UNSTABLE'
+              ? { backgroundColor: '#EF444420' }
+              : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
+                ? { backgroundColor: '#F59E0B20' }
+                : undefined,
+          ]}>
+            <View style={[
+              styles.statusDot,
+              positioning.epistemicStatus === 'UNAVAILABLE_OR_FAILED' || positioning.positioningStatus === 'UNSTABLE'
+                ? { backgroundColor: '#EF4444' }
+                : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
+                  ? { backgroundColor: '#F59E0B' }
+                  : undefined,
+            ]} />
+            <Text style={[
+              styles.statusText,
+              positioning.epistemicStatus === 'UNAVAILABLE_OR_FAILED' || positioning.positioningStatus === 'UNSTABLE'
+                ? { color: '#F87171' }
+                : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
+                  ? { color: '#FBBF24' }
+                  : undefined,
+            ]}>
+              {positioning.epistemicLabel || (data.hasPlan ? 'Approved Strategy' : 'Strategic Baseline')}
+            </Text>
           </View>
         </View>
 
@@ -43,6 +90,15 @@ export default function PositioningIntelligenceView({ data }: Props) {
           <View style={styles.contrastBox}>
             <Text style={styles.contrastLabel}>STRATEGIC CONTRAST AXIS</Text>
             <Text style={styles.contrastText}>{positioning.contrastAxis}</Text>
+          </View>
+        ) : null}
+
+        {positioning.validationNeeds && positioning.validationNeeds.length > 0 ? (
+          <View style={[styles.contrastBox, { marginTop: 10, borderColor: '#F59E0B40', backgroundColor: '#F59E0B10' }]}>
+            <Text style={[styles.contrastLabel, { color: '#FBBF24' }]}>VALIDATION REQUIRED BEFORE CLAIMING AS PRODUCT FACT</Text>
+            {positioning.validationNeeds.map((need, idx) => (
+              <Text key={idx} style={[styles.contrastText, { fontSize: 13, marginTop: idx > 0 ? 4 : 0 }]}>• {need}</Text>
+            ))}
           </View>
         ) : null}
       </View>
@@ -199,18 +255,27 @@ export default function PositioningIntelligenceView({ data }: Props) {
       {/* ── 4. HOW THIS DECISION WAS VALIDATED ── */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
-          <Feather name="check-square" size={16} color="#10B981" style={{ marginRight: 8 }} />
+          <Feather
+            name={validation.length > 0 && validation.every(v => v.passed) ? "check-square" : "alert-circle"}
+            size={16}
+            color={validation.length > 0 && validation.every(v => v.passed) ? "#10B981" : "#F59E0B"}
+            style={{ marginRight: 8 }}
+          />
           <Text style={styles.sectionTitle}>HOW THIS DECISION WAS VALIDATED</Text>
         </View>
         <Text style={styles.sectionSubtitle}>
-          Multi-layer integrity gates verified this positioning choice against buyer pain, product truth, and competitor whitespace.
+          {validation.length === 0
+            ? "Positioning validation checks have not yet been recorded for this snapshot."
+            : validation.every(v => v.passed)
+              ? `All ${validation.length} integrity and competitive comparison checks passed against buyer pain, product truth, and competitor claims.`
+              : `${validation.filter(v => v.passed).length} of ${validation.length} validation checks passed — review flagged items below before treating proposed or unverified elements as proven.`}
         </Text>
 
         <View style={styles.validationGrid}>
           {validation.map((v, idx) => (
             <View key={idx} style={styles.validationItem}>
-              <View style={styles.validationIconBox}>
-                <Feather name="check" size={14} color="#10B981" />
+              <View style={[styles.validationIconBox, !v.passed ? { backgroundColor: '#F59E0B20', borderColor: '#F59E0B40' } : undefined]}>
+                <Feather name={v.passed ? 'check' : 'alert-triangle'} size={14} color={v.passed ? '#10B981' : '#F59E0B'} />
               </View>
               <View style={styles.validationTextCol}>
                 <Text style={styles.validationLabel}>{v.label}</Text>
@@ -656,5 +721,28 @@ const styles = StyleSheet.create({
   historyAuthority: {
     fontSize: 11,
     color: '#6B7280',
+  },
+  emptyStateCard: {
+    backgroundColor: '#161B22',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#1E2535',
+    padding: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  emptyStateTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 8,
+  },
+  emptyStateSubtitle: {
+    fontSize: 13,
+    color: '#9CA3AF',
+    textAlign: 'center',
+    lineHeight: 20,
+    maxWidth: 480,
   },
 });

@@ -80,27 +80,27 @@ const JudgeOutputSchema = z.object({
 // Per-kind interchangeability test text (the only thing that varies by shape).
 // ---------------------------------------------------------------------------
 
-const KIND_TEST: Record<JudgeKind, { label: string; test: string; examples: string }> = {
+export const KIND_TEST: Record<JudgeKind, { label: string; test: string; examples: string }> = {
   segment: {
     label: "AUDIENCE SEGMENT DEFINITION",
     test:
-      "A segment FAILS only when it is so broad or vague that it is a pure zero-information tautology ('people who exist', 'consumers who buy things', 'people looking for general solutions'). A segment PASSES when it describes a group with a specific health, physiological, recovery, aesthetic, or wellness concern (e.g. individuals with body image or weight management plateaus, aging adults managing skin elasticity or wrinkles, individuals with chronic joint or tendinitis pain, athletes managing muscle recovery). Multiple competitors legitimately serve these same audience concerns — do NOT reject a segment because another competitor could also target body image, anti-aging, or injury recovery. Do NOT demand brand exclusivity, proprietary clinical protocols, or B2B buyer roles.",
+      "A segment FAILS only when it is so broad or vague that it is a pure zero-information tautology ('people who exist', 'consumers who buy things', 'people looking for general solutions'). A segment PASSES when it describes a buyer group with a specific functional, emotional, operational, or situational need grounded in the offering's market context (e.g. consumers seeking personalized milestone gifts under tight deadlines, operations leads managing multi-team handoff bottlenecks, buyers evaluating reliability before purchase). Multiple competitors legitimately serve these same audience concerns — do NOT reject a segment because another competitor could also target the same buyer need. Do NOT demand brand exclusivity or industry-irrelevant jargon.",
     examples:
-      'Generic (REJECT): "people who want to buy products", "anyone looking for results". Specific (ACCEPT): "Individuals struggling with body image and stubborn weight loss plateaus", "Adults experiencing chronic tendinitis and rotator cuff pain", "Aging adults seeking skin elasticity and wrinkle reduction", "Athletes managing post-exercise muscle recovery". ALWAYS ACCEPT condition-specific consumer segments.',
+      'Generic (REJECT): "people who want to buy products", "anyone looking for results". Specific (ACCEPT): "Gift buyers seeking emotionally resonant personalized presents for milestone occasions", "Operations leads managing cross-team handoff delays", "Consumers comparing transparent pricing and preview options before purchase". ALWAYS ACCEPT context-specific buyer segments.',
   },
   positioning_claim: {
     label: "POSITIONING CLAIM / TERRITORY",
     test:
-      "Could this claim or territory be made, UNCHANGED, by any generic competitor in the category? Claims like \"most trusted\", \"best value\", \"innovative solution\" are interchangeable and FAIL. A valid claim ties to THIS product's differentiating feature or mechanism in a way a competitor could not truthfully repeat. NOTE: If market evidence indicates minimal true differentiation, an explicit statement acknowledging limited differentiation and establishing a capability gap is VALID and should be ACCEPTED.",
+      "A positioning claim or territory FAILS ONLY when it is generic category boilerplate or empty puffery ('most trusted', 'best value', 'innovative solution', 'high quality service') that names no concrete product capabilities, deliverables, workflows, or specific customer problem. A claim PASSES and MUST be ACCEPTED when it explicitly anchors to THIS product's VALIDATED PRODUCT CAPABILITIES (or Reference Product key attributes / differentiating feature) and addresses a specific AUTHORIZED CUSTOMER PROBLEM or named competitor gap. CRITICAL: Multiple competitors in a category may legitimately offer similar capabilities or deliverables (shared-capability strategic emphasis). Do NOT reject a claim because another competitor in the category could hypothetically offer similar capabilities, and NEVER demand unverified claims that competitors fail, non-replicable superiority, invented proprietary technology, trademarked system names, or capabilities outside VALIDATED PRODUCT CAPABILITIES.",
     examples:
-      'Generic (REJECT): "the smart choice for modern teams". Specific (ACCEPT): a claim anchored to the named differentiating feature or an explicit acknowledgement of market parity / capability gap.',
+      'Generic (REJECT): "the smart choice for modern customers", "high quality service you can trust". Specific (ACCEPT): any claim that names concrete validated product capabilities/deliverables/workflows and ties them to an authorized customer problem, strategic combination of verified capabilities, or explicit market-emphasis choice.',
   },
   offer: {
     label: "OFFER (outcome + mechanism language)",
     test:
-      "Could this offer's outcome and mechanism language be attached, UNCHANGED, to a generic competitor's product? Vague outcomes (\"get results\", \"save money\") paired with vague mechanisms (\"our proven system\") are interchangeable and FAIL. A valid offer names the specific outcome THIS product's mechanism produces and includes clear risk reduction and commercial tradeoffs.",
+      "An offer FAILS ONLY when its outcome and mechanism language are vague category slogans ('get results', 'save money', 'transform your life with our proven system') with no concrete deliverables or workflow. A valid offer PASSES and MUST be ACCEPTED when it names the specific outcome and deliverables THIS product produces grounded in VALIDATED PRODUCT CAPABILITIES and includes clear risk reduction or commercial boundaries. CRITICAL: Do NOT reject an offer because another competitor in the category could offer similar deliverables, and NEVER demand patented technology, invented guarantees, unverified SLAs, or capabilities outside VALIDATED PRODUCT CAPABILITIES.",
     examples:
-      'Generic (REJECT): "transform your business with our proven system". Specific (ACCEPT): a named outcome produced by the named mechanism with explicit commercial terms and boundaries.',
+      'Generic (REJECT): "transform your results with our proven system". Specific (ACCEPT): a named outcome produced by verified capabilities/deliverables with explicit commercial terms, risk reduction, or boundaries.',
   },
   channel_rationale: {
     label: "CHANNEL RECOMMENDATION RATIONALE",
@@ -121,21 +121,21 @@ const KIND_TEST: Record<JudgeKind, { label: string; test: string; examples: stri
     test:
       "Reject if ANY of these hold: (1) The output provides generic business advice that could apply to virtually any business without market evidence (e.g. \"build trust\", \"use social proof\", \"maintain consistent presence\", \"focus on quality\"); (2) The output fails to define an actual strategic choice that changes what the business should do; (3) The output lacks a meaningful tradeoff or explicit \"what NOT to do\". A valid strategic decision explains the commercial consequence of the observed problem, defines a concrete strategic response, and specifies what the business must avoid. NOTE: An honest admission of a proof gap or capability gap is VALID and should be ACCEPTED.",
     examples:
-      'Generic (REJECT): "Build trust with clinics through high quality content and proof-led persuasion." Specific (ACCEPT): "Lead the procurement proposition with verified batch consistency and delivery reliability rather than broad therapeutic health claims for clinic buyers; do not lead B2B procurement messaging with consumer recovery outcomes."',
+      'Generic (REJECT): "Build trust with buyers through high quality content and proof-led persuasion." Specific (ACCEPT): "Lead the primary acquisition proposition with verified preview transparency and upfront pricing rather than unverified speed claims; do not lead consumer acquisition messaging with B2B partnership terms."',
   },
   brand_spine: {
     label: "BRAND SPINE & UMBRELLA POSITIONING",
     test:
-      "Reject if ANY of these hold: (1) The Brand Spine smushes conflicting lane pains together into an incoherent contrast axis (e.g. \"body image struggles vs clinic trust doubts\"); (2) It relies on invented operational features (e.g. \"real-time automated ERP inventory sync\") not backed by the Product Anchor; (3) It is generic category boilerplate (e.g. \"trusted peptide provider\"). A valid Brand Spine represents the single unifying strategic truth that remains valid across all active audience lanes.",
+      "Reject if ANY of these hold: (1) The Brand Spine smushes conflicting lane pains together into an incoherent contrast axis; (2) It relies on invented operational features or unverified SLAs not backed by the Product Anchor; (3) It is generic category boilerplate (e.g. \"trusted solution provider\"). A valid Brand Spine represents the single unifying strategic truth that remains valid across all active audience lanes.",
     examples:
-      'Incoherent (REJECT): "body image struggles vs current trust and credibility doubts". Valid (ACCEPT): "Direct-fulfillment peptide sourcing partner focused on verified batch availability and transparent delivery for UAE medical practices."',
+      'Incoherent (REJECT): "combining unrelated consumer emotion pains with enterprise procurement doubts". Valid (ACCEPT): "A unified strategic proposition anchored in verified product capabilities, clear commercial terms, and consistent buyer outcomes across active lanes."',
   },
   proof_strategy: {
     label: "PROOF STRATEGY & CREDIBILITY ARCHITECTURE",
     test:
-      "Reject if the proof strategy is merely a generic phrase like \"use proof\", \"provide clinical validation\", or \"show social proof\" without specifying WHAT claim requires proof, WHAT proof asset is required, or explicitly documenting that a PROOF GAP exists. A valid proof strategy names the exact claim to prove and the proof asset required, or honestly states that proof must be collected.",
+      "Reject if the proof strategy is merely a generic phrase like \"use proof\", \"provide validation\", or \"show social proof\" without specifying WHAT claim requires proof, WHAT proof asset is required, or explicitly documenting that a PROOF GAP exists. A valid proof strategy names the exact claim to prove and the proof asset required, or honestly states that proof must be collected.",
     examples:
-      'Generic (REJECT): "Use proof-led persuasion to overcome buyer doubts." Specific (ACCEPT): "Claim to prove: batch purity and consistent UAE supply. Required proof: certified third-party lab assay reports per batch. Proof gap: clinical trial documentation is not yet established for private clinic therapies."',
+      'Generic (REJECT): "Use proof-led persuasion to overcome buyer doubts." Specific (ACCEPT): "Claim to prove: preview-before-purchase workflow and delivery reliability. Required proof: live interactive preview sample and timestamped fulfillment records. Proof gap: competitor revision policy comparison is not yet verified."',
   },
 };
 
@@ -176,15 +176,15 @@ function authoritySection(authority: JudgeAuthorityContext | null | undefined): 
   const pains = authority.selectedPains ?? [];
   const caps = authority.capabilities ?? [];
   if (pains.length === 0 && caps.length === 0) return "";
-  parts.push("AUTHORITY BOUNDARIES (also REJECT on any of these):");
+  parts.push("AUTHORITY BOUNDARIES (strictly govern what the candidate may claim):");
   if (pains.length > 0) {
     parts.push(
-      `- AUTHORIZED CUSTOMER PROBLEMS (the ONLY problems the output may center): ${pains.map((p) => `"${p.canonical}"`).join("; ")}. REJECT if the output's central customer problem is a different problem, an invented problem, or product-capability/competitor-weakness language reframed as the customer's problem.`,
+      `- AUTHORIZED CUSTOMER PROBLEMS (the ONLY problems the output may center): ${pains.map((p) => `"${p.canonical}"`).join("; ")}. REJECT if the output's central customer problem is an invented problem outside this list.`,
     );
   }
   if (caps.length > 0) {
     parts.push(
-      `- VALIDATED PRODUCT CAPABILITIES (the ONLY capabilities the output may claim): ${caps.map((c) => `"${c.statement}"`).join("; ")}. REJECT if the output claims a product capability not covered by these.`,
+      `- VALIDATED PRODUCT CAPABILITIES (the ONLY capabilities the output is permitted to claim): ${caps.map((c) => `"${c.statement}"`).join("; ")}. REJECT if the output claims a product capability not covered by these. IMPORTANT: Because the candidate is strictly forbidden from claiming capabilities outside this list, when the candidate explicitly anchors to one or more of these VALIDATED PRODUCT CAPABILITIES and addresses an AUTHORIZED CUSTOMER PROBLEM, you MUST ACCEPT it — never reject it because a competitor in the category might share similar capabilities, and never ask the candidate to add unverified claims beyond these capabilities.`,
     );
   }
   parts.push(
@@ -202,9 +202,11 @@ function buildJudgePrompt(
   const k = KIND_TEST[kind];
   const ruleLine = kind === "segment"
     ? "Judge ONLY whether the segment describes a concrete, situation-specific group/problem (PASS) versus a completely generic catch-all (FAIL). Do NOT demand product exclusivity or brand-specific ties."
-    : "Judge ONLY interchangeability — ignore grammar, tone, and length. If the text would survive being swapped onto a generic competitor with no edit, it FAILS.";
+    : (kind === "positioning_claim" || kind === "offer")
+      ? "Judge whether the candidate names concrete validated capabilities/deliverables/workflows tied to a specific customer problem (ACCEPT) versus empty generic slogans (REJECT). Never demand capabilities or competitor-failure claims outside VALIDATED PRODUCT CAPABILITIES."
+      : "Judge ONLY interchangeability — ignore grammar, tone, and length. If the text would survive being swapped onto a generic competitor with no edit, it FAILS.";
 
-  return `You are a hostile INTERCHANGEABILITY reviewer for a marketing-strategy engine. You have read thousands of generic marketing documents and you reject anything that could belong to a competitor unchanged.
+  return `You are a hostile INTERCHANGEABILITY reviewer for a marketing-strategy engine. You have read thousands of generic marketing documents and you reject empty category boilerplate.
 
 THE ONE TEST — INTERCHANGEABILITY:
 ${k.test}

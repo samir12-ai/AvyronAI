@@ -13,7 +13,6 @@ function makeCompetitor(posts: { timestamp: string }[], comments: { timestamp: s
     id: "test-comp-1",
     name: "Test Competitor",
     platform: "instagram",
-    profileLink: "https://instagram.com/test",
     businessType: "fitness",
     postingFrequency: 3,
     contentTypeRatio: null,

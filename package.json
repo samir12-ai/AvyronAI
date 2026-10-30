@@ -8,7 +8,7 @@
     "server:dev": "NODE_ENV=development tsx server/index.ts",
     "expo:start:static:build": "npx expo start --no-dev --minify --localhost",
     "expo:static:build": "node scripts/build.js",
-    "server:build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=server_dist",
+    "server:build": "esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outdir=server_dist",
     "server:prod": "NODE_ENV=production node server_dist/index.js",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
@@ -25,7 +25,10 @@
     "replay:flake": "bash scripts/replay-flake-check.sh",
     "lint:vocab": "bash scripts/check-engine-vocabulary.sh",
     "lint:fallback-strings": "bash scripts/check-banned-fallback-strings.sh",
-    "lint:all": "npm run lint && npm run lint:vocab && npm run lint:fallback-strings"
+    "lint:all": "npm run lint && npm run lint:vocab && npm run lint:fallback-strings",
+    "demo:seed": "tsx scripts/demo-seed.ts",
+    "demo:reset": "tsx scripts/demo-seed.ts MARKET_CHANGE_DETECTED",
+    "demo:server": "tsx scripts/demo-server.ts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",

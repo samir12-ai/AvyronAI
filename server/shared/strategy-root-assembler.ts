@@ -75,6 +75,7 @@ export function canonicalizeAudienceShape<T extends Record<string, any>>(audienc
 interface AssemblerArgs {
   campaignId: string;
   accountId: string;
+  jobId?: string;
   miSnapshotId: string;
   audienceSnapshotId: string;
   positioningSnapshotId: string;
@@ -114,6 +115,7 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
   const {
     campaignId,
     accountId,
+    jobId,
     miSnapshotId,
     audienceSnapshotId,
     positioningSnapshotId,
@@ -201,6 +203,7 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
   return {
     campaignId,
     accountId,
+    jobId,
     miSnapshotId: miSnapshotId || "",
     audienceSnapshotId: audienceSnapshotId || "",
     positioningSnapshotId,
@@ -227,5 +230,8 @@ export async function assembleStrategyRootInput(args: AssemblerArgs): Promise<St
     approvedPositioningContext: positioningContext,
     brandSpine: brandSpine || null,
     approvedLanes: approvedLanes || null,
+    approvedProposals: Array.isArray(differentiationContext?.strategicProposals)
+      ? differentiationContext.strategicProposals
+      : safeJsonParse<any[]>(differentiationContext?.strategicProposals, []),
   };
 }

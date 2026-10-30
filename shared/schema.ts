@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint, foreignKey } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, serial, timestamp, boolean, doublePrecision, uniqueIndex, index, jsonb, primaryKey, bigint, foreignKey, numeric, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1028,8 +1028,6 @@ export const ciCompetitors = pgTable("ci_competitors", {
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull().default("default"),
   name: text("name").notNull(),
-  platform: text("platform").notNull().default("instagram"),
-  profileLink: text("profile_link").notNull(),
   businessType: text("business_type").notNull(),
   primaryObjective: text("primary_objective").notNull(),
   postingFrequency: integer("posting_frequency"),
@@ -1042,8 +1040,7 @@ export const ciCompetitors = pgTable("ci_competitors", {
   socialProofPresence: text("social_proof_presence"),
   screenshotUrls: text("screenshot_urls"),
   notes: text("notes"),
-  websiteUrl: text("website_url"),
-  blogUrl: text("blog_url"),
+  websiteUrl: text("website_url"), // Canonical root domain metadata ONLY (not a platform fetch authority)
   websiteScrapedAt: timestamp("website_scraped_at"),
   blogScrapedAt: timestamp("blog_scraped_at"),
   websiteEnrichmentStatus: text("website_enrichment_status").default("NONE"),
@@ -1062,15 +1059,44 @@ export const ciCompetitors = pgTable("ci_competitors", {
   syntheticChurnFlag: text("synthetic_churn_flag"),
   lastPostWatermark: timestamp("last_post_watermark"),
   sharedProfileId: varchar("shared_profile_id"),
-  tiktokUrl: text("tiktok_url"),
-  googleMapsUrl: text("google_maps_url"),
   // refresh tier. 'A' = priority (24h cooldown), 'B' = standard
   // (72h cooldown). Defaults to 'B' for safety; operators promote competitors
   // to tier A explicitly via UI/API.
   tier: text("tier").notNull().default("B"),
+  // canonical strategic role: DIRECT, ADJACENT, ASPIRATIONAL, UNRESOLVED
+  strategicRole: text("strategic_role").notNull().default("UNRESOLVED"),
+  geographicClassification: text("geographic_classification").default("LOCAL_MARKET"),
+  canonicalEntityId: varchar("canonical_entity_id"),
+  storefronts: jsonb("storefronts"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+export const competitorDiscoverySessions = pgTable("competitor_discovery_sessions", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  campaignOfferingId: varchar("campaign_offering_id").notNull(),
+  buSnapshotId: varchar("bu_snapshot_id").notNull(),
+  pinnedContext: jsonb("pinned_context").notNull(),
+  targetMarket: text("target_market").notNull(),
+  status: text("status").notNull(),
+  searchMissions: jsonb("search_missions").notNull().default(sql`'[]'::jsonb`),
+  candidates: jsonb("candidates").notNull().default(sql`'[]'::jsonb`),
+  localVerifiedCount: integer("local_verified_count").notNull().default(0),
+  crossBorderCount: integer("cross_border_count").notNull().default(0),
+  internationalReferenceCount: integer("international_reference_count").notNull().default(0),
+  shortfall: integer("shortfall").notNull().default(10),
+  isBuildEligible: boolean("is_build_eligible").notNull().default(false),
+  telemetry: jsonb("telemetry").default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type CompetitorDiscoverySession = typeof competitorDiscoverySessions.$inferSelect;
+export type InsertCompetitorDiscoverySession = typeof competitorDiscoverySessions.$inferInsert;
 
 export const ciSnapshots = pgTable("ci_snapshots", {
   id: varchar("id")
@@ -1188,6 +1214,13 @@ export const campaignSelections = pgTable("campaign_selections", {
   campaignStatus: text("campaign_status").notNull().default("active"),
   campaignLocation: text("campaign_location"),
   dataSourceMode: text("data_source_mode").notNull().default("benchmark"),
+  businessId: varchar("business_id", { length: 128 }),
+  productId: varchar("product_id", { length: 128 }),
+  campaignOfferingId: varchar("campaign_offering_id", { length: 128 }),
+  setupStatus: varchar("setup_status", { length: 32 }).default("IN_PROGRESS"),
+  setupStep: varchar("setup_step", { length: 32 }).default("01_BUSINESS"),
+  isArchived: boolean("is_archived").notNull().default(false),
+  pausedAt: timestamp("paused_at", { withTimezone: true }),
   selectedAt: timestamp("selected_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1248,6 +1281,8 @@ export const ciSharedProfiles = pgTable("ci_shared_profiles", {
 }));
 
 export type CiSharedProfile = typeof ciSharedProfiles.$inferSelect;
+
+// Note: CompetitorStrategicRole and CustomerEvidencePool are exported from ./contracts/discovery-contracts at line 5505
 
 export type CiCompetitor = typeof ciCompetitors.$inferSelect;
 export type CiSnapshot = typeof ciSnapshots.$inferSelect;
@@ -1434,6 +1469,7 @@ export const strategicPlans = pgTable("strategic_plans", {
   // throws CONCURRENT_MODIFICATION instead of silently overwriting a
   // concurrent edit (e.g. plan approval racing plan synthesis re-write).
   version: integer("version").notNull().default(1),
+  isDesignatedActive: boolean("is_designated_active").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -1815,10 +1851,25 @@ export const aiUsageLog = pgTable("ai_usage_log", {
     .primaryKey()
     .default(sql`gen_random_uuid()`),
   accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id", { length: 128 }),
+  operationType: varchar("operation_type", { length: 64 }),
+  provider: varchar("provider", { length: 32 }),
   endpoint: text("endpoint").notNull(),
   model: text("model").notNull(),
   maxTokens: integer("max_tokens").notNull(),
   estimatedTokens: integer("estimated_tokens").default(0),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cachedTokens: integer("cached_tokens"),
+  reasoningTokens: integer("reasoning_tokens"),
+  costUsd: doublePrecision("cost_usd"),
+  costStatus: varchar("cost_status", { length: 32 }).default("UNKNOWN"),
+  providerCallId: varchar("provider_call_id", { length: 128 }),
+  retryCount: integer("retry_count").default(0),
+  errorCategory: varchar("error_category", { length: 64 }),
+  errorMessage: text("error_message"),
+  sharedConsumerCampaignIds: jsonb("shared_consumer_campaign_ids").default(sql`'[]'::jsonb`),
+  attributionPolicy: varchar("attribution_policy", { length: 64 }).default("ORIGINATING_CAMPAIGN_ONCE"),
   success: boolean("success").default(true),
   durationMs: integer("duration_ms").default(0),
   createdAt: timestamp("created_at").defaultNow(),
@@ -2080,6 +2131,7 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  sourceId: varchar("source_id", { length: 128 }),
   competitorId: varchar("competitor_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
   postId: text("post_id").notNull(),
@@ -2100,6 +2152,9 @@ export const ciCompetitorPosts = pgTable("ci_competitor_posts", {
   hookText: text("hook_text"),
   transcript: text("transcript"),
   hookSource: text("hook_source"),
+  acquisitionTaskId: varchar("acquisition_task_id", { length: 128 }),
+  providerRunId: varchar("provider_run_id", { length: 128 }),
+  observationId: varchar("observation_id", { length: 128 }),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => ({
   competitorPostUnique: uniqueIndex("idx_ci_posts_competitor_postid").on(table.competitorId, table.postId),
@@ -2173,6 +2228,7 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  sourceId: varchar("source_id", { length: 128 }),
   competitorId: varchar("competitor_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
   postId: text("post_id").notNull(),
@@ -2197,6 +2253,9 @@ export const ciCompetitorComments = pgTable("ci_competitor_comments", {
   filterStatus: varchar("filter_status", { length: 24 }),
   /** Machine-readable detail for LOW_SIGNAL acceptances (e.g. EMOJI_ONLY_GENERIC). */
   filterReason: varchar("filter_reason", { length: 40 }),
+  acquisitionTaskId: varchar("acquisition_task_id", { length: 128 }),
+  providerRunId: varchar("provider_run_id", { length: 128 }),
+  observationId: varchar("observation_id", { length: 128 }),
 });
 
 export type CiCompetitorComment = typeof ciCompetitorComments.$inferSelect;
@@ -2205,6 +2264,7 @@ export const ciCompetitorReviews = pgTable("ci_competitor_reviews", {
   id: varchar("id")
     .primaryKey()
     .default(sql`gen_random_uuid()`),
+  sourceId: varchar("source_id", { length: 128 }),
   competitorId: varchar("competitor_id").notNull(),
   accountId: varchar("account_id").notNull().default("default"),
   campaignId: varchar("campaign_id").notNull(),
@@ -2219,6 +2279,9 @@ export const ciCompetitorReviews = pgTable("ci_competitor_reviews", {
   // extractor produced them). Used for cross-review dedup and reviewer-pattern
   // analysis without revealing identity.
   authorHash: varchar("author_hash", { length: 12 }),
+  acquisitionTaskId: varchar("acquisition_task_id", { length: 128 }),
+  providerRunId: varchar("provider_run_id", { length: 128 }),
+  observationId: varchar("observation_id", { length: 128 }),
   scrapedAt: timestamp("scraped_at").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -2624,6 +2687,26 @@ export const budgetGovernorSnapshots = pgTable("budget_governor_snapshots", {
 
 export type BudgetGovernorSnapshot = typeof budgetGovernorSnapshots.$inferSelect;
 
+export const campaignBudgetSettings = pgTable("campaign_budget_settings", {
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  accountId: varchar("account_id").notNull().default("default"),
+  campaignId: varchar("campaign_id").notNull(),
+  monthlyBudget: numeric("monthly_budget", { precision: 14, scale: 4 }),
+  currency: varchar("currency", { length: 10 }),
+  version: integer("version").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+}, (t) => [
+  unique("campaign_budget_settings_account_campaign_unique").on(t.accountId, t.campaignId),
+  index("campaign_budget_settings_lookup_idx").on(t.accountId, t.campaignId),
+]);
+
+export type CampaignBudgetSetting = typeof campaignBudgetSettings.$inferSelect;
+export type InsertCampaignBudgetSetting = typeof campaignBudgetSettings.$inferInsert;
+
+
 export const channelSelectionSnapshots = pgTable("channel_selection_snapshots", {
   id: varchar("id")
     .primaryKey()
@@ -3009,6 +3092,9 @@ export const ownedPosts = pgTable("owned_posts", {
   hookStyle: text("hook_style"),
   contentAngle: text("content_angle"),
   contentType: text("content_type"),
+  acquisitionTaskId: varchar("acquisition_task_id", { length: 128 }),
+  providerRunId: varchar("provider_run_id", { length: 128 }),
+  observationId: varchar("observation_id", { length: 128 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (table) => ({
@@ -4225,6 +4311,7 @@ export const websiteSnapshots = pgTable(
     contentHash: text("content_hash").notNull(),
     status: text("status").notNull().default('SUCCESS'),
     failureCode: text("failure_code"),
+    preliminaryExtraction: jsonb("preliminary_extraction"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -4240,11 +4327,18 @@ export const businessUnderstandingSnapshots = pgTable(
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     accountId: varchar("account_id").notNull(),
     campaignId: varchar("campaign_id").notNull(),
+    businessId: varchar("business_id", { length: 128 }),
+    productId: varchar("product_id", { length: 128 }),
     websiteSnapshotId: varchar("website_snapshot_id").notNull(),
     offeringInputEvidenceId: varchar("offering_input_evidence_id").notNull(),
     campaignOfferingId: varchar("campaign_offering_id").notNull(),
     version: integer("version").notNull().default(1),
     businessUnderstanding: jsonb("business_understanding").notNull(),
+    companyFacts: jsonb("company_facts").default(sql`'[]'::jsonb`),
+    productFacts: jsonb("product_facts").default(sql`'[]'::jsonb`),
+    campaignChoices: jsonb("campaign_choices").default(sql`'{}'::jsonb`),
+    evidenceProvenance: jsonb("evidence_provenance").default(sql`'{}'::jsonb`),
+    inputSnapshotVersion: varchar("input_snapshot_version", { length: 128 }),
     status: text("status").notNull().default('COMPLETE'),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -4327,7 +4421,19 @@ export const campaignOfferings = pgTable(
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     accountId: varchar("account_id").notNull(),
     campaignId: varchar("campaign_id").notNull(),
+    businessId: varchar("business_id", { length: 128 }),
+    productId: varchar("product_id", { length: 128 }),
     offeringName: text("offering_name").notNull(),
+    productType: varchar("product_type", { length: 64 }).default("PRODUCT"),
+    description: text("description"),
+    productUrl: text("product_url"),
+    documentationText: text("documentation_text"),
+    verifiedCapabilities: jsonb("verified_capabilities").default(sql`'[]'::jsonb`),
+    pricingModel: text("pricing_model"),
+    purchaseModel: text("purchase_model"),
+    evidenceProvenance: jsonb("evidence_provenance").default(sql`'{}'::jsonb`),
+    inputSnapshotVersion: varchar("input_snapshot_version", { length: 128 }),
+    reviewStatus: varchar("review_status", { length: 32 }).default("CONFIRMED"),
     sourceInputEvidenceId: varchar("source_input_evidence_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -4484,14 +4590,20 @@ export const clarificationRequests = pgTable(
     accountId: varchar("account_id").notNull(),
     campaignId: varchar("campaign_id").notNull(),
     executionStateDraftId: varchar("execution_state_draft_id"),
+    requestCategory: varchar("request_category", { length: 32 }).notNull().default("BASELINE"), // BASELINE | WEEKLY_PERIOD
     missingFactType: varchar("missing_fact_type").notNull(),
     question: text("question").notNull(),
-    answerType: varchar("answer_type").notNull().default("TEXT"), // TEXT | NUMBER | BOOLEAN | CHOICE
+    answerType: varchar("answer_type").notNull().default("TEXT"), // TEXT | NUMBER | BOOLEAN | CHOICE | STRUCTURED_BASELINE
+    structuredFields: jsonb("structured_fields").default(sql`'[]'::jsonb`),
     reason: text("reason"),
     evidenceRefIds: jsonb("evidence_ref_ids").default(sql`'[]'::jsonb`),
-    status: varchar("status").notNull().default("PENDING"), // PENDING | ANSWERED | EXPIRED
+    status: varchar("status").notNull().default("PENDING"), // PENDING | ANSWERED | EXPIRED | RESOLVED
     userAnswer: text("user_answer"),
+    structuredAnswer: jsonb("structured_answer"),
     answeredAt: timestamp("answered_at", { withTimezone: true }),
+    reminderCount: integer("reminder_count").notNull().default(0),
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    nextReminderAt: timestamp("next_reminder_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -4750,6 +4862,7 @@ export const competitorSources = pgTable(
     tenantIdx: index("competitor_sources_tenant_idx").on(table.accountId, table.campaignId),
     competitorIdx: index("competitor_sources_competitor_idx").on(table.competitorId),
     platformIdx: index("competitor_sources_platform_idx").on(table.platform),
+    compPlatUrlIdx: uniqueIndex("uidx_competitor_sources_comp_plat_url").on(table.competitorId, table.platform, table.canonicalUrl),
   }),
 );
 
@@ -5195,6 +5308,10 @@ export const weeklyBusinessInventories = pgTable(
     id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
     accountId: varchar("account_id").notNull(),
     campaignId: varchar("campaign_id").notNull(),
+    planId: varchar("plan_id"),
+    windowId: varchar("window_id"),
+    windowIndex: integer("window_index"),
+    currency: varchar("currency", { length: 16 }).notNull().default("USD"),
     periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
     periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
     periodLabel: text("period_label").notNull(),
@@ -5204,6 +5321,9 @@ export const weeklyBusinessInventories = pgTable(
     submittedMetrics: jsonb("submitted_metrics").default(sql`'{}'::jsonb`),
     coverageStatus: text("coverage_status").default("NONE"), // COMPLETE | PARTIAL | NONE
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    reminderCount: integer("reminder_count").notNull().default(0),
+    lastRemindedAt: timestamp("last_reminded_at", { withTimezone: true }),
+    nextReminderAt: timestamp("next_reminder_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -5415,6 +5535,9 @@ export const marketVoiceEvidence = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true }),
     geography: varchar("geography", { length: 16 }), // Nullable: "LB", "US", or null if unknown. MUST NOT default to target market.
     language: varchar("language", { length: 16 }),
+    semanticScope: varchar("semantic_scope", { length: 32 }),
+    transferability: varchar("transferability", { length: 48 }),
+    eligibilityVerdict: varchar("eligibility_verdict", { length: 32 }),
     fetchJobId: varchar("fetch_job_id", { length: 80 }),
     providerRunId: varchar("provider_run_id", { length: 80 }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -5444,18 +5567,335 @@ export const marketVoiceEvidence = pgTable(
 export type MarketVoiceEvidence = typeof marketVoiceEvidence.$inferSelect;
 export type InsertMarketVoiceEvidence = typeof marketVoiceEvidence.$inferInsert;
 
+export type { CompetitorStrategicRole, CustomerEvidencePool } from "./contracts/discovery-contracts";
 
+export const acquisitionTasks = pgTable(
+  "acquisition_tasks",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    campaignId: varchar("campaign_id", { length: 128 }).notNull(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    sourcePlatform: varchar("source_platform", { length: 32 }).notNull(),
+    entityType: varchar("entity_type", { length: 32 }).notNull(),
+    entityId: varchar("entity_id", { length: 128 }).notNull(),
+    sourceId: varchar("source_id", { length: 128 }),
+    canonicalUrl: text("canonical_url"),
+    externalAccountId: varchar("external_account_id", { length: 128 }),
+    capability: varchar("capability", { length: 64 }),
+    provider: varchar("provider", { length: 32 }).default("apify"),
+    actorId: varchar("actor_id", { length: 128 }),
+    providerRunId: varchar("provider_run_id", { length: 128 }),
+    datasetId: varchar("dataset_id", { length: 128 }),
+    usageUsd: doublePrecision("usage_usd"),
+    taskKey: varchar("task_key", { length: 256 }).notNull().unique(),
+    taskType: varchar("task_type", { length: 32 }).notNull(),
+    status: varchar("status", { length: 32 }).notNull().default("PENDING"),
+    terminalOutcome: varchar("terminal_outcome", { length: 64 }),
+    errorCode: varchar("error_code", { length: 64 }),
+    priority: integer("priority").notNull().default(100),
+    leaseOwner: varchar("lease_owner", { length: 128 }),
+    leasedUntil: timestamp("leased_until", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    fencingToken: integer("fencing_token").notNull().default(0),
+    retryCount: integer("retry_count").notNull().default(0),
+    maxRetries: integer("max_retries").notNull().default(2),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+    paginationCursor: jsonb("pagination_cursor"),
+    timeWindowDays: integer("time_window_days"),
+    itemLimit: integer("item_limit"),
+    freshnessTtlSec: integer("freshness_ttl_sec"),
+    contentFingerprint: varchar("content_fingerprint", { length: 64 }),
+    inputPayload: jsonb("input_payload").notNull().default(sql`'{}'::jsonb`),
+    outputSummary: jsonb("output_summary"),
+    errorMessage: text("error_message"),
+    productId: varchar("product_id", { length: 128 }),
+    sharedConsumerCampaignIds: jsonb("shared_consumer_campaign_ids").default(sql`'[]'::jsonb`),
+    attributionPolicy: varchar("attribution_policy", { length: 64 }).default("ORIGINATING_CAMPAIGN_ONCE"),
+    dataReuseStatus: varchar("data_reuse_status", { length: 64 }).default("NEWLY_ACQUIRED"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    claimIdx: index("idx_acq_tasks_claim").on(table.status, table.leasedUntil, table.priority),
+    campaignIdx: index("idx_acq_tasks_campaign").on(table.campaignId, table.status),
+  })
+);
 
+export type AcquisitionTask = typeof acquisitionTasks.$inferSelect;
+export type InsertAcquisitionTask = typeof acquisitionTasks.$inferInsert;
 
+export const acquisitionRequests = pgTable(
+  "acquisition_requests",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    campaignId: varchar("campaign_id", { length: 128 }).notNull(),
+    productId: varchar("product_id", { length: 128 }),
+    requesterEngine: varchar("requester_engine", { length: 64 }).notNull(),
+    trigger: varchar("trigger", { length: 64 }).notNull(),
+    parentJobId: varchar("parent_job_id", { length: 128 }),
+    strategyVersion: integer("strategy_version"),
+    monitoringCycleId: varchar("monitoring_cycle_id", { length: 128 }),
+    performanceCycleId: varchar("performance_cycle_id", { length: 128 }),
+    entityType: varchar("entity_type", { length: 32 }).notNull(),
+    entityId: varchar("entity_id", { length: 128 }).notNull(),
+    sourceId: varchar("source_id", { length: 128 }),
+    platform: varchar("platform", { length: 32 }).notNull(),
+    canonicalUrl: text("canonical_url"),
+    externalAccountId: varchar("external_account_id", { length: 128 }),
+    capability: varchar("capability", { length: 64 }).notNull(),
+    timeWindowDays: integer("time_window_days"),
+    itemLimit: integer("item_limit"),
+    freshnessTtlSec: integer("freshness_ttl_sec"),
+    taskId: varchar("task_id", { length: 128 }),
+    attemptId: varchar("attempt_id", { length: 128 }),
+    resolutionType: varchar("resolution_type", { length: 32 }).notNull().default("FRESH_FETCH"),
+    status: varchar("status", { length: 32 }).notNull().default("PENDING"),
+    terminalOutcome: varchar("terminal_outcome", { length: 64 }),
+    provider: varchar("provider", { length: 32 }),
+    actorId: varchar("actor_id", { length: 128 }),
+    providerRunId: varchar("provider_run_id", { length: 128 }),
+    datasetId: varchar("dataset_id", { length: 128 }),
+    observationIds: jsonb("observation_ids").notNull().default(sql`'[]'::jsonb`),
+    normalizedEvidenceIds: jsonb("normalized_evidence_ids").notNull().default(sql`'[]'::jsonb`),
+    itemsStored: integer("items_stored").notNull().default(0),
+    consumerDeliveryStatus: varchar("consumer_delivery_status", { length: 32 }).notNull().default("PENDING"),
+    consumerDeliveryDetail: jsonb("consumer_delivery_detail"),
+    errorCode: varchar("error_code", { length: 64 }),
+    errorMessage: text("error_message"),
+    retryDecision: varchar("retry_decision", { length: 64 }),
+    usageUsd: doublePrecision("usage_usd"),
+    sharedConsumerCampaignIds: jsonb("shared_consumer_campaign_ids").default(sql`'[]'::jsonb`),
+    attributionPolicy: varchar("attribution_policy", { length: 64 }).default("ORIGINATING_CAMPAIGN_ONCE"),
+    dataReuseStatus: varchar("data_reuse_status", { length: 64 }).default("NEWLY_ACQUIRED"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+  },
+  (table) => ({
+    campaignIdx: index("idx_acq_req_campaign").on(table.accountId, table.campaignId, table.requestedAt),
+    taskIdx: index("idx_acq_req_task").on(table.taskId),
+    entityIdx: index("idx_acq_req_entity").on(table.accountId, table.entityType, table.entityId, table.platform),
+  })
+);
 
+export type AcquisitionRequestRow = typeof acquisitionRequests.$inferSelect;
+export type InsertAcquisitionRequest = typeof acquisitionRequests.$inferInsert;
 
+export const acquisitionAttempts = pgTable(
+  "acquisition_attempts",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    taskId: varchar("task_id", { length: 128 }).notNull(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    campaignId: varchar("campaign_id", { length: 128 }).notNull(),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    actorId: varchar("actor_id", { length: 128 }),
+    providerRunId: varchar("provider_run_id", { length: 128 }),
+    datasetId: varchar("dataset_id", { length: 128 }),
+    inputHash: varchar("input_hash", { length: 64 }),
+    sanitizedInput: jsonb("sanitized_input"),
+    status: varchar("status", { length: 32 }).notNull().default("STARTING"),
+    errorCode: varchar("error_code", { length: 64 }),
+    errorMessage: text("error_message"),
+    retryDecision: varchar("retry_decision", { length: 64 }),
+    rawItemCount: integer("raw_item_count").notNull().default(0),
+    acceptedItemCount: integer("accepted_item_count").notNull().default(0),
+    usageUsd: doublePrecision("usage_usd"),
+    durationMs: integer("duration_ms"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => ({
+    taskIdx: index("idx_acq_attempts_task").on(table.taskId, table.attemptNumber),
+    runIdx: index("idx_acq_attempts_run").on(table.providerRunId),
+  })
+);
 
+export type AcquisitionAttemptRow = typeof acquisitionAttempts.$inferSelect;
+export type InsertAcquisitionAttempt = typeof acquisitionAttempts.$inferInsert;
 
+export const rawAcquisitionObservations = pgTable(
+  "raw_acquisition_observations",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    campaignId: varchar("campaign_id", { length: 128 }).notNull(),
+    taskId: varchar("task_id", { length: 128 }).notNull(),
+    attemptId: varchar("attempt_id", { length: 128 }).notNull(),
+    providerRunId: varchar("provider_run_id", { length: 128 }),
+    entityType: varchar("entity_type", { length: 32 }).notNull(),
+    entityId: varchar("entity_id", { length: 128 }).notNull(),
+    sourceId: varchar("source_id", { length: 128 }),
+    platform: varchar("platform", { length: 32 }).notNull(),
+    capability: varchar("capability", { length: 64 }).notNull(),
+    canonicalUrl: text("canonical_url"),
+    contentHash: varchar("content_hash", { length: 64 }).notNull(),
+    itemCount: integer("item_count").notNull().default(0),
+    rawPayload: jsonb("raw_payload").notNull(),
+    coverageStatus: varchar("coverage_status", { length: 32 }).notNull().default("COMPLETE"),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+  },
+  (table) => ({
+    taskIdx: index("idx_raw_obs_task").on(table.taskId),
+    entityIdx: index("idx_raw_obs_entity").on(table.accountId, table.campaignId, table.entityType, table.entityId, table.platform),
+  })
+);
 
+export type RawAcquisitionObservationRow = typeof rawAcquisitionObservations.$inferSelect;
+export type InsertRawAcquisitionObservation = typeof rawAcquisitionObservations.$inferInsert;
 
+export const evidenceManifests = pgTable(
+  "evidence_manifests",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    campaignId: varchar("campaign_id", { length: 128 }).notNull(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    orchestrationJobId: varchar("orchestration_job_id", { length: 128 }).notNull(),
+    contextFingerprint: varchar("context_fingerprint", { length: 64 }).notNull(),
+    manifestVersion: integer("manifest_version").notNull().default(1),
+    status: varchar("status", { length: 32 }).notNull().default("FROZEN"),
+    includedPostIds: jsonb("included_post_ids").notNull().default(sql`'[]'::jsonb`),
+    includedCommentIds: jsonb("included_comment_ids").notNull().default(sql`'[]'::jsonb`),
+    includedReviewIds: jsonb("included_review_ids").notNull().default(sql`'[]'::jsonb`),
+    includedMarketVoiceIds: jsonb("included_market_voice_ids").notNull().default(sql`'[]'::jsonb`),
+    includedWebSnapshotIds: jsonb("included_web_snapshot_ids").notNull().default(sql`'[]'::jsonb`),
+    evidencePoolCounts: jsonb("evidence_pool_counts").notNull().default(sql`'{}'::jsonb`),
+    sourceDiversityReport: jsonb("source_diversity_report").notNull().default(sql`'{}'::jsonb`),
+    frozenAt: timestamp("frozen_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    jobIdx: index("idx_evidence_manifest_job").on(table.orchestrationJobId),
+    campaignIdx: index("idx_evidence_manifest_campaign").on(table.campaignId, table.createdAt),
+  })
+);
 
+export type EvidenceManifest = typeof evidenceManifests.$inferSelect;
+export type InsertEvidenceManifest = typeof evidenceManifests.$inferInsert;
 
+// =============================================================================
+// MULTI-CAMPAIGN & PRODUCT ISOLATION TABLES (Migration 072)
+// =============================================================================
 
+export const businesses = pgTable(
+  "businesses",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    name: text("name").notNull(),
+    canonicalDomain: text("canonical_domain"),
+    websiteUrl: text("website_url"),
+    industry: text("industry"),
+    businessModel: text("business_model"),
+    classificationProfile: jsonb("classification_profile").default(sql`'{}'::jsonb`),
+    verifiedCompanyFacts: jsonb("verified_company_facts").default(sql`'[]'::jsonb`),
+    sharedChannels: jsonb("shared_channels").default(sql`'[]'::jsonb`),
+    sourceWebsiteSnapshotId: varchar("source_website_snapshot_id", { length: 128 }),
+    reviewStatus: varchar("review_status", { length: 32 }).notNull().default("CONFIRMED"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    accountIdx: index("idx_businesses_account").on(table.accountId),
+    domainIdx: index("idx_businesses_domain").on(table.accountId, table.canonicalDomain),
+  })
+);
 
+export type BusinessRow = typeof businesses.$inferSelect;
+export type InsertBusiness = typeof businesses.$inferInsert;
 
+export const businessProducts = pgTable(
+  "business_products",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    businessId: varchar("business_id", { length: 128 }).notNull(),
+    name: text("name").notNull(),
+    productType: varchar("product_type", { length: 64 }).notNull().default("PRODUCT"),
+    description: text("description"),
+    productUrl: text("product_url"),
+    documentationText: text("documentation_text"),
+    verifiedCapabilities: jsonb("verified_capabilities").default(sql`'[]'::jsonb`),
+    pricingModel: text("pricing_model"),
+    purchaseModel: text("purchase_model"),
+    evidenceProvenance: jsonb("evidence_provenance").default(sql`'{}'::jsonb`),
+    inputSnapshotVersion: varchar("input_snapshot_version", { length: 128 }),
+    reviewStatus: varchar("review_status", { length: 32 }).notNull().default("CONFIRMED"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    accountBizIdx: index("idx_business_products_account_biz").on(table.accountId, table.businessId),
+  })
+);
+
+export type BusinessProductRow = typeof businessProducts.$inferSelect;
+export type InsertBusinessProduct = typeof businessProducts.$inferInsert;
+
+export const competitorRelevanceDecisions = pgTable(
+  "competitor_relevance_decisions",
+  {
+    id: varchar("id", { length: 128 }).primaryKey(),
+    accountId: varchar("account_id", { length: 128 }).notNull(),
+    businessId: varchar("business_id", { length: 128 }),
+    productId: varchar("product_id", { length: 128 }),
+    campaignId: varchar("campaign_id", { length: 128 }).notNull(),
+    campaignOfferingId: varchar("campaign_offering_id", { length: 128 }),
+    buSnapshotId: varchar("bu_snapshot_id", { length: 128 }),
+    competitorId: varchar("competitor_id", { length: 128 }),
+    candidateDomain: text("candidate_domain").notNull(),
+    candidateName: text("candidate_name").notNull(),
+    competingOffering: text("competing_offering"),
+    servesBuyerNeed: boolean("serves_buyer_need"),
+    buyerNeedRationale: text("buyer_need_rationale"),
+    targetMarket: text("target_market"),
+    targetMarketRelevance: varchar("target_market_relevance", { length: 64 }),
+    competitorType: varchar("competitor_type", { length: 64 }).notNull().default("DIRECT"),
+    decisionVerdict: varchar("decision_verdict", { length: 32 }).notNull().default("INCLUDED"),
+    inclusionEvidence: jsonb("inclusion_evidence").default(sql`'[]'::jsonb`),
+    unknownsAndGaps: jsonb("unknowns_and_gaps").default(sql`'[]'::jsonb`),
+    exclusionReason: text("exclusion_reason"),
+    dataReuseStatus: varchar("data_reuse_status", { length: 64 }).notNull().default("NEWLY_ACQUIRED"),
+    monitoredProductUrls: jsonb("monitored_product_urls").default(sql`'[]'::jsonb`),
+    sourceObservationIds: jsonb("source_observation_ids").default(sql`'[]'::jsonb`),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    campaignIdx: index("idx_comp_rel_decisions_campaign").on(
+      table.accountId,
+      table.campaignId,
+      table.decisionVerdict
+    ),
+    campaignDomainUnique: uniqueIndex("uidx_comp_rel_decisions_campaign_domain").on(
+      table.campaignId,
+      table.candidateDomain
+    ),
+  })
+);
+
+export type CompetitorRelevanceDecisionRow = typeof competitorRelevanceDecisions.$inferSelect;
+export type InsertCompetitorRelevanceDecision = typeof competitorRelevanceDecisions.$inferInsert;
+
+export const accountEntitlements = pgTable("account_entitlements", {
+  accountId: varchar("account_id", { length: 128 }).primaryKey(),
+  packageTier: varchar("package_tier", { length: 32 }).notNull().default("starter"),
+  monthlyPriceUsd: integer("monthly_price_usd").notNull().default(199),
+  maxActiveCampaigns: integer("max_active_campaigns").notNull().default(1),
+  isTestEntitlement: boolean("is_test_entitlement").notNull().default(false),
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type AccountEntitlementRow = typeof accountEntitlements.$inferSelect;
+export type InsertAccountEntitlement = typeof accountEntitlements.$inferInsert;
+
+export const strategyRootBundles = rootBundles;
+export const ciReviews = ciCompetitorReviews;
+export const budgetAllocationSnapshots = budgetGovernorSnapshots;
 

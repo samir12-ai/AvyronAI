@@ -641,28 +641,22 @@ const BUDGET_GOVERNOR_CONTRACT: EngineContract = {
   engineVersion: BUDGET_GOVERNOR_ENGINE_VERSION,
   livenessRule: "current_run_only",
   requiredOutputs: [
-    { id: "decision",            path: ["decision"],                              shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection", "retention", "system_control.budget_funnel_alignment", "system_control.budget_cac_verification", "system_control.budget_override_zero_confidence", "system_control.contradiction_detector.budget_scale_no_conversion", "system_control.contradiction_detector.budget_scale_weak_integrity", "repair_actions", "build_plan_layer.budget_block"] },
-    // H3 (2026-05-10): shape tightened from z.string() to strict enum.
-    // Canonical budget action vocabulary (lowercase, per types.ts:34 and
-    // engine.ts:218-255). No semantic fallback to verdict/status (Doctrine D1).
-    { id: "decisionAction",      path: ["decision", "action"],                    shape: z.enum(["test", "scale", "hold", "halt"]), emptyIsMissing: true,  consumers: ["channel_selection", "system_control.budget_funnel_alignment", "system_control.budget_cac_verification", "system_control.budget_override_zero_confidence", "system_control.contradiction_detector.budget_scale_no_conversion", "repair_actions"] },
-    { id: "decisionReasoning",   path: ["decision", "reasoning"],                 shape: z.string(),        emptyIsMissing: true,  consumers: ["build_plan_layer.budget_block", "audit_control.budget_panel"] },
-    { id: "testBudgetRange",     path: ["testBudgetRange"],                       shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection", "build_plan_layer.budget_block"] },
-    { id: "scaleBudgetRange",    path: ["scaleBudgetRange"],                      shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection", "build_plan_layer.budget_block"] },
-    { id: "killFlag",            path: ["killFlag"],                              shape: z.boolean(),       emptyIsMissing: false, consumers: ["channel_selection", "system_control.collectBlockReasons"] },
-    { id: "killReasons",         path: ["killReasons"],                           shape: StringArraySchema, emptyIsMissing: false, consumers: ["recovery_planner", "build_plan_layer.budget_block"] },
-    { id: "guardResult",         path: ["guardResult"],                           shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.budget_cac_verification"] },
-    // C5 (2026-05-09): legacy path dropped — engine source verified to return `guardResult: { ..., warnings: [...] }` (engine.ts:464,501).
-    { id: "guardResultWarnings", path: ["guardResult", "warnings"],               shape: StringArraySchema, emptyIsMissing: false, consumers: ["system_control.budget_cac_verification"] },
-    { id: "expansionPermission", path: ["expansionPermission"],                   shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["channel_selection"] },
-    { id: "cacAssumptionCheck",  path: ["cacAssumptionCheck"],                    shape: LooseObjectSchema, emptyIsMissing: true,  consumers: ["system_control.budget_cac_verification"] },
-    { id: "confidenceScore",     path: ["confidenceScore"],                       shape: NumberZeroToOneSchema, emptyIsMissing: false, consumers: ["system_control.confidence_chain_integrity"] },
+    { id: "mode", path: ["mode"], shape: z.literal("recommendation_only"), emptyIsMissing: true, consumers: ["system_control", "build_plan_layer"] },
+    { id: "status", path: ["status"], shape: z.enum(["COMPLETE", "BUDGET_NOT_PROVIDED", "ZERO_BUDGET", "MISSING_CHANNELS", "FAILED"]), emptyIsMissing: true, consumers: ["system_control", "build_plan_layer"] },
+    { id: "statusMessage", path: ["statusMessage"], shape: z.string(), emptyIsMissing: true, consumers: ["system_control", "build_plan_layer"] },
+    { id: "allocations", path: ["allocations"], shape: z.array(LooseObjectSchema), emptyIsMissing: false, consumers: ["build_plan_layer.budget_block", "system_control"] },
+    { id: "overallRationale", path: ["overallRationale"], shape: z.string(), emptyIsMissing: true, consumers: ["build_plan_layer.budget_block"] },
   ],
   optionalOutputs: [
-    { id: "structuralWarnings", path: ["structuralWarnings"], shape: StringArraySchema, emptyIsMissing: false, consumers: ["recovery_planner"] },
-    { id: "commercialStrategy", path: ["commercialStrategy"], shape: z.any().nullable(), emptyIsMissing: false, consumers: ["build_plan_layer.causal_narrative", "commercial_dna"] },
+    { id: "totalMonthlyBudget", path: ["totalMonthlyBudget"], shape: z.number().nullable(), emptyIsMissing: false, consumers: ["build_plan_layer"] },
+    { id: "currency", path: ["currency"], shape: z.string().nullable(), emptyIsMissing: false, consumers: ["build_plan_layer"] },
+    { id: "decision", path: ["decision"], shape: LooseObjectSchema, emptyIsMissing: false, consumers: ["legacy_adapter"] },
+    { id: "decisionAction", path: ["decision", "action"], shape: z.enum(["test", "scale", "hold", "halt"]), emptyIsMissing: false, consumers: ["legacy_adapter"] },
+    { id: "validationResult", path: ["validationResult"], shape: LooseObjectSchema, emptyIsMissing: false, consumers: ["system_control"] },
+    { id: "budgetSettingsVersion", path: ["budgetSettingsVersion"], shape: z.number().optional(), emptyIsMissing: false, consumers: ["orchestrator"] },
+    { id: "channelSelectionSnapshotId", path: ["channelSelectionSnapshotId"], shape: z.string().nullable().optional(), emptyIsMissing: false, consumers: ["orchestrator"] },
   ],
-  requiredBy: ["channel_selection", "retention", "system_control", "build_plan_layer", "recovery_planner"],
+  requiredBy: ["system_control", "build_plan_layer"],
 };
 
 // ────────────────────────────────────────────────────────────────────────────

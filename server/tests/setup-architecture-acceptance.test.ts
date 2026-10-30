@@ -447,7 +447,6 @@ describe("Avyron Setup & Multi-Campaign Architecture End-to-End Acceptance", () 
       campaignId: campaignBId,
       name: "Sprinklr",
       platform: "linkedin",
-      profileLink: "https://linkedin.com/company/sprinklr",
       websiteUrl: "https://sprinklr.com",
       businessType: "Competitor",
       primaryObjective: "Enterprise Analytics",

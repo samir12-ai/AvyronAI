@@ -504,35 +504,19 @@ export function registerCreativeRoutes(app: Express) {
           : null,
       };
 
-      const sampleVideoUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4";
+      if (!process.env.GOOGLE_GEMINI_API_KEY) {
+        return res.status(503).json({
+          success: false,
+          error: "VIDEO_GENERATION_UNAVAILABLE",
+          message: "Video generation provider is not configured. Configure GOOGLE_GEMINI_API_KEY to enable video generation.",
+        });
+      }
 
-      const [created] = await db
-        .insert(schema.generatedCreatives)
-        .values({
-          accountId,
-          campaignId,
-          generationType: "VIDEO",
-          sourceTaskId: taskId || null,
-          sourceLaneId: laneId || null,
-          platform: "Instagram",
-          format: "Reel",
-          prompt,
-          mediaUrl: sampleVideoUrl,
-          referenceAssetIds: startingAsset ? [startingAsset.id] : [],
-          metadata: {
-            mode,
-            aspect,
-            duration,
-            resolution,
-            audio,
-            providerPayload: videoProviderPayload,
-          },
-        })
-        .returning();
-
-      return res.json({
-        success: true,
-        asset: created,
+      // When provider credentials are present, delegate to genuine Veo/Gemini generation
+      return res.status(501).json({
+        success: false,
+        error: "NOT_IMPLEMENTED",
+        message: "Direct video synthesis requires the dedicated /api/veo/generate endpoint.",
       });
     } catch (err: any) {
       console.error("[Creative] video generation error:", err);

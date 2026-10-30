@@ -1115,20 +1115,33 @@ export function registerPerceptionRoutes(app: Express) {
         .map((row) => {
           if (!row.kind) return null;
           const label = translateSignalKind(row.kind);
-          if (!label) return null; 
+          if (!label) return null;
 
-          const evidenceNotes: string[] = (() => {
-            if (!row.evidence) return [];
+          const parsedEvidence: Record<string, any> = (() => {
+            if (!row.evidence) return {};
             try {
-              const parsed = JSON.parse(row.evidence);
-              return Array.isArray(parsed?.notes)
-                ? (parsed.notes as unknown[]).filter((n): n is string => typeof n === "string")
-                : [];
-            } catch { return []; }
+              return JSON.parse(row.evidence) || {};
+            } catch {
+              return {};
+            }
           })();
 
-          const compName = row.competitorName ?? null;
+          const evidenceNotes: string[] = Array.isArray(parsedEvidence?.notes)
+            ? (parsedEvidence.notes as unknown[]).filter(
+                (n): n is string => typeof n === "string",
+              )
+            : [];
+
+          const compName =
+            row.competitorName ??
+            (typeof parsedEvidence?.competitorName === "string"
+              ? parsedEvidence.competitorName
+              : null);
           const compIds = row.competitorId ? [row.competitorId] : [];
+          const customTitle =
+            typeof parsedEvidence?.title === "string" && parsedEvidence.title.trim()
+              ? parsedEvidence.title.trim()
+              : label;
 
           return {
             id: row.id,
@@ -1137,12 +1150,33 @@ export function registerPerceptionRoutes(app: Express) {
             status: row.status,
             kind: row.kind,
             label,
+            title: customTitle,
+            categoryLabel: label,
             severity: row.severity ?? "mild",
             scope: row.scope ?? "single_competitor",
             scopeCompetitorCount: row.scopeCompetitorCount ?? 1,
             competitor: compName,
             competitorIds: compIds,
             evidence: evidenceNotes,
+            evidenceUrls: Array.isArray(parsedEvidence?.evidenceUrls)
+              ? parsedEvidence.evidenceUrls
+              : [],
+            evidenceConfidence:
+              typeof parsedEvidence?.confidence === "number"
+                ? parsedEvidence.confidence
+                : null,
+            prevValue: parsedEvidence?.prev ?? null,
+            currValue: parsedEvidence?.curr ?? null,
+            productReferenced: parsedEvidence?.productReferenced ?? null,
+            segmentName: parsedEvidence?.segmentName ?? null,
+            laneId: parsedEvidence?.laneId ?? null,
+            laneTitle: parsedEvidence?.laneTitle ?? null,
+            businessRelevance: parsedEvidence?.businessRelevance ?? null,
+            actionabilityType: parsedEvidence?.actionabilityType ?? null,
+            nextActionLabel: parsedEvidence?.nextActionLabel ?? null,
+            linkedScenarioId: parsedEvidence?.linkedScenarioId ?? null,
+            investigationStatus: parsedEvidence?.investigationStatus ?? null,
+            appliedStrategyVersion: parsedEvidence?.appliedStrategyVersion ?? null,
             sourceRecordIds: [],
             evidenceRefIds: [],
             createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : row.createdAt,
@@ -1196,7 +1230,8 @@ export function registerPerceptionRoutes(app: Express) {
             "Content format shift": "content_format_shift",
             "Posting cadence shift": "posting_frequency_shift",
             "Competitor profile change": "competitor_profile_change",
-            "Offer language change": "offer_language_change"
+            "Offer language change": "offer_language_change",
+            "Pricing strategy shift": "pricing_change"
           };
           return map[lbl] || null;
         };
@@ -1238,9 +1273,10 @@ export function registerPerceptionRoutes(app: Express) {
       const lastScanAt = lastScanResult.rows[0]?.completed_at;
 
       const nextScanResult = await db.execute(sql`
-        SELECT min(next_refresh_at) as next_scan
-        FROM mi_refresh_schedule
-        WHERE campaign_id = ${campaignId}
+        SELECT min(s.next_refresh_at) as next_scan
+        FROM mi_refresh_schedule s
+        JOIN ci_competitors c ON s.competitor_id = c.id AND s.campaign_id = c.campaign_id
+        WHERE s.campaign_id = ${campaignId} AND s.status = 'active' AND c.is_active = true
       `);
       const nextScanAt = nextScanResult.rows[0]?.next_scan;
 
@@ -1669,17 +1705,37 @@ export function registerPerceptionRoutes(app: Express) {
             updatedAt: row.event.updatedAt instanceof Date ? row.event.updatedAt.toISOString() : null,
           },
           presentation: {
-            title: label || "Market Change",
+            title:
+              typeof evidenceParsed.title === "string" && evidenceParsed.title.trim()
+                ? (evidenceParsed.title as string)
+                : label || "Market Change",
             category: label || "Market Signal",
             impactLabel: impactLabel,
-            // BUG 3/14 fix: return human-readable label, not raw DB enum
             statusLabel: humanStatusLabel,
+            productReferenced: (evidenceParsed.productReferenced as string) ?? null,
+            segmentName: (evidenceParsed.segmentName as string) ?? null,
+            laneId: (evidenceParsed.laneId as string) ?? null,
+            laneTitle: (evidenceParsed.laneTitle as string) ?? null,
+            actionabilityType: (evidenceParsed.actionabilityType as string) ?? null,
+            nextActionLabel: (evidenceParsed.nextActionLabel as string) ?? null,
+            linkedScenarioId: (evidenceParsed.linkedScenarioId as string) ?? null,
+            investigationStatus: (evidenceParsed.investigationStatus as string) ?? null,
+            appliedStrategyVersion: (evidenceParsed.appliedStrategyVersion as number) ?? null,
+            evidenceConfidence:
+              typeof evidenceParsed.confidence === "number"
+                ? evidenceParsed.confidence
+                : null,
           },
           observation: {
-            // BUG 2 fix: enriched sentence with metric name, units, window
             whatChanged: whatChangedSentence,
             evidenceNotes: notes,
-            whyItMatters: whyItMatters,
+            whyItMatters:
+              (evidenceParsed.businessRelevance as string | undefined) || whyItMatters,
+            businessRelevance:
+              (evidenceParsed.businessRelevance as string | undefined) || whyItMatters,
+            evidenceUrls: Array.isArray(evidenceParsed.evidenceUrls)
+              ? (evidenceParsed.evidenceUrls as string[])
+              : [],
             diff: (prevValue !== undefined || currValue !== undefined) ? {
               prev: prevValue,
               curr: currValue,
@@ -1688,7 +1744,11 @@ export function registerPerceptionRoutes(app: Express) {
           strategicBrief: strategicBriefData,
           competitors: [{
             competitorId: row.event.competitorId,
-            competitorName: row.competitor ? row.competitor.name : (row.event.competitorId ? null : null),
+            competitorName:
+              row.competitor?.name ||
+              (typeof evidenceParsed.competitorName === "string"
+                ? (evidenceParsed.competitorName as string)
+                : null),
             observedChange: competitorObservedChange,
             impact: impactLabel,
             sourceRecordIds: [],

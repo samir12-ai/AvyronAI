@@ -134,9 +134,18 @@ describe("Audience Root-Pain Consolidation + Factual Materiality Dossier", { tim
       sourceTypes: ["comment"]
     };
 
+    const canonicalEvidence = new Map([
+      ["EV-189", {
+        detail: "Users are unable to see current market pricing and visibility.",
+        platform: "comment",
+        actorType: "CUSTOMER",
+      }]
+    ]);
+
     const registry = buildAudiencePainRegistry(
       [rawPain],
       { accountId: "acc_1", audienceSnapshotId: "snap_1" },
+      canonicalEvidence,
       [{ id: "seg_1", name: "Segment 1" } as any]
     );
 
@@ -169,13 +178,25 @@ describe("Audience Root-Pain Consolidation + Factual Materiality Dossier", { tim
       painClaim: "Users find testimonial design cards slightly tedious to format manually.",
       productFitType: "DIRECT_FIT" as const,
       targetCoverageDecision: "COVERED" as const,
-      materialityContext: {
-        citationCount: 45, // High citation count
+      materiality: {
+        mode: "GROUNDED",
+        evidence: [
+          {
+            evidenceUid: "EV-CARD-1",
+            rawEvidenceUids: ["EV-CARD-1"],
+            canonicalEvidenceId: "rev:card:1",
+            actorType: "CUSTOMER",
+            authorityClass: "DIRECT_CUSTOMER_VOICE",
+            sourceType: "social_comment",
+            verbatimText: "Users mention spending 10 minutes making testimonial cards look nice.",
+            boundedExcerpt: '[social_comment] "Users mention spending 10 minutes making testimonial cards look nice."',
+          }
+        ],
+        rawEvidenceUids: ["EV-CARD-1"],
+        rawCitationCount: 45,
         uniqueEvidenceCount: 45,
         uniqueCompetitorCount: 5,
-        occurrenceCount: 45,
         sourceTypes: ["social_comment"],
-        evidenceSummaries: ["Users mention spending 10 minutes making testimonial cards look nice."]
       }
     };
 
@@ -201,13 +222,25 @@ describe("Audience Root-Pain Consolidation + Factual Materiality Dossier", { tim
       painClaim: "B2B marketing executives lose millions in pipeline because they cannot identify high-intent buying signals from scattered market data.",
       productFitType: "DIRECT_FIT" as const,
       targetCoverageDecision: "COVERED" as const,
-      materialityContext: {
-        citationCount: 1, // Only 1 single citation
+      materiality: {
+        mode: "GROUNDED",
+        evidence: [
+          {
+            evidenceUid: "EV-CMO-1",
+            rawEvidenceUids: ["EV-CMO-1"],
+            canonicalEvidenceId: "rev:cmo:1",
+            actorType: "CUSTOMER",
+            authorityClass: "DIRECT_CUSTOMER_VOICE",
+            sourceType: "executive_interview",
+            verbatimText: "CMO reports enterprise pipeline collapses due to lack of market buying signals.",
+            boundedExcerpt: '[executive_interview] "CMO reports enterprise pipeline collapses due to lack of market buying signals."',
+          }
+        ],
+        rawEvidenceUids: ["EV-CMO-1"],
+        rawCitationCount: 1,
         uniqueEvidenceCount: 1,
         uniqueCompetitorCount: 1,
-        occurrenceCount: 1,
         sourceTypes: ["executive_interview"],
-        evidenceSummaries: ["CMO reports enterprise pipeline collapses due to lack of market buying signals."]
       }
     };
 

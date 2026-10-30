@@ -29,12 +29,14 @@ import {
   pipelineAcquisitions,
   ciCompetitors,
   competitorUnderstandingSnapshots,
+  competitorWebsiteSnapshots,
   userPublicProfiles,
   userChannelSnapshots,
 } from "@shared/schema";
 import {
   getStoredPostsForMIv3,
   getStoredTikTokPostsForMIv3,
+  getStoredYouTubePostsForMIv3,
   getStoredReviewsForMIv3,
   fetchCompetitorData,
 } from "../competitive-intelligence/data-acquisition";
@@ -101,6 +103,12 @@ const ADAPTERS: AdapterDescriptor[] = [
     sourceAdapter: "main:ci_competitor_posts.tiktok",
     version: "1.0.0",
     description: "Reads stored TikTok posts for a competitor via getStoredTikTokPostsForMIv3.",
+  },
+  {
+    entityType: "competitor_youtube",
+    sourceAdapter: "main:ci_competitor_posts.youtube",
+    version: "1.0.0",
+    description: "Reads stored YouTube videos for a competitor via getStoredYouTubePostsForMIv3.",
   },
   {
     entityType: "competitor_reviews",
@@ -220,25 +228,48 @@ async function buildPayload(
       let offerPhrases: string[] = [];
       let pricingAnchors: string[] = [];
       let headlines: string[] = [];
+      let ctaLabels: string[] = safeJsonStringArray(c.ctaPatterns);
+
       try {
         const [uSnap] = await db
           .select()
           .from(competitorUnderstandingSnapshots)
           .where(eq(competitorUnderstandingSnapshots.competitorId, input.entityId))
-          .orderBy(desc(competitorUnderstandingSnapshots.analyzedAt))
+          .orderBy(desc(competitorUnderstandingSnapshots.createdAt))
           .limit(1);
-        if (uSnap && uSnap.payload) {
-          const uPayload = typeof uSnap.payload === "string" ? JSON.parse(uSnap.payload) : uSnap.payload;
+        const rawUnderstanding = (uSnap as any)?.competitorUnderstanding ?? (uSnap as any)?.payload;
+        if (uSnap && rawUnderstanding) {
+          const uPayload =
+            typeof rawUnderstanding === "string"
+              ? JSON.parse(rawUnderstanding)
+              : rawUnderstanding;
           if (Array.isArray(uPayload.offers)) {
             for (const off of uPayload.offers) {
-              if (off.offerStatement) offerPhrases.push(off.offerStatement);
-              if (off.planPackage) offerPhrases.push(off.planPackage);
-              if (off.pricing) pricingAnchors.push(off.pricing);
+              if (typeof off.offerStatement === "string" && off.offerStatement.trim()) {
+                offerPhrases.push(off.offerStatement.trim());
+              }
+              if (typeof off.planPackage === "string" && off.planPackage.trim()) {
+                offerPhrases.push(off.planPackage.trim());
+              }
+              if (typeof off.freeEntry === "string" && off.freeEntry.trim() && off.freeEntry.toLowerCase() !== "none") {
+                offerPhrases.push(off.freeEntry.trim());
+              }
+              if (typeof off.pricing === "string" && off.pricing.trim()) {
+                pricingAnchors.push(off.pricing.trim());
+              }
+              if (typeof off.cta === "string" && off.cta.trim()) {
+                ctaLabels.push(off.cta.trim());
+              }
             }
           }
           if (Array.isArray(uPayload.positioning)) {
             for (const pos of uPayload.positioning) {
-              if (pos.statement) headlines.push(pos.statement);
+              if (typeof pos.statement === "string" && pos.statement.trim()) {
+                headlines.push(pos.statement.trim());
+              }
+              if (typeof pos.primaryPromise === "string" && pos.primaryPromise.trim()) {
+                headlines.push(pos.primaryPromise.trim());
+              }
             }
           }
         }
@@ -246,9 +277,59 @@ async function buildPayload(
         // non-fatal
       }
 
+      // Also enrich from latest successful competitorWebsiteSnapshots if available
+      try {
+        const [wSnap] = await db
+          .select()
+          .from(competitorWebsiteSnapshots)
+          .where(eq(competitorWebsiteSnapshots.competitorId, input.entityId))
+          .orderBy(desc(competitorWebsiteSnapshots.createdAt))
+          .limit(1);
+        if (wSnap) {
+          if (wSnap.crawlStatus === "FAILED") {
+            warnings.push("website_crawl_failed");
+          } else if (wSnap.pagesCrawled) {
+            const pages = typeof wSnap.pagesCrawled === "string" ? JSON.parse(wSnap.pagesCrawled) : wSnap.pagesCrawled;
+            if (Array.isArray(pages)) {
+              for (const pg of pages.slice(0, 5)) {
+                if (headlines.length === 0 && typeof pg?.title === "string" && pg.title.trim()) {
+                  headlines.push(pg.title.trim());
+                }
+                if (Array.isArray(pg?.headings) && headlines.length < 10) {
+                  for (const h of pg.headings.slice(0, 4)) {
+                    if (typeof h === "string" && h.trim()) headlines.push(h.trim());
+                  }
+                }
+                if (Array.isArray(pg?.ctaBlocks)) {
+                  for (const cta of pg.ctaBlocks.slice(0, 5)) {
+                    if (typeof cta === "string" && cta.trim()) ctaLabels.push(cta.trim());
+                  }
+                }
+                if (Array.isArray(pg?.pricingBlocks) && pricingAnchors.length === 0) {
+                  for (const pr of pg.pricingBlocks.slice(0, 5)) {
+                    if (typeof pr === "string" && pr.trim()) pricingAnchors.push(pr.trim());
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // non-fatal
+      }
+
+      headlines = Array.from(new Set(headlines));
+      ctaLabels = Array.from(new Set(ctaLabels));
+      offerPhrases = Array.from(new Set(offerPhrases));
+      pricingAnchors = Array.from(new Set(pricingAnchors));
+
+      if (headlines.length === 0 && ctaLabels.length === 0 && offerPhrases.length === 0 && pricingAnchors.length === 0) {
+        warnings.push("no_website_signals_available");
+      }
+
       return {
         headlines,
-        cta_labels: safeJsonStringArray(c.ctaPatterns),
+        cta_labels: ctaLabels,
         offer_phrases: offerPhrases,
         pricing_anchors: pricingAnchors,
         messaging_tone: c.messagingTone ?? null,
@@ -269,12 +350,14 @@ async function buildPayload(
       }
       const posts = await getStoredPostsForMIv3(input.entityId, input.accountId);
       if (posts.length === 0) warnings.push("no_instagram_posts_available");
-      // Aggregate hashtags for translation hygiene.
+      // Aggregate hashtags with normalized prefix stripping so #tag and tag never diff falsely.
       const hashtags = Array.from(
         new Set(
           posts
             .flatMap((p) => (Array.isArray(p.hashtags) ? p.hashtags : []))
-            .filter((h): h is string => typeof h === "string" && h.length > 0),
+            .filter((h): h is string => typeof h === "string" && h.length > 0)
+            .map((h) => h.replace(/^#+/, "").trim().toLowerCase())
+            .filter(Boolean),
         ),
       ).slice(0, 100);
       return { posts, hashtags };
@@ -283,7 +366,31 @@ async function buildPayload(
     case "competitor_tiktok": {
       const posts = await getStoredTikTokPostsForMIv3(input.entityId, input.accountId);
       if (posts.length === 0) warnings.push("no_tiktok_posts_available");
-      return { posts };
+      const hashtags = Array.from(
+        new Set(
+          posts
+            .flatMap((p) => (Array.isArray(p.hashtags) ? p.hashtags : []))
+            .filter((h): h is string => typeof h === "string" && h.length > 0)
+            .map((h) => h.replace(/^#+/, "").trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ).slice(0, 100);
+      return { posts, hashtags };
+    }
+
+    case "competitor_youtube": {
+      const posts = await getStoredYouTubePostsForMIv3(input.entityId, input.accountId);
+      if (posts.length === 0) warnings.push("no_youtube_posts_available");
+      const hashtags = Array.from(
+        new Set(
+          posts
+            .flatMap((p) => (Array.isArray(p.hashtags) ? p.hashtags : []))
+            .filter((h): h is string => typeof h === "string" && h.length > 0)
+            .map((h) => h.replace(/^#+/, "").trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ).slice(0, 100);
+      return { posts, hashtags };
     }
 
     case "competitor_reviews": {
@@ -323,7 +430,7 @@ async function buildPayload(
         .from(ciCompetitors)
         .where(eq(ciCompetitors.id, input.entityId))
         .limit(1);
-      const profileUrl = compRows[0]?.profileLink || `https://www.linkedin.com/company/${compRows[0]?.name?.toLowerCase().replace(/\\s+/g, "-")}`;
+      const profileUrl = compRows[0]?.websiteUrl || `https://www.linkedin.com/company/${compRows[0]?.name?.toLowerCase().replace(/\\s+/g, "-")}`;
       const result = await fetchLinkedInEvidence({
         profileUrl,
         campaignId: input.campaignId,
@@ -347,7 +454,7 @@ async function buildPayload(
         .from(ciCompetitors)
         .where(eq(ciCompetitors.id, input.entityId))
         .limit(1);
-      const handle = compRows[0]?.profileLink ? extractHandleFromUrl(compRows[0].profileLink) : (compRows[0]?.name || "");
+      const handle = compRows[0]?.name || "";
       const result = await fetchXEvidence({
         handle,
         campaignId: input.campaignId,
@@ -376,6 +483,76 @@ export async function acquire(input: AcquireInput): Promise<CollectorEnvelope> {
     throw new Error("BadRequest:accountId, campaignId, entityId are required");
   }
 
+  const maxAgeMs = input.freshness?.maxAgeMs ?? DEFAULT_TTL_MS;
+  const force = input.freshness?.force === true;
+
+  // Freshness-aware cache reuse check when !force
+  if (!force && maxAgeMs > 0) {
+    const existingRows = await db
+      .select()
+      .from(pipelineAcquisitions)
+      .where(
+        and(
+          eq(pipelineAcquisitions.accountId, input.accountId),
+          eq(pipelineAcquisitions.campaignId, input.campaignId),
+          eq(pipelineAcquisitions.entityType, input.entityType),
+          eq(pipelineAcquisitions.entityId, input.entityId)
+        )
+      )
+      .orderBy(desc(pipelineAcquisitions.collectedAt))
+      .limit(1);
+
+    const latest = existingRows[0];
+    if (latest && latest.collectedAt && Date.now() - latest.collectedAt.getTime() <= maxAgeMs) {
+      let cachedPayload: Record<string, unknown> = {};
+      let cachedProvenance: CollectorProvenance = { cache_hit: true, warnings: [] };
+      try {
+        cachedPayload = JSON.parse(latest.payload) || {};
+      } catch {}
+      try {
+        const parsedProv = JSON.parse(latest.provenance) || {};
+        cachedProvenance = { ...parsedProv, cache_hit: true };
+      } catch {}
+
+      try {
+        const { acquisitionRequests } = await import("@shared/schema");
+        await db.insert(acquisitionRequests).values({
+          id: `areq_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`,
+          accountId: input.accountId,
+          campaignId: input.campaignId,
+          requesterEngine: "COLLECTOR",
+          trigger: input.lane,
+          entityType: input.entityType.toUpperCase(),
+          entityId: input.entityId,
+          platform: input.entityType.toUpperCase(),
+          capability: "COLLECTOR_ENVELOPE",
+          freshnessTtlSec: Math.round(maxAgeMs / 1000),
+          resolutionType: "CACHE_REUSE",
+          status: "COMPLETED",
+          terminalOutcome: "SUCCESS_WITH_CONTENT",
+          provider: adapter.sourceAdapter,
+          normalizedEvidenceIds: [latest.id],
+          consumerDeliveryStatus: "DELIVERED",
+          usageUsd: 0,
+          completedAt: new Date(),
+        });
+      } catch {}
+
+      return {
+        acquisition_id: latest.id,
+        account_id: latest.accountId,
+        campaign_id: latest.campaignId,
+        lane: latest.lane as CollectorLane,
+        entity_type: latest.entityType as CollectorEntityType,
+        entity_id: latest.entityId,
+        source_adapter: latest.sourceAdapter,
+        collected_at: latest.collectedAt.toISOString(),
+        payload: cachedPayload,
+        provenance: cachedProvenance,
+      };
+    }
+  }
+
   const acqId = crypto.randomUUID();
   const startedAt = new Date();
   const warnings: string[] = [];
@@ -396,7 +573,7 @@ export async function acquire(input: AcquireInput): Promise<CollectorEnvelope> {
     fetch_started_at: startedAt.toISOString(),
     fetch_finished_at: finishedAt.toISOString(),
     fetch_duration_ms: finishedAt.getTime() - startedAt.getTime(),
-    forced_freshness: input.freshness?.force === true,
+    forced_freshness: force,
   };
 
   await db.insert(pipelineAcquisitions).values({
@@ -410,9 +587,62 @@ export async function acquire(input: AcquireInput): Promise<CollectorEnvelope> {
     collectedAt: finishedAt,
     payload: JSON.stringify(payload),
     provenance: JSON.stringify(provenance),
-    ttlMs: DEFAULT_TTL_MS,
+    ttlMs: maxAgeMs,
     scopeHash: "default",
   });
+
+  try {
+    const { acquisitionRequests } = await import("@shared/schema");
+    const hasFailedWarning = warnings.some(
+      (w) => w.startsWith("adapter_error:") || w.includes("_failed")
+    );
+    const hasEmptyWarning = warnings.some(
+      (w) =>
+        w.includes("no_website_signals_available") ||
+        w.includes("no_instagram_posts_available") ||
+        w.includes("no_tiktok_posts_available") ||
+        w.includes("no_youtube_posts_available") ||
+        w.includes("no_reviews_available")
+    );
+    const isZeroPayload =
+      hasEmptyWarning ||
+      (Array.isArray((payload as any).posts) && (payload as any).posts.length === 0) ||
+      (Array.isArray((payload as any).tweets) && (payload as any).tweets.length === 0) ||
+      (Array.isArray((payload as any).search_results) && (payload as any).search_results.length === 0);
+    const isConfirmedEmptyFromReport = (payload as any).report?.isConfirmedEmpty === true;
+
+    await db.insert(acquisitionRequests).values({
+      id: `areq_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`,
+      accountId: input.accountId,
+      campaignId: input.campaignId,
+      requesterEngine: "COLLECTOR",
+      trigger: input.lane,
+      entityType: input.entityType.toUpperCase(),
+      entityId: input.entityId,
+      platform: input.entityType.toUpperCase(),
+      capability: "COLLECTOR_ENVELOPE",
+      freshnessTtlSec: Math.round(maxAgeMs / 1000),
+      resolutionType: "NEW_FETCH",
+      status: hasFailedWarning ? "FAILED" : "COMPLETED",
+      terminalOutcome: hasFailedWarning
+        ? "ACQUISITION_FAILED"
+        : isZeroPayload
+          ? isConfirmedEmptyFromReport
+            ? "CONFIRMED_EMPTY_SOURCE"
+            : "INCONCLUSIVE_ZERO_RESULT"
+          : "SUCCESS_WITH_CONTENT",
+      provider: adapter.sourceAdapter,
+      normalizedEvidenceIds: [acqId],
+      consumerDeliveryStatus: hasFailedWarning
+        ? "FAILED"
+        : isZeroPayload
+          ? isConfirmedEmptyFromReport
+            ? "EMPTY_CONFIRMED"
+            : "EMPTY_INCONCLUSIVE"
+          : "DELIVERED",
+      completedAt: finishedAt,
+    });
+  } catch {}
 
   return {
     acquisition_id: acqId,

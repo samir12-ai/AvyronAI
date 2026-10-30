@@ -38,7 +38,7 @@
  */
 
 import { db } from "../db";
-import { pipelineSnapshots, pipelineChangeEvents, competitorPostClassifications, ciCompetitorPosts, ciCompetitors } from "@shared/schema";
+import { pipelineSnapshots, pipelineChangeEvents, competitorPostClassifications, ciCompetitorPosts, ciCompetitors, competitorWebsiteSnapshots } from "@shared/schema";
 import { and, eq, isNull, isNotNull, desc, sql, count, ne } from "drizzle-orm";
 import { scheduleConfirmationFetch, CONFIRMATION_DELAY_HOURS } from "./scheduler";
 import { enqueueBrief } from "./strategic-brief-runner";
@@ -342,13 +342,49 @@ interface WatchtowerEvidence {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+const PLACEHOLDER_TOKENS = new Set([
+  "not established",
+  "not specified",
+  "n/a",
+  "none",
+  "unknown",
+  "null",
+  "undefined",
+]);
+
+function isPlaceholderValue(val: string): boolean {
+  if (PLACEHOLDER_TOKENS.has(val)) return true;
+  return /^(not\s+(explicitly\s+)?(stated|listed|established|specified|available|disclosed|provided|mentioned)|no\s+explicit\s+pricing)/i.test(
+    val
+  );
+}
+
 function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   const cleaned = (input as unknown[])
     .filter((x): x is string => typeof x === "string")
-    .map((x) => x.trim().toLowerCase())
-    .filter((x) => x.length > 0);
+    .map((x) =>
+      x
+        .trim()
+        // Normalize hashtag prefix formatting (#tag -> tag) so #tag vs tag never diffs as removed/added
+        .replace(/^#+([a-z0-9_.-]+)$/i, "$1")
+        .replace(/\s+/g, " ")
+        .toLowerCase(),
+    )
+    .filter((x) => x.length > 0 && !isPlaceholderValue(x));
   return Array.from(new Set(cleaned)).sort();
+}
+
+function normalizePostIds(input: unknown): string[] {
+  if (!Array.isArray(input)) return [];
+  return Array.from(
+    new Set(
+      (input as unknown[])
+        .filter((x): x is string => typeof x === "string")
+        .map((x) => x.trim().replace(/^yt_/i, ""))
+        .filter((x) => x.length > 0)
+    )
+  );
 }
 
 function safeParsePayload(raw: string | null | undefined, label: string): Record<string, unknown> | null {
@@ -402,20 +438,80 @@ export function classifyWatchtowerChanges(
   const changes: WatchtowerChange[] = [];
   const ids = { baselineSnapshotId, currentSnapshotId };
 
+  // Empty, failed, or partial fetches must never generate market changes or "removed" claims.
+  if (current.is_empty_or_failed === true || previous.is_empty_or_failed === true) {
+    return [];
+  }
+
+  // If both snapshots reference the exact same website_snapshot_id, any payload diff is a re-extraction/repair, not a market change.
+  if (
+    typeof current.website_snapshot_id === "string" &&
+    typeof previous.website_snapshot_id === "string" &&
+    current.website_snapshot_id === previous.website_snapshot_id
+  ) {
+    return [];
+  }
+
+  // If both snapshots represent social/video post feeds with explicit post_ids and zero new normalized post IDs exist,
+  // no new posts were published (e.g., title-only vs title — description formatting or duplicate yt_ prefix cleanup).
+  const prevNormPostIds = normalizePostIds(previous.post_ids);
+  const currNormPostIds = normalizePostIds(current.post_ids);
+  if (prevNormPostIds.length > 0 && currNormPostIds.length > 0) {
+    const prevPostIdSet = new Set(prevNormPostIds);
+    const hasNewPostId = currNormPostIds.some((id) => !prevPostIdSet.has(id));
+    if (!hasNewPostId) {
+      return [];
+    }
+  }
+
   // 1. posting_frequency_shift
+  // Only compare when both snapshots use comparable window metrics and neither is sample-capped.
   const prevFreq = typeof previous.frequency === "number" ? previous.frequency : null;
   const currFreq = typeof current.frequency === "number" ? current.frequency : null;
-  if (prevFreq !== null && currFreq !== null && prevFreq !== currFreq && prevFreq > 0) {
+  const prevMeta = (previous.frequency_meta as Record<string, unknown> | undefined) ?? null;
+  const currMeta = (current.frequency_meta as Record<string, unknown> | undefined) ?? null;
+
+  const isSampleCapped =
+    prevMeta?.isSampleCapped === true || currMeta?.isSampleCapped === true;
+  const isSmallerSampleCap =
+    prevMeta !== null &&
+    currMeta !== null &&
+    typeof prevMeta.totalSampled === "number" &&
+    typeof currMeta.totalSampled === "number" &&
+    currMeta.totalSampled < prevMeta.totalSampled;
+  const methodMismatch =
+    prevMeta !== null &&
+    currMeta !== null &&
+    Boolean(prevMeta.hasPublicationTimestamps) !== Boolean(currMeta.hasPublicationTimestamps);
+  // Also guard against legacy snapshots where frequency was raw DB row count (no frequency_meta)
+  // being compared against a 30d window frequency or another cumulative cap.
+  const legacyVsWindowMismatch =
+    (prevMeta === null && currMeta?.hasPublicationTimestamps === true) ||
+    (currMeta === null && prevMeta?.hasPublicationTimestamps === true);
+
+  if (
+    prevFreq !== null &&
+    currFreq !== null &&
+    prevFreq !== currFreq &&
+    prevFreq > 0 &&
+    currFreq > 0 &&
+    !isSampleCapped &&
+    !isSmallerSampleCap &&
+    !methodMismatch &&
+    !legacyVsWindowMismatch
+  ) {
     const delta = currFreq - prevFreq;
     const pctChange = Math.abs(delta / prevFreq);
     if (pctChange >= 0.20) {
+      const coverageNote =
+        currMeta?.hasPublicationTimestamps === true
+          ? `30d window frequency: ${prevFreq} → ${currFreq} (${Math.round(pctChange * 100)}% change, sample=${currMeta.totalSampled ?? currFreq})`
+          : `frequency: ${prevFreq} → ${currFreq} (${Math.round(pctChange * 100)}% change)`;
       changes.push({
         kind: "posting_frequency_shift",
         // >50% shift = watch, 20–49% = mild (B1: truthful sizing)
         severity: pctChange >= 0.50 ? "medium" : "mild",
-        evidence: [
-          `frequency: ${prevFreq} → ${currFreq} (${Math.round(pctChange * 100)}% change)`,
-        ],
+        evidence: [coverageNote],
         prevValue: prevFreq,
         currValue: currFreq,
         ...ids,
@@ -424,13 +520,47 @@ export function classifyWatchtowerChanges(
   }
 
   // 2. competitor_profile_change (patterns shift — captions, hashtags, CTAs)
+  // Require both previous and current to have non-empty patterns so empty/partial fetches never emit removals.
   const prevPatterns = normalizeStringArray(previous.patterns);
   const currPatterns = normalizeStringArray(current.patterns);
-  if (prevPatterns.length > 0 || currPatterns.length > 0) {
+  if (prevPatterns.length > 0 && currPatterns.length > 0) {
     const prevSet = new Set(prevPatterns);
     const currSet = new Set(currPatterns);
     const added = currPatterns.filter((p) => !prevSet.has(p));
-    const removed = prevPatterns.filter((p) => !currSet.has(p));
+    let removed = prevPatterns.filter((p) => !currSet.has(p));
+
+    // Guard against rolling-window post displacement and sample-cap differences:
+    // Social post feeds (where post_ids or frequency/posts exist) are rolling samples
+    // of recent posts (capped at 25 captions in envelope-to-lane). Older posts aging out
+    // or being pushed down by newer posts is NOT a profile "removal".
+    const prevSources = Array.isArray(previous._translation_sources) ? (previous._translation_sources as string[]) : [];
+    const currSources = Array.isArray(current._translation_sources) ? (current._translation_sources as string[]) : [];
+    const isSocialPostSample =
+      Array.isArray(previous.post_ids) ||
+      Array.isArray(current.post_ids) ||
+      typeof previous.frequency === "number" ||
+      typeof current.frequency === "number" ||
+      prevSources.some((s) => s.includes("posts")) ||
+      currSources.some((s) => s.includes("posts"));
+
+    const prevSampleSize = typeof previous.sample_size === "number" ? previous.sample_size : prevPatterns.length;
+    const currSampleSize = typeof current.sample_size === "number" ? current.sample_size : currPatterns.length;
+    const isSampleCapSmaller = currSampleSize < prevSampleSize;
+
+    if (isSocialPostSample || isSampleCapSmaller) {
+      // Do not emit "removed" claims from rolling-window post displacement or sample-cap differences.
+      removed = [];
+    } else {
+      // Even on website patterns, if a "removed" item still appears as a substring of any current pattern/offer,
+      // it was not removed.
+      const currCorpus = [
+        ...currPatterns,
+        ...normalizeStringArray(current.objections),
+        ...normalizeStringArray(current.pricing || current.pricingAnchors),
+      ].join(" || ");
+      removed = removed.filter((r) => !currCorpus.includes(r));
+    }
+
     const totalUniq = new Set([...prevPatterns, ...currPatterns]).size;
     const changedCount = added.length + removed.length;
     const changePct = totalUniq > 0 ? changedCount / totalUniq : 0;
@@ -452,13 +582,15 @@ export function classifyWatchtowerChanges(
   }
 
   // 3. offer_language_change (objections = offer_phrases for competitor_website entities)
+  // Require both snapshots to have non-empty offers before claiming removals (empty/partial crawl guard).
   const prevOffers = normalizeStringArray(previous.objections);
   const currOffers = normalizeStringArray(current.objections);
-  if (prevOffers.length > 0 || currOffers.length > 0) {
+  if (prevOffers.length > 0 && currOffers.length > 0) {
     const prevOfferSet = new Set(prevOffers);
     const currOfferSet = new Set(currOffers);
+    const currFullText = [...currOffers, ...currPatterns].join(" || ");
     const addedOffers = currOffers.filter((o) => !prevOfferSet.has(o));
-    const removedOffers = prevOffers.filter((o) => !currOfferSet.has(o));
+    const removedOffers = prevOffers.filter((o) => !currOfferSet.has(o) && !currFullText.includes(o));
     if (addedOffers.length > 0 || removedOffers.length > 0) {
       const totalChanged = addedOffers.length + removedOffers.length;
       changes.push({
@@ -481,13 +613,15 @@ export function classifyWatchtowerChanges(
   }
 
   // 4. pricing_change (pricing = pricing_anchors / plans for competitor_website entities)
+  // Require both snapshots to have non-empty pricing before claiming removals (empty/partial crawl guard).
   const prevPricing = normalizeStringArray(previous.pricing || previous.pricingAnchors);
   const currPricing = normalizeStringArray(current.pricing || current.pricingAnchors);
-  if (prevPricing.length > 0 || currPricing.length > 0) {
+  if (prevPricing.length > 0 && currPricing.length > 0) {
     const prevPricingSet = new Set(prevPricing);
     const currPricingSet = new Set(currPricing);
+    const currFullText = [...currPricing, ...currOffers, ...currPatterns].join(" || ");
     const addedPricing = currPricing.filter((p) => !prevPricingSet.has(p));
-    const removedPricing = prevPricing.filter((p) => !currPricingSet.has(p));
+    const removedPricing = prevPricing.filter((p) => !currPricingSet.has(p) && !currFullText.includes(p));
     if (addedPricing.length > 0 || removedPricing.length > 0) {
       const totalChanged = addedPricing.length + removedPricing.length;
       changes.push({
@@ -696,8 +830,53 @@ async function maintainOpenCandidates(
     const match = vsBaseline.find((c) => c.kind === candidate.kind);
 
     if (!match) {
-      // State reverted to baseline before confirmation → close, never promote.
-      await archiveCandidate(candidate.id, candidate.kind, competitorId, "reverted_to_baseline", input.runId);
+      // Distinguish genuine market reversion from baseline/evidence correction (e.g. duplicate post cleanup,
+      // placeholder "not established" baseline repair, single-crawl website enrichment, or source quarantine).
+      let archiveReason = "reverted_to_baseline";
+      try {
+        const storedEv = parseEvidence(candidate.evidence);
+        const prevArr = Array.isArray(storedEv?.prev) ? (storedEv!.prev as unknown[]) : [];
+        const hasPlaceholderBaseline = prevArr.some(
+          (x) => typeof x === "string" && PLACEHOLDER_TOKENS.has(x.trim().toLowerCase())
+        );
+        if (hasPlaceholderBaseline) {
+          archiveReason = "baseline_or_evidence_corrected";
+        } else if (candidate.currentSnapshotId) {
+          const [candCurrRow] = await db
+            .select({ payload: pipelineSnapshots.payload, source: pipelineSnapshots.source })
+            .from(pipelineSnapshots)
+            .where(eq(pipelineSnapshots.id, candidate.currentSnapshotId))
+            .limit(1);
+          const candCurrPayload = candCurrRow ? safeParsePayload(candCurrRow.payload, `candCurr:${candidate.currentSnapshotId}`) : null;
+          const baselinePayload = baselineRow ? safeParsePayload(baselineRow.payload, `baseline:${candidate.baselineSnapshotId}`) : null;
+          if (candCurrPayload && baselinePayload) {
+            const recheckOriginal = classifyWatchtowerChanges(
+              candCurrPayload,
+              baselinePayload,
+              candidate.currentSnapshotId,
+              candidate.baselineSnapshotId
+            );
+            if (!recheckOriginal.some((c) => c.kind === candidate.kind)) {
+              archiveReason = "baseline_or_evidence_corrected";
+            }
+          }
+          if (String(candCurrRow?.source || "").includes("website")) {
+            const [crawlCountRow] = await db
+              .select({ cnt: count() })
+              .from(competitorWebsiteSnapshots)
+              .where(
+                and(
+                  eq(competitorWebsiteSnapshots.competitorId, competitorId),
+                  eq(competitorWebsiteSnapshots.status, "COMPLETE")
+                )
+              );
+            if (Number(crawlCountRow?.cnt ?? 0) <= 1) {
+              archiveReason = "baseline_or_evidence_corrected";
+            }
+          }
+        }
+      } catch {}
+      await archiveCandidate(candidate.id, candidate.kind, competitorId, archiveReason, input.runId);
       continue;
     }
 
@@ -980,25 +1159,81 @@ export async function runWatchtowerOrchestrator(
   // We shifted this early-return from the top of the function to sit between 
   // Phase A and Phase B.
 
-  // Load the two most recent pipeline_snapshots for this competitor.
-  let snapshots: Array<{ id: string; payload: string | null; collectedAt: Date | null }>;
+  // Load the most recent pipeline_snapshots for this competitor, scoped to the
+  // same source adapter so website, Instagram, TikTok, YouTube, and review
+  // snapshots are never cross-compared against a different platform's snapshot.
+  let snapshots: Array<{ id: string; payload: string | null; collectedAt: Date | null; source: string | null }>;
   try {
-    snapshots = await db
-      .select({
-        id: pipelineSnapshots.id,
-        payload: pipelineSnapshots.payload,
-        collectedAt: pipelineSnapshots.collectedAt,
-      })
-      .from(pipelineSnapshots)
-      .where(
-        and(
-          eq(pipelineSnapshots.entityId, competitorId),
-          eq(pipelineSnapshots.campaignId, campaignId),
-          eq(pipelineSnapshots.lane, "competitor"),
-        ),
-      )
-      .orderBy(desc(pipelineSnapshots.collectedAt))
-      .limit(2);
+    // First locate the current snapshot (preferring the one created by this runId)
+    const runSnaps = input.runId
+      ? await db
+          .select({
+            id: pipelineSnapshots.id,
+            payload: pipelineSnapshots.payload,
+            collectedAt: pipelineSnapshots.collectedAt,
+            source: pipelineSnapshots.source,
+          })
+          .from(pipelineSnapshots)
+          .where(
+            and(
+              eq(pipelineSnapshots.entityId, competitorId),
+              eq(pipelineSnapshots.campaignId, campaignId),
+              eq(pipelineSnapshots.lane, "competitor"),
+              eq(pipelineSnapshots.runId, input.runId),
+            ),
+          )
+          .orderBy(desc(pipelineSnapshots.collectedAt))
+          .limit(1)
+      : [];
+
+    const latestSnap =
+      runSnaps[0] ??
+      (
+        await db
+          .select({
+            id: pipelineSnapshots.id,
+            payload: pipelineSnapshots.payload,
+            collectedAt: pipelineSnapshots.collectedAt,
+            source: pipelineSnapshots.source,
+          })
+          .from(pipelineSnapshots)
+          .where(
+            and(
+              eq(pipelineSnapshots.entityId, competitorId),
+              eq(pipelineSnapshots.campaignId, campaignId),
+              eq(pipelineSnapshots.lane, "competitor"),
+            ),
+          )
+          .orderBy(desc(pipelineSnapshots.collectedAt))
+          .limit(1)
+      )[0];
+
+    if (!latestSnap) {
+      snapshots = [];
+    } else {
+      const prevConds = [
+        eq(pipelineSnapshots.entityId, competitorId),
+        eq(pipelineSnapshots.campaignId, campaignId),
+        eq(pipelineSnapshots.lane, "competitor"),
+        ne(pipelineSnapshots.id, latestSnap.id),
+      ];
+      if (latestSnap.source) {
+        prevConds.push(eq(pipelineSnapshots.source, latestSnap.source));
+      }
+      const prevSnaps = await db
+        .select({
+          id: pipelineSnapshots.id,
+          payload: pipelineSnapshots.payload,
+          collectedAt: pipelineSnapshots.collectedAt,
+          source: pipelineSnapshots.source,
+        })
+        .from(pipelineSnapshots)
+        .where(and(...prevConds))
+        .orderBy(desc(pipelineSnapshots.collectedAt))
+        .limit(1);
+
+      snapshots = prevSnaps[0] ? [latestSnap, prevSnaps[0]] : [latestSnap];
+    }
   } catch (err) {
     console.error(
       `${LOG_PREFIX} WATCHTOWER_ORCHESTRATOR_FAILED competitorId=${competitorId} reason=snapshot_load_failed detail=${(err as Error).message}`,
@@ -1053,6 +1288,35 @@ export async function runWatchtowerOrchestrator(
       `${LOG_PREFIX} COMPETITOR_DIFF_FAILED competitorId=${competitorId} reason=previous_payload_parse_failed previousId=${previousSnap.id}`,
     );
     return;
+  }
+
+  // Guard against creating false market-change candidates when two competitor-website pipeline_snapshots
+  // were produced from the SAME single website crawl (e.g., baseline repair / understanding enrichment).
+  if (
+    String(currentSnap.source || "").includes("website") ||
+    String(previousSnap.source || "").includes("website")
+  ) {
+    try {
+      const [crawlCountRow] = await db
+        .select({ cnt: count() })
+        .from(competitorWebsiteSnapshots)
+        .where(
+          and(
+            eq(competitorWebsiteSnapshots.competitorId, competitorId),
+            eq(competitorWebsiteSnapshots.status, "COMPLETE"),
+          ),
+        );
+      if (Number(crawlCountRow?.cnt ?? 0) <= 1) {
+        console.log(
+          `${LOG_PREFIX} SINGLE_WEBSITE_CRAWL_BASELINE_ENRICHMENT competitorId=${competitorId} campaign=${campaignId} — skipping candidate diff because only 1 website crawl exists`,
+        );
+        return;
+      }
+    } catch (err) {
+      console.warn(
+        `${LOG_PREFIX} Website crawl count check warning for competitorId=${competitorId}: ${(err as Error).message}`,
+      );
+    }
   }
 
   // Payload-based classification (sync): posting frequency, patterns, offer language.

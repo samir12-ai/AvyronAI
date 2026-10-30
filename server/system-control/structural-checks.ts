@@ -369,7 +369,8 @@ export function checkSnapshotFreshness(
     const freshnessClass = provenance.freshnessClass ?? null;
     const ageInDays = provenance.ageInDays;
 
-    const jobMismatch = sourceJobId !== null && sourceJobId !== currentJobId;
+    const isOfficialResume = provenance.isOfficialResume === true;
+    const jobMismatch = sourceJobId !== null && sourceJobId !== currentJobId && !isOfficialResume;
     const schemaIncompatible = freshnessClass === "INCOMPATIBLE";
     const needsRefresh = freshnessClass === "NEEDS_REFRESH";
 
@@ -522,8 +523,8 @@ export function checkBudgetFunnelAlignment(results: Map<EngineId, EngineStepResu
   downgrade: Downgrade | null;
 } {
   const budgetResult = results.get("budget_governor");
-  if (!budgetResult?.output) {
-    return { contradiction: false, details: "No budget output — check skipped", downgrade: null };
+  if (!budgetResult?.output || budgetResult.output.mode === "recommendation_only") {
+    return { contradiction: false, details: "Recommendation-only mode — execution alignment check skipped", downgrade: null };
   }
 
   const action = budgetResult.output.decision?.action;
@@ -552,8 +553,8 @@ export function checkBudgetCACVerification(results: Map<EngineId, EngineStepResu
   downgrade: Downgrade | null;
 } {
   const budgetResult = results.get("budget_governor");
-  if (!budgetResult?.output) {
-    return { unverified: false, details: "No budget output — check skipped", downgrade: null };
+  if (!budgetResult?.output || budgetResult.output.mode === "recommendation_only") {
+    return { unverified: false, details: "Recommendation-only mode — CAC verification check skipped", downgrade: null };
   }
 
   const action = budgetResult.output.decision?.action;
@@ -631,28 +632,104 @@ export function checkSignalGroundingMassFailure(results: Map<EngineId, EngineSte
  * `layerDiagnostics.blockCode` directly off `result.output` so it works in
  * both BLOCKED and INSUFFICIENT_SIGNALS exit shapes.
  */
+export const VALID_OFFER_STATUSES = new Set([
+  "COMPLETE",
+  "SUCCESS",
+  "INSUFFICIENT_SIGNALS",
+  "MISSING_DEPENDENCY",
+  "INTEGRITY_FAILED",
+  "POSITIONING_MISMATCH",
+  "PARTIAL",
+  "AUDIENCE_MISALIGNMENT",
+  "INVALID_ROOT_BINDING",
+  "AXIS_MISMATCH",
+  "DEPTH_FAILED",
+]);
+
+/**
+ * Validates that the Offer engine had sufficient pain input to generate a
+ * grounded offer. Reads the canonical `status` field fail-closed from the exact
+ * STATUS enum, and inspects `blockCode` / `statusMessage`.
+ */
 export function checkOfferInputSufficient(
   results: Map<EngineId, EngineStepResult>,
   currentJobId: string | null = null,
+  activeContext?: { accountId?: string; campaignId?: string } | null,
 ): StructuralCheck {
   const offerResult = results.get("offer");
   if (!offerResult) {
     return notReached("offer_input_sufficient", "offer", "MISSING");
   }
 
-  // canonical contract read. The offer engine's
-  // `status` field is registered in OFFER_CONTRACT (z.enum), so we read it
-  // through the boundary helper instead of via bespoke `output?.status`
-  // logic. This satisfies D2 (each meaning has its own canonical field),
-  // D3 (strict enum shape), and D5 (missing canonical → CONTRACT_INCOMPLETE
-  // surfaced as `unknown(...)` instead of silently substituted).
-  const statusRead = requireContractField<string>("offer", "status", results, currentJobId);
-
   const output = offerResult.output as any | null;
-  // `blockCode` is NOT a contract-registered field — it's an engine-internal
-  // diagnostic. Reading it via the if/else helper below keeps the
-  // alias-detector quiet (the local var is renamed off the `code` suffix
-  // anyway, but we use plain if-blocks for clarity).
+  if (!output) {
+    if (offerResult.status === "BLOCKED" && typeof offerResult.blockReason === "string" && offerResult.blockReason.includes("OFFER_INPUT_INSUFFICIENT")) {
+      return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: ${offerResult.blockReason}`);
+    }
+    return notReached("offer_input_sufficient", "offer", offerResult.status);
+  }
+
+  // Cross-job isolation check: ensure output is not silently reused from a foreign job
+  if (currentJobId && output._provenance?.sourceJobId && output._provenance.sourceJobId !== currentJobId) {
+    const prov = output._provenance;
+    const isOfficialResume = prov.isOfficialResume === true;
+
+    if (isOfficialResume) {
+      // Validate official resume ancestry
+      const provAccountId = prov.accountId || output.accountId;
+      const provCampaignId = prov.campaignId || output.campaignId;
+      const expectedAccountId = activeContext?.accountId;
+      const expectedCampaignId = activeContext?.campaignId;
+
+      if (expectedAccountId && provAccountId && provAccountId !== expectedAccountId) {
+        return fail(
+          "offer_input_sufficient",
+          `CROSS_JOB_ISOLATION: Resumed offer account ${provAccountId} does not match active account ${expectedAccountId}`,
+        );
+      }
+      if (expectedCampaignId && provCampaignId && provCampaignId !== expectedCampaignId) {
+        return fail(
+          "offer_input_sufficient",
+          `CROSS_JOB_ISOLATION: Resumed offer campaign ${provCampaignId} does not match active campaign ${expectedCampaignId}`,
+        );
+      }
+
+      const offerStatus = (prov.status || output.status || "").trim().toUpperCase();
+      if (offerStatus !== "SUCCESS" && offerStatus !== "COMPLETE") {
+        return fail(
+          "offer_input_sufficient",
+          `CROSS_JOB_ISOLATION: Resumed offer has invalid status '${offerStatus}' (expected SUCCESS or COMPLETE)`,
+        );
+      }
+
+      if (!prov.snapshotId) {
+        return fail(
+          "offer_input_sufficient",
+          `CROSS_JOB_ISOLATION: Resumed offer missing snapshotId`,
+        );
+      }
+
+      // Lineage linkage check: if positioning is present in results, ensure positioning snapshot matches
+      const posResult = results.get("positioning");
+      const activePosSnapId = posResult?.snapshotId || (posResult?.output as any)?.snapshotId;
+      if (activePosSnapId && prov.positioningSnapshotId && prov.positioningSnapshotId !== activePosSnapId) {
+        return fail(
+          "offer_input_sufficient",
+          `CROSS_JOB_ISOLATION: Resumed offer positioningSnapshotId ${prov.positioningSnapshotId} does not match active positioning ${activePosSnapId}`,
+        );
+      }
+    } else {
+      return fail(
+        "offer_input_sufficient",
+        `CROSS_JOB_ISOLATION: offer engine output originates from foreign job ${output._provenance.sourceJobId} (expected current job ${currentJobId})`,
+      );
+    }
+  }
+
+  // Extract canonical status directly from the offer output
+  const rawStatus = typeof output.status === "string" ? output.status.trim() : null;
+
+  // Diagnostic blockCode extraction
   let blockCodeValue: string | null = null;
   if (typeof output?.layerDiagnostics?.blockCode === "string" && output.layerDiagnostics.blockCode.length > 0) {
     blockCodeValue = output.layerDiagnostics.blockCode;
@@ -660,11 +737,12 @@ export function checkOfferInputSufficient(
     blockCodeValue = output.blockCode;
   }
 
-  const isInsufficientSignals = statusRead.status === "OK" && statusRead.value === "INSUFFICIENT_SIGNALS";
+  const isInsufficientSignals = rawStatus === "INSUFFICIENT_SIGNALS";
   const blocked =
     blockCodeValue === "OFFER_INPUT_INSUFFICIENT" ||
     isInsufficientSignals ||
     (offerResult.status === "BLOCKED" && typeof offerResult.blockReason === "string" && offerResult.blockReason.includes("OFFER_INPUT_INSUFFICIENT"));
+
   if (blocked) {
     let detail: string;
     if (typeof output?.statusMessage === "string" && output.statusMessage.length > 0) {
@@ -677,25 +755,29 @@ export function checkOfferInputSufficient(
     return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: ${detail}`);
   }
 
-  // explicit branch handling for every
-  // ContractFieldResult status. requireContractField returns NOT_REACHED
-  // whenever engine status is not SUCCESS|PARTIAL — so ERROR/TIMEOUT/SKIPPED
-  // (and BLOCKED without the OFFER_INPUT_INSUFFICIENT signal already caught
-  // above) must NOT fall through to pass(). NOT_REACHED → emit notReached()
-  // so the verdict pipeline correctly attributes the gap to the engine's
-  // execution status. Other non-OK statuses (INCOMPLETE / INVALID / STALE)
-  // → D5 unknown() with CONTRACT_INCOMPLETE attribution.
-  if (statusRead.status === "NOT_REACHED") {
+  // Engine did not reach completion
+  if (offerResult.status !== "SUCCESS" && (offerResult.status as string) !== "PARTIAL") {
     return notReached("offer_input_sufficient", "offer", offerResult.status);
   }
-  if (statusRead.status !== "OK") {
-    return unknown(
+
+  // Validate canonical status against strict enum
+  if (!rawStatus || !VALID_OFFER_STATUSES.has(rawStatus)) {
+    return fail(
       "offer_input_sufficient",
-      `CONTRACT_INCOMPLETE: offer engine canonical \`status\` field unreadable (${statusRead.status}: ${statusRead.reason}) — cannot verify pain-input sufficiency`,
+      `CONTRACT_INVALID: offer engine canonical status field invalid or missing ("${rawStatus}") — cannot verify pain-input sufficiency`,
     );
   }
 
-  return pass("offer_input_sufficient", "Offer engine has sufficient pain input");
+  if (rawStatus === "COMPLETE" || rawStatus === "SUCCESS") {
+    return pass("offer_input_sufficient", "Offer engine has sufficient pain input");
+  }
+
+  if (rawStatus === "PARTIAL") {
+    return pass("offer_input_sufficient", "Offer engine has sufficient pain input (partial)");
+  }
+
+  // Any other valid enum value represents a non-successful offer outcome (fail-closed)
+  return fail("offer_input_sufficient", `OFFER_INPUT_INSUFFICIENT: Offer engine exited with status ${rawStatus}${output.statusMessage ? `: ${output.statusMessage}` : ""}`);
 }
 
 export function checkOfferAudienceMisalignment(results: Map<EngineId, EngineStepResult>): StructuralCheck {
@@ -829,7 +911,7 @@ export function checkPositioningHardGate(ssc: SharedStrategicContext | null): St
     return unknown("positioning_hard_gate", "no confidence chain data — positioning entry cannot be inspected");
   }
 
-  const positioningEntry = ssc.confidenceChain.find(e => e.engineId === "positioning");
+  const positioningEntry = [...ssc.confidenceChain].reverse().find(e => e.engineId === "positioning");
   if (!positioningEntry) {
     return unknown("positioning_hard_gate", "no positioning confidence entry in chain — engine likely did not complete");
   }
@@ -849,6 +931,14 @@ export function checkPositioningHardGate(ssc: SharedStrategicContext | null): St
 
 
 export function checkBudgetOverrideZeroConfidence(ssc: SharedStrategicContext | null, results: Map<EngineId, EngineStepResult>): StructuralCheck {
+  const budgetResult = results.get("budget_governor");
+  if (budgetResult?.output?.mode === "recommendation_only") {
+    return pass(
+      "budget_override_zero_confidence",
+      "Recommendation-only mode — no automatic performance override attempted",
+    );
+  }
+
   if (!ssc) {
     return unknown("budget_override_zero_confidence", "no SSC available — confidence floor cannot be inspected");
   }
@@ -860,7 +950,6 @@ export function checkBudgetOverrideZeroConfidence(ssc: SharedStrategicContext | 
     );
   }
 
-  const budgetResult = results.get("budget_governor");
   const budgetActionValue = budgetResult?.output?.decision?.action ?? null;
 
   if (budgetActionValue === "scale" || budgetActionValue === "test") {
@@ -899,8 +988,9 @@ export function collectBlockReasons(checks: StructuralCheck[], results: Map<Engi
   const blocks: BlockReason[] = [];
 
   const budgetResult = results.get("budget_governor");
-  const killFlag = budgetResult?.output?.killFlag === true;
-  const budgetAction = budgetResult?.output?.decision?.action;
+  const isRecommendationOnly = budgetResult?.output?.mode === "recommendation_only";
+  const killFlag = !isRecommendationOnly && budgetResult?.output?.killFlag === true;
+  const budgetAction = isRecommendationOnly ? null : budgetResult?.output?.decision?.action;
 
   if (killFlag) {
     blocks.push({
@@ -1280,18 +1370,55 @@ export const HALLUCINATION_EXPOSURE_THRESHOLDS: Record<string, { minTrustedRatio
   halt:  { minTrustedRatio: 0.00, nMin: 0 },
 };
 
+export interface HallucinationCheckContext {
+  authorityBoundariesPassed?: boolean;
+  hasUnsupportedFactualClaims?: boolean;
+  unsupportedFactualClaimCount?: number;
+  unsupportedFactualRatio?: number;
+}
+
 function readOriginRatio(
   signalComposition: SignalComposition,
   origin: HallucinationOrigin,
+  context?: HallucinationCheckContext,
 ): number {
-  // Typed access — no `as any`. `inferred_synthesis` proxies through
-  // inferredRatio (see matrix comment).
+  // Typed access — no `as any`. `inferred_synthesis` distinguishes legitimate
+  // strategic synthesis (SYNTHESIS_NAMESPACE) from unsupported factual product claims.
   switch (origin) {
     case "trusted": return signalComposition.trustedRatio;
     case "real": return signalComposition.realRatio;
     case "competitor": return signalComposition.competitorRatio;
-    case "inferred": return signalComposition.inferredRatio;
-    case "inferred_synthesis": return signalComposition.inferredRatio;
+    case "inferred": {
+      if (typeof (signalComposition as any).rawInferredRatio === "number") {
+        return (signalComposition as any).rawInferredRatio;
+      }
+      return signalComposition.inferredRatio;
+    }
+    case "inferred_synthesis": {
+      // Direct explicit ratios take precedence:
+      if (typeof context?.unsupportedFactualRatio === "number") {
+        return context.unsupportedFactualRatio;
+      }
+      if (typeof (signalComposition as any).unsupportedFactualRatio === "number") {
+        return (signalComposition as any).unsupportedFactualRatio;
+      }
+      if (typeof (signalComposition as any).inferredSynthesisRatio === "number") {
+        return (signalComposition as any).inferredSynthesisRatio;
+      }
+      // If there are explicit unsupported factual claims or authority boundaries failed,
+      // proxy through inferredRatio to fail closed against fabrications:
+      if (context?.hasUnsupportedFactualClaims === true || context?.authorityBoundariesPassed === false) {
+        return signalComposition.inferredRatio;
+      }
+      // When authority boundaries passed, downstream strategic synthesis
+      // (territory names, strategy cards, mechanism descriptions) in SYNTHESIS_NAMESPACE
+      // is legitimate strategic synthesis from evidence, not unsupported factual fabrication:
+      if (context?.authorityBoundariesPassed === true) {
+        return 0;
+      }
+      // Default: if no context is provided, preserve proxy
+      return signalComposition.inferredRatio;
+    }
     case "fallback": return signalComposition.fallbackRatio;
     case "unknown": return signalComposition.unknownRatio;
   }
@@ -1300,6 +1427,7 @@ function readOriginRatio(
 export function checkHallucinationExposure(
   signalComposition: SignalComposition | null,
   budgetAction: string | null,
+  context?: HallucinationCheckContext,
 ): StructuralCheck {
   if (!signalComposition) {
     return unknown("hallucination_exposure", "no signal composition data — cannot evaluate hallucination exposure");
@@ -1322,7 +1450,7 @@ export function checkHallucinationExposure(
       continue;
     }
     evaluatedRows++;
-    const ratio = readOriginRatio(signalComposition, row.origin);
+    const ratio = readOriginRatio(signalComposition, row.origin, context);
     const threshold = row.thresholds[budgetAction];
     const violated = row.kind === "min" ? ratio < threshold : ratio > threshold;
     if (!violated) continue;

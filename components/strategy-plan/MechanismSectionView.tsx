@@ -19,35 +19,90 @@ export default function MechanismSectionView({ planData, intelligenceData }: Pro
 
   const sections = planData?.sections || {};
   const root = sections.strategyRoot || planData?.strategyRoot;
-  const approvedMech = root?.approvedMechanism || sections.mechanism;
-  const brandSpine = sections.brandSpine || intelligenceData?.positioning?.brandSpine;
+  const rawMech = sections.mechanism || root?.approvedMechanism || planData?.mechanism;
+  const approvedMech = rawMech?.primaryMechanism || rawMech?.mechanism || rawMech;
+  const brandSpine = sections.brandSpine || root?.brandSpine || intelligenceData?.positioning?.brandSpine;
 
-  const mechanismName = approvedMech?.name || approvedMech?.mechanismName || (brandSpine?.mechanism && brandSpine.mechanism !== 'none' ? brandSpine.mechanism : null);
-  const mechanismType = approvedMech?.type || approvedMech?.mechanismType || 'Algorithmic Delivery';
-  const mechanismDescription = approvedMech?.description || approvedMech?.mechanismDescription || approvedMech?.logic || 'Grounded delivery process connecting buyer pain resolution directly to product capabilities.';
-  const mechanismPromise = approvedMech?.promise || approvedMech?.mechanismPromise || 'Continuous verified signal intelligence without manual research overhead.';
-  const whyItWorks = approvedMech?.whyItWorks || approvedMech?.commercialFunction?.description || 'By enforcing automated data ingestion and semantic verification, ungrounded noise is filtered before reaching strategy decisions.';
+  const mechanismName =
+    approvedMech?.mechanismName ||
+    approvedMech?.name ||
+    (typeof sections.approvedMechanism === 'string' && sections.approvedMechanism.toLowerCase() !== 'none'
+      ? sections.approvedMechanism
+      : null) ||
+    (brandSpine?.mechanismName && brandSpine.mechanismName.toLowerCase() !== 'none'
+      ? brandSpine.mechanismName
+      : brandSpine?.mechanism && brandSpine.mechanism.toLowerCase() !== 'none'
+        ? brandSpine.mechanism
+        : null);
 
-  // Steps / Causal Chain
-  const steps: string[] = React.useMemo(() => {
-    if (Array.isArray(approvedMech?.steps) && approvedMech.steps.length > 0) {
-      return approvedMech.steps;
+  const mechanismType =
+    approvedMech?.mechanismType ||
+    approvedMech?.type ||
+    brandSpine?.mechanismType ||
+    '';
+
+  const mechanismDescription =
+    approvedMech?.mechanismLogic ||
+    approvedMech?.coreLogic ||
+    approvedMech?.description ||
+    approvedMech?.mechanismDescription ||
+    approvedMech?.logic ||
+    '';
+
+  const mechanismPromise =
+    approvedMech?.mechanismPromise ||
+    approvedMech?.corePromise ||
+    approvedMech?.promise ||
+    brandSpine?.mechanismPromise ||
+    '';
+
+  const whyItWorks =
+    approvedMech?.whyItWorks ||
+    approvedMech?.commercialFunction?.description ||
+    approvedMech?.mechanismLogic ||
+    approvedMech?.coreLogic ||
+    mechanismPromise ||
+    '';
+
+  const requiredCapabilities: string[] = React.useMemo(() => {
+    if (Array.isArray(approvedMech?.requiredCapabilities)) {
+      return approvedMech.requiredCapabilities.filter(Boolean);
     }
-    if (Array.isArray(approvedMech?.mechanismSteps) && approvedMech.mechanismSteps.length > 0) {
-      return approvedMech.mechanismSteps;
+    return [];
+  }, [approvedMech]);
+
+  // Steps / Causal Chain — zero hardcoded B2B fallbacks
+  const steps: string[] = React.useMemo(() => {
+    const rawSteps =
+      (Array.isArray(approvedMech?.mechanismSteps) && approvedMech.mechanismSteps.length > 0
+        ? approvedMech.mechanismSteps
+        : null) ||
+      (Array.isArray(approvedMech?.steps) && approvedMech.steps.length > 0
+        ? approvedMech.steps
+        : null) ||
+      (Array.isArray(brandSpine?.mechanismSteps) && brandSpine.mechanismSteps.length > 0
+        ? brandSpine.mechanismSteps
+        : null);
+
+    if (rawSteps) {
+      return rawSteps.map((s: any, idx: number) => {
+        if (typeof s === 'string') return s;
+        const stepTitle = s.stepName || s.name || s.title || `Step ${s.stepNumber || idx + 1}`;
+        const stepDesc = s.description || s.purpose || s.action || '';
+        return stepDesc ? `${stepTitle}: ${stepDesc}` : stepTitle;
+      });
     }
     if (Array.isArray(approvedMech?.causalChain) && approvedMech.causalChain.length > 0) {
       return approvedMech.causalChain.map((c: any) => `${c.cause} → ${c.impact}`);
     }
-    return [
-      'Multi-source signal ingestion across active market channels',
-      'Automated evidence filtering via evidence integrity gates',
-      'Targeted pain-capability pairing with strict product truth constraints',
-      'Structured strategy synthesis locked into weekly execution playbooks'
-    ];
-  }, [approvedMech]);
+    return [];
+  }, [approvedMech, brandSpine]);
 
-  const hasMechanism = Boolean(mechanismName && mechanismName.toLowerCase() !== 'none' && mechanismType.toLowerCase() !== 'none');
+  const hasMechanism = Boolean(
+    mechanismName &&
+    mechanismName.toLowerCase() !== 'none' &&
+    mechanismType.toLowerCase() !== 'none'
+  );
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
@@ -61,7 +116,7 @@ export default function MechanismSectionView({ planData, intelligenceData }: Pro
           <View style={[styles.statusPill, !hasMechanism && styles.statusPillNeutral]}>
             <View style={[styles.statusDot, !hasMechanism && styles.statusDotNeutral]} />
             <Text style={[styles.statusText, !hasMechanism && styles.statusTextNeutral]}>
-              {hasMechanism ? 'Canonical Mechanism' : 'Category Direct Stance'}
+              {hasMechanism ? 'Canonical Mechanism' : 'No Mechanism Snapshot Attached'}
             </Text>
           </View>
         </View>
@@ -69,13 +124,17 @@ export default function MechanismSectionView({ planData, intelligenceData }: Pro
         {hasMechanism ? (
           <>
             <Text style={styles.heroTitle}>{mechanismName}</Text>
-            <View style={styles.typeBadge}>
-              <Feather name="tag" size={11} color="#34D399" style={{ marginRight: 4 }} />
-              <Text style={styles.typeBadgeText}>Mechanism Type: {mechanismType}</Text>
-            </View>
-            <Text style={styles.heroDescription}>"{mechanismDescription}"</Text>
+            {mechanismType ? (
+              <View style={styles.typeBadge}>
+                <Feather name="tag" size={11} color="#34D399" style={{ marginRight: 4 }} />
+                <Text style={styles.typeBadgeText}>Mechanism Type: {mechanismType}</Text>
+              </View>
+            ) : null}
+            {mechanismDescription ? (
+              <Text style={styles.heroDescription}>"{mechanismDescription}"</Text>
+            ) : null}
 
-            {mechanismPromise && (
+            {mechanismPromise ? (
               <View style={styles.promiseBox}>
                 <View style={styles.promiseHeader}>
                   <Feather name="award" size={13} color="#F59E0B" style={{ marginRight: 6 }} />
@@ -83,57 +142,61 @@ export default function MechanismSectionView({ planData, intelligenceData }: Pro
                 </View>
                 <Text style={styles.promiseText}>{mechanismPromise}</Text>
               </View>
-            )}
+            ) : null}
           </>
         ) : (
           <View style={styles.noMechBox}>
-            <Text style={styles.noMechTitle}>NO DISTINCT MECHANISM REQUIRED</Text>
+            <Text style={styles.noMechTitle}>MECHANISM SNAPSHOT NOT AVAILABLE IN PLAN</Text>
             <Text style={styles.noMechDesc}>
-              This strategic plan relies on direct category execution and established product capability delivery. The offering wins on direct positioning and contrast without requiring a complex proprietary naming abstraction.
+              No canonical Mechanism Engine output is attached to this plan revision. Run or refresh the Mechanism stage to populate the grounded operating process and delivery steps.
             </Text>
             <View style={styles.canonicalBadge}>
-              <Feather name="check-circle" size={12} color="#34D399" style={{ marginRight: 5 }} />
-              <Text style={styles.canonicalBadgeText}>Canonical Status: NO_DISTINCT_MECHANISM_ESTABLISHED</Text>
+              <Feather name="info" size={12} color="#94A3B8" style={{ marginRight: 5 }} />
+              <Text style={styles.canonicalBadgeText}>Lineage Status: MECHANISM_SNAPSHOT_MISSING</Text>
             </View>
           </View>
         )}
       </View>
 
       {/* ── 2. HOW IT WORKS (STEP-BY-STEP CAUSAL LOGIC) ── */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeader}>
-          <Feather name="git-merge" size={16} color="#8B5CF6" style={{ marginRight: 8 }} />
-          <Text style={styles.sectionTitle}>HOW THE PROCESS OPERATES</Text>
-        </View>
-        <Text style={styles.sectionSubtitle}>
-          Step-by-step causal logic explaining why this approach reliably delivers the desired commercial outcome.
-        </Text>
+      {steps.length > 0 && (
+        <View style={styles.sectionCard}>
+          <View style={styles.sectionHeader}>
+            <Feather name="git-merge" size={16} color="#8B5CF6" style={{ marginRight: 8 }} />
+            <Text style={styles.sectionTitle}>HOW THE PROCESS OPERATES</Text>
+          </View>
+          <Text style={styles.sectionSubtitle}>
+            Step-by-step causal logic explaining why this approach reliably delivers the desired commercial outcome.
+          </Text>
 
-        <View style={styles.stepsContainer}>
-          {steps.map((step: string, idx: number) => (
-            <View key={idx} style={styles.stepRow}>
-              <View style={styles.stepIndicatorCol}>
-                <View style={styles.stepDot}>
-                  <Text style={styles.stepNum}>{idx + 1}</Text>
+          <View style={styles.stepsContainer}>
+            {steps.map((step: string, idx: number) => (
+              <View key={idx} style={styles.stepRow}>
+                <View style={styles.stepIndicatorCol}>
+                  <View style={styles.stepDot}>
+                    <Text style={styles.stepNum}>{idx + 1}</Text>
+                  </View>
+                  {idx < steps.length - 1 && <View style={styles.stepLine} />}
                 </View>
-                {idx < steps.length - 1 && <View style={styles.stepLine} />}
+                <View style={styles.stepContent}>
+                  <Text style={styles.stepText}>{step}</Text>
+                </View>
               </View>
-              <View style={styles.stepContent}>
-                <Text style={styles.stepText}>{step}</Text>
-              </View>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
       {/* ── 3. COMMERCIAL FUNCTION & WHY IT WORKS ── */}
-      <View style={styles.whyCard}>
-        <View style={styles.whyHeader}>
-          <Feather name="target" size={14} color="#38BDF8" style={{ marginRight: 6 }} />
-          <Text style={styles.whyTitle}>COMMERCIAL FUNCTION & REASONING</Text>
+      {whyItWorks ? (
+        <View style={styles.whyCard}>
+          <View style={styles.whyHeader}>
+            <Feather name="target" size={14} color="#38BDF8" style={{ marginRight: 6 }} />
+            <Text style={styles.whyTitle}>COMMERCIAL FUNCTION & REASONING</Text>
+          </View>
+          <Text style={styles.whyBody}>{whyItWorks}</Text>
         </View>
-        <Text style={styles.whyBody}>{whyItWorks}</Text>
-      </View>
+      ) : null}
 
       {/* ── 4. PRODUCT TRUTH CONNECTION (DRAWER) ── */}
       <View style={styles.drawerCard}>
@@ -150,10 +213,18 @@ export default function MechanismSectionView({ planData, intelligenceData }: Pro
 
         {showEvidence && (
           <View style={styles.drawerBody}>
+            {requiredCapabilities.length > 0 && (
+              <View style={styles.evidenceItem}>
+                <Text style={styles.evidenceLabel}>REQUIRED PRODUCT CAPABILITIES</Text>
+                <Text style={styles.evidenceValue}>
+                  {requiredCapabilities.join(' · ')}
+                </Text>
+              </View>
+            )}
             <View style={styles.evidenceItem}>
               <Text style={styles.evidenceLabel}>PRODUCT TRUTH LINKAGE</Text>
               <Text style={styles.evidenceValue}>
-                {brandSpine?.productTruth || 'First-party capability verification via Business Understanding.'}
+                {approvedMech?.proofArtifact || brandSpine?.productTruth || 'First-party capability verification via Business Understanding.'}
               </Text>
             </View>
             <View style={styles.evidenceItem}>

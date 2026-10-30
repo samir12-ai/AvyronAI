@@ -152,7 +152,7 @@ export default function SettingsScreen() {
     name: string;
     websiteUrl: string;
     platform?: string;
-    profileLink?: string;
+    websiteUrl?: string;
     tier?: string;
     monitoringStatus?: string;
     lastFetchedAt?: string | null;
@@ -172,23 +172,464 @@ export default function SettingsScreen() {
   const [newCompUrl, setNewCompUrl] = useState('');
   const [addingComp, setAddingComp] = useState(false);
 
-  const fetchCampaignCompetitors = useCallback(async () => {
-    if (!selectedCampaignId) return;
-    setLoadingCompetitors(true);
+  const currencyOptions = ['USD', 'AED', 'SAR', 'EUR', 'GBP', 'QAR', 'KWD'];
+  const [monthlyBudgetInput, setMonthlyBudgetInput] = useState('');
+  const [currencyInput, setCurrencyInput] = useState('USD');
+  const [isBudgetSaving, setIsBudgetSaving] = useState(false);
+  const [isBudgetUpdating, setIsBudgetUpdating] = useState(false);
+  const [isBudgetOutdated, setIsBudgetOutdated] = useState(false);
+  const [budgetSaveMessage, setBudgetSaveMessage] = useState('');
+  const [latestBudgetRecommendation, setLatestBudgetRecommendation] = useState<any>(null);
+
+  // Owned Social & Website Channels State
+  const [ownedChannels, setOwnedChannels] = useState<Array<{
+    id?: string;
+    platform: string;
+    handle: string | null;
+    url: string | null;
+    accountType?: string | null;
+    identityStatus: string;
+    lifecycleStatus?: string;
+    statusLabel?: string;
+    scrapeStatus: string;
+    scrapeError: string | null;
+    isConfirmedEmpty?: boolean;
+    lastScrapedAt: string | null;
+    nextScrapeDueAt?: string | null;
+    followersCount: number;
+    storedPostsCount: number;
+    channelId?: string | null;
+    channelName?: string | null;
+    profileDossier?: any;
+    lastTaskId?: string | null;
+    lastProviderRunId?: string | null;
+    scheduleHealth?: string;
+  }>>([]);
+  const [ownedInstagramInput, setOwnedInstagramInput] = useState('');
+  const [ownedTiktokInput, setOwnedTiktokInput] = useState('');
+  const [ownedYoutubeInput, setOwnedYoutubeInput] = useState('');
+  const [ownedLinkedinInput, setOwnedLinkedinInput] = useState('');
+  const [ownedWebsiteInput, setOwnedWebsiteInput] = useState('');
+  const [ownedChannelsLoading, setOwnedChannelsLoading] = useState(Boolean(selectedCampaignId));
+  const [ownedChannelsLoaded, setOwnedChannelsLoaded] = useState(false);
+  const [ownedChannelsLoadError, setOwnedChannelsLoadError] = useState('');
+  const [ownedChannelsSaving, setOwnedChannelsSaving] = useState(false);
+  const [removingChannelPlatform, setRemovingChannelPlatform] = useState<string | null>(null);
+  const [ownedChannelsMessage, setOwnedChannelsMessage] = useState('');
+  const [ownedChannelsError, setOwnedChannelsError] = useState('');
+
+  const [loadedChannelUrls, setLoadedChannelUrls] = useState<Record<string, string>>({
+    instagram: '',
+    tiktok: '',
+    youtube: '',
+    linkedin: '',
+    website: '',
+  });
+  const [dirtyChannelFields, setDirtyChannelFields] = useState<Record<string, boolean>>({});
+  const dirtyChannelFieldsRef = useRef<Record<string, boolean>>({});
+
+  const activeContextKey = `${user?.id || 'anon'}:${selectedCampaignId || 'none'}`;
+  const activeContextKeyRef = useRef<string>(activeContextKey);
+  const prevContextKeyRef = useRef<string>(activeContextKey);
+  activeContextKeyRef.current = activeContextKey;
+
+  const markChannelDirty = useCallback((platform: string, isDirty: boolean) => {
+    dirtyChannelFieldsRef.current = {
+      ...dirtyChannelFieldsRef.current,
+      [platform]: isDirty,
+    };
+    setDirtyChannelFields((prev) => ({
+      ...prev,
+      [platform]: isDirty,
+    }));
+  }, []);
+
+  // Reset Owned Channels state immediately on account or campaign switch to prevent cross-campaign/account leakage
+  useEffect(() => {
+    if (prevContextKeyRef.current !== activeContextKey) {
+      prevContextKeyRef.current = activeContextKey;
+      setOwnedChannels([]);
+      setOwnedInstagramInput('');
+      setOwnedTiktokInput('');
+      setOwnedYoutubeInput('');
+      setOwnedLinkedinInput('');
+      setOwnedWebsiteInput('');
+      setLoadedChannelUrls({
+        instagram: '',
+        tiktok: '',
+        youtube: '',
+        linkedin: '',
+        website: '',
+      });
+      dirtyChannelFieldsRef.current = {};
+      setDirtyChannelFields({});
+      setOwnedChannelsLoaded(false);
+      setOwnedChannelsLoading(Boolean(selectedCampaignId));
+      setOwnedChannelsLoadError('');
+      setOwnedChannelsMessage('');
+      setOwnedChannelsError('');
+    }
+  }, [activeContextKey, selectedCampaignId]);
+
+  const applyCanonicalChannelsToState = useCallback(
+    (chs: any[], fallbackWebsiteUrl: string, forceOverwriteAll: boolean = false) => {
+      setOwnedChannels(chs);
+      const findUrl = (plat: string) => {
+        const row = chs.find((c) => String(c.platform || '').toLowerCase() === plat);
+        return row?.url || row?.handle || '';
+      };
+      const canonicalMap: Record<string, string> = {
+        instagram: findUrl('instagram'),
+        tiktok: findUrl('tiktok'),
+        youtube: findUrl('youtube'),
+        linkedin: findUrl('linkedin'),
+        website: findUrl('website') || fallbackWebsiteUrl || '',
+      };
+      setLoadedChannelUrls(canonicalMap);
+
+      if (forceOverwriteAll || !dirtyChannelFieldsRef.current.instagram) {
+        setOwnedInstagramInput(canonicalMap.instagram);
+      }
+      if (forceOverwriteAll || !dirtyChannelFieldsRef.current.tiktok) {
+        setOwnedTiktokInput(canonicalMap.tiktok);
+      }
+      if (forceOverwriteAll || !dirtyChannelFieldsRef.current.youtube) {
+        setOwnedYoutubeInput(canonicalMap.youtube);
+      }
+      if (forceOverwriteAll || !dirtyChannelFieldsRef.current.linkedin) {
+        setOwnedLinkedinInput(canonicalMap.linkedin);
+      }
+      if (forceOverwriteAll || !dirtyChannelFieldsRef.current.website) {
+        setOwnedWebsiteInput(canonicalMap.website);
+      }
+      if (forceOverwriteAll) {
+        dirtyChannelFieldsRef.current = {};
+        setDirtyChannelFields({});
+      }
+    },
+    []
+  );
+
+  const fetchCampaignCompetitors = useCallback(
+    async (opts?: { forceOverwriteChannels?: boolean }) => {
+      if (!selectedCampaignId) {
+        setOwnedChannelsLoading(false);
+        return;
+      }
+      const requestContextKey = `${user?.id || 'anon'}:${selectedCampaignId}`;
+      setLoadingCompetitors(true);
+      setOwnedChannelsLoading(true);
+      setOwnedChannelsLoadError('');
+      try {
+        const apiUrl = getApiUrl();
+        const url = new URL(`/api/settings/campaign/${selectedCampaignId}`, apiUrl);
+        const res = await authFetch(url.toString(), { credentials: 'include' });
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          throw new Error(`HTTP ${res.status}: Failed to parse campaign settings response.`);
+        }
+        // Discard stale response if user or campaign changed while in flight
+        if (activeContextKeyRef.current !== requestContextKey) {
+          return;
+        }
+        if (!res.ok || !data?.success) {
+          throw new Error(data?.error || `HTTP ${res.status}: Failed to load campaign settings.`);
+        }
+        if (data.campaign?.competitors) {
+          setCampaignCompetitors(data.campaign.competitors);
+        }
+        const canonicalChannels = (data.campaign?.ownedChannels ?? data.campaign?.channels) as any[] | undefined;
+        const fallbackWebsite = data.campaign?.websiteUrl || data.campaign?.domain || '';
+        if (Array.isArray(canonicalChannels)) {
+          applyCanonicalChannelsToState(
+            canonicalChannels,
+            fallbackWebsite,
+            Boolean(opts?.forceOverwriteChannels)
+          );
+          setOwnedChannelsLoaded(true);
+          setOwnedChannelsLoadError('');
+        } else {
+          throw new Error('Campaign settings response is missing canonical channels.');
+        }
+        if (data.campaign?.budget) {
+          const b = data.campaign.budget;
+          setMonthlyBudgetInput(b.monthlyBudget != null ? String(b.monthlyBudget) : '');
+          setCurrencyInput(b.currency || 'USD');
+          setIsBudgetOutdated(b.isOutdated ?? false);
+          setLatestBudgetRecommendation(b.latestRecommendation ?? null);
+        }
+      } catch (err: any) {
+        if (activeContextKeyRef.current !== requestContextKey) {
+          return;
+        }
+        console.error('Failed to fetch campaign settings:', err);
+        setOwnedChannelsLoadError(err?.message || 'Failed to load saved channels.');
+      } finally {
+        if (activeContextKeyRef.current === requestContextKey) {
+          setLoadingCompetitors(false);
+          setOwnedChannelsLoading(false);
+        }
+      }
+    },
+    [selectedCampaignId, user?.id, applyCanonicalChannelsToState]
+  );
+
+  const handleSaveOwnedChannels = async (triggerSync: boolean = true) => {
+    if (!selectedCampaignId || !ownedChannelsLoaded || ownedChannelsLoading || ownedChannelsSaving) {
+      return;
+    }
+    setOwnedChannelsMessage('');
+    setOwnedChannelsError('');
+
+    const currentInputs: Record<string, string> = {
+      instagram: ownedInstagramInput.trim(),
+      tiktok: ownedTiktokInput.trim(),
+      youtube: ownedYoutubeInput.trim(),
+      linkedin: ownedLinkedinInput.trim(),
+      website: ownedWebsiteInput.trim(),
+    };
+
+    // Blank/unloaded fields must NEVER silently disconnect an existing channel
+    const blankedExistingPlatforms: string[] = [];
+    for (const plat of ['instagram', 'tiktok', 'youtube', 'linkedin', 'website']) {
+      if (!currentInputs[plat] && loadedChannelUrls[plat]) {
+        blankedExistingPlatforms.push(plat);
+      }
+    }
+    if (blankedExistingPlatforms.length > 0) {
+      // Restore canonical URLs in the blanked inputs and explain explicit removal
+      if (!currentInputs.instagram && loadedChannelUrls.instagram) setOwnedInstagramInput(loadedChannelUrls.instagram);
+      if (!currentInputs.tiktok && loadedChannelUrls.tiktok) setOwnedTiktokInput(loadedChannelUrls.tiktok);
+      if (!currentInputs.youtube && loadedChannelUrls.youtube) setOwnedYoutubeInput(loadedChannelUrls.youtube);
+      if (!currentInputs.linkedin && loadedChannelUrls.linkedin) setOwnedLinkedinInput(loadedChannelUrls.linkedin);
+      if (!currentInputs.website && loadedChannelUrls.website) setOwnedWebsiteInput(loadedChannelUrls.website);
+      for (const plat of blankedExistingPlatforms) {
+        markChannelDirty(plat, false);
+      }
+      setOwnedChannelsError(
+        `Blank fields cannot disconnect an existing channel (${blankedExistingPlatforms.join(', ')}). Restored saved URL(s). Use the explicit "Remove" button next to a channel to disconnect it.`
+      );
+      return;
+    }
+
+    // Collect only intentionally changed non-empty fields
+    const channelsToSend: Array<{ platform: string; url: string }> = [];
+    for (const plat of ['instagram', 'tiktok', 'youtube', 'linkedin', 'website']) {
+      const val = currentInputs[plat];
+      if (!val) continue;
+      const wasEdited = Boolean(dirtyChannelFieldsRef.current[plat]) || val !== (loadedChannelUrls[plat] || '');
+      if (wasEdited) {
+        channelsToSend.push({ platform: plat, url: val });
+      }
+    }
+
+    // If user clicked Save & Sync without editing text, check if any channel needs retry/sync (CONFIGURED or FAILED)
+    if (channelsToSend.length === 0) {
+      for (const row of ownedChannels) {
+        const plat = String(row.platform || '').toLowerCase();
+        const val = currentInputs[plat];
+        if (
+          val &&
+          (row.lifecycleStatus === 'CONFIGURED' ||
+            row.lifecycleStatus === 'FAILED' ||
+            row.scrapeStatus === 'FAILED' ||
+            row.scrapeStatus === 'CONFIGURED')
+        ) {
+          channelsToSend.push({ platform: plat, url: val });
+        }
+      }
+    }
+
+    // If still empty and LinkedIn is in Needs full LinkedIn URL state, surface actionable validation message
+    if (channelsToSend.length === 0) {
+      const liRow = ownedChannels.find((c) => String(c.platform || '').toLowerCase() === 'linkedin');
+      if (liRow && (liRow.identityStatus === 'UNRESOLVED' || liRow.lifecycleStatus === 'NEEDS_FULL_URL')) {
+        setOwnedChannelsError(
+          'LinkedIn needs a full /company/<slug> or /in/<slug> URL before it can be synced. Enter the full URL and click Save & Sync Channels.'
+        );
+        return;
+      }
+      setOwnedChannelsMessage('All configured channels are already saved and up to date.');
+      return;
+    }
+
+    setOwnedChannelsSaving(true);
     try {
       const apiUrl = getApiUrl();
-      const url = new URL(`/api/settings/campaign/${selectedCampaignId}`, apiUrl);
-      const res = await authFetch(url.toString(), { credentials: 'include' });
+      const url = new URL(`/api/settings/campaign/${selectedCampaignId}/owned-channels`, apiUrl);
+      const res = await authFetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          channels: channelsToSend,
+          triggerScrape: triggerSync,
+        }),
+      });
       const data = await res.json();
-      if (data.success && data.campaign?.competitors) {
-        setCampaignCompetitors(data.campaign.competitors);
+      const updatedList = (data.ownedChannels ?? data.channels) as any[] | undefined;
+
+      if (data.validationErrors && Object.keys(data.validationErrors).length > 0) {
+        const msgs = Object.values(data.validationErrors).join(' ');
+        setOwnedChannelsError(msgs);
+      } else if (!res.ok || !data.success) {
+        setOwnedChannelsError(data.error || 'Failed to save owned channels.');
+      } else {
+        if (Array.isArray(updatedList)) {
+          // Clear dirty flags for platforms that were just saved
+          for (const item of channelsToSend) {
+            dirtyChannelFieldsRef.current[item.platform] = false;
+          }
+          setDirtyChannelFields({ ...dirtyChannelFieldsRef.current });
+          applyCanonicalChannelsToState(
+            updatedList,
+            data.websiteUrl || data.domain || loadedChannelUrls.website || '',
+            false
+          );
+        }
+        // Refresh canonical campaign query to keep scheduleHealth & all state in sync
+        await fetchCampaignCompetitors({ forceOverwriteChannels: false });
+
+        // Check if any saved channel experienced a downstream acquisition error (while preserving the saved URL)
+        const failedSaved = (updatedList || []).filter(
+          (c) =>
+            channelsToSend.some((sent) => sent.platform === String(c.platform || '').toLowerCase()) &&
+            (c.lifecycleStatus === 'FAILED' || c.scrapeStatus === 'FAILED')
+        );
+        if (failedSaved.length > 0) {
+          const errDetail = failedSaved
+            .map((c) => `${String(c.platform).toUpperCase()}: ${c.scrapeError || 'Acquisition failed'}`)
+            .join(' | ');
+          setOwnedChannelsMessage('Channel URL saved and preserved.');
+          setOwnedChannelsError(`Saved identity preserved, but live acquisition reported an error: ${errDetail}`);
+        } else {
+          setOwnedChannelsMessage(
+            triggerSync
+              ? `Saved & synced (${channelsToSend.map((c) => c.platform).join(', ')}). Performance Loop updated.`
+              : 'Owned channels saved.'
+          );
+        }
+        if (Platform.OS !== 'web') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
       }
-    } catch (err) {
-      console.error('Failed to fetch campaign competitors:', err);
+    } catch (err: any) {
+      setOwnedChannelsError(err.message || 'Failed to save owned channels.');
     } finally {
-      setLoadingCompetitors(false);
+      setOwnedChannelsSaving(false);
     }
-  }, [selectedCampaignId]);
+  };
+
+  const handleRemoveOwnedChannel = async (platform: string, label: string) => {
+    if (!selectedCampaignId || removingChannelPlatform || ownedChannelsSaving) return;
+
+    const performRemove = async () => {
+      setRemovingChannelPlatform(platform);
+      setOwnedChannelsMessage('');
+      setOwnedChannelsError('');
+      try {
+        const apiUrl = getApiUrl();
+        const url = new URL(`/api/settings/campaign/${selectedCampaignId}/owned-channels/${platform}`, apiUrl);
+        const res = await authFetch(url.toString(), {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `Failed to remove ${label}.`);
+        }
+        markChannelDirty(platform, false);
+        const updatedList = (data.ownedChannels ?? data.channels ?? []) as any[];
+        applyCanonicalChannelsToState(updatedList, data.websiteUrl || data.domain || '', false);
+        if (platform === 'instagram') setOwnedInstagramInput('');
+        if (platform === 'tiktok') setOwnedTiktokInput('');
+        if (platform === 'youtube') setOwnedYoutubeInput('');
+        if (platform === 'linkedin') setOwnedLinkedinInput('');
+        if (platform === 'website') setOwnedWebsiteInput(data.websiteUrl || '');
+        setOwnedChannelsMessage(`${label} channel removed.`);
+      } catch (err: any) {
+        setOwnedChannelsError(err.message || `Failed to remove ${label}.`);
+      } finally {
+        setRemovingChannelPlatform(null);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const ok = window.confirm(`Remove ${label} from this campaign's tracked owned channels?`);
+      if (ok) {
+        await performRemove();
+      }
+    } else {
+      Alert.alert(
+        `Remove ${label}`,
+        `Are you sure you want to remove ${label} from this campaign's tracked owned channels?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Remove', style: 'destructive', onPress: () => void performRemove() },
+        ]
+      );
+    }
+  };
+
+  const handleSaveBudgetSettings = async () => {
+    if (!selectedCampaignId) return;
+    setIsBudgetSaving(true);
+    setBudgetSaveMessage('');
+    try {
+      const parsed = monthlyBudgetInput.trim() === '' ? null : parseFloat(monthlyBudgetInput.trim());
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/settings/campaign/${selectedCampaignId}/budget`, apiUrl);
+      const res = await authFetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          monthlyBudget: parsed !== null && !isNaN(parsed) ? parsed : null,
+          currency: currencyInput || 'USD',
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setBudgetSaveMessage('Budget settings saved.');
+        setIsBudgetOutdated(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert('Error', data.error || 'Failed to save budget settings.');
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to save budget settings.');
+    } finally {
+      setIsBudgetSaving(false);
+    }
+  };
+
+  const handleUpdateBudgetDistribution = async () => {
+    if (!selectedCampaignId) return;
+    setIsBudgetUpdating(true);
+    setBudgetSaveMessage('');
+    try {
+      const apiUrl = getApiUrl();
+      const url = new URL(`/api/settings/campaign/${selectedCampaignId}/update-budget-distribution`, apiUrl);
+      const res = await authFetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (data.success && data.recommendation) {
+        setLatestBudgetRecommendation(data.recommendation);
+        setIsBudgetOutdated(false);
+        setBudgetSaveMessage('Budget distribution updated with latest channels!');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        Alert.alert('Update Failed', data.error || 'Could not update budget distribution.');
+      }
+    } catch (err: any) {
+      Alert.alert('Update Error', err.message || 'Failed to update budget distribution.');
+    } finally {
+      setIsBudgetUpdating(false);
+    }
+  };
 
   useEffect(() => {
     fetchCampaignCompetitors();
@@ -761,6 +1202,271 @@ export default function SettingsScreen() {
           </View>
         </Pressable>
 
+        {/* Marketing Budget Card */}
+        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="wallet-outline" size={20} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Marketing Budget</Text>
+            </View>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary }]}>
+            Set your monthly marketing budget and currency. Used to generate intelligent channel distribution recommendations.
+          </Text>
+
+          {/* Currency selection chips */}
+          <Text style={[styles.fieldLabel, { color: colors.text, marginTop: 14, marginBottom: 8 }]}>Currency</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
+            {currencyOptions.map((c) => {
+              const isSelected = (currencyInput || 'USD').toUpperCase() === c;
+              return (
+                <Pressable
+                  key={c}
+                  onPress={() => {
+                    Haptics.selectionAsync();
+                    setCurrencyInput(c);
+                  }}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    borderWidth: 1,
+                    backgroundColor: isSelected ? colors.primary : (isDark ? '#1E293B' : '#F1F5F9'),
+                    borderColor: isSelected ? colors.primary : (isDark ? '#334155' : '#CBD5E1'),
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 13,
+                    fontFamily: isSelected ? 'Inter_700Bold' : 'Inter_500Medium',
+                    color: isSelected ? '#FFFFFF' : (isDark ? '#94A3B8' : '#475569'),
+                  }}>
+                    {c}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {/* Monthly Budget input */}
+          <Text style={[styles.fieldLabel, { color: colors.text, marginBottom: 8 }]}>Monthly Marketing Budget</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <View style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              borderRadius: 10,
+              borderWidth: 1,
+              borderColor: isDark ? '#334155' : '#E2E8F0',
+              backgroundColor: isDark ? '#1E293B' : '#F8FAFC',
+              paddingHorizontal: 12,
+            }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 14, marginRight: 6, fontFamily: 'Inter_600SemiBold' }}>
+                {currencyInput || 'USD'}
+              </Text>
+              <TextInput
+                style={{
+                  flex: 1,
+                  paddingVertical: 10,
+                  fontSize: 14,
+                  color: colors.text,
+                  fontFamily: 'Inter_500Medium',
+                }}
+                value={monthlyBudgetInput}
+                onChangeText={setMonthlyBudgetInput}
+                placeholder="e.g. 5000 (optional)"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="numeric"
+              />
+            </View>
+            <Pressable
+              onPress={handleSaveBudgetSettings}
+              disabled={isBudgetSaving}
+              style={{
+                backgroundColor: colors.primary,
+                borderRadius: 10,
+                paddingHorizontal: 16,
+                paddingVertical: 11,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: isBudgetSaving ? 0.7 : 1,
+              }}
+            >
+              {isBudgetSaving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={{ color: '#fff', fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Save</Text>
+              )}
+            </Pressable>
+          </View>
+
+          {budgetSaveMessage ? (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, color: '#10B981', fontFamily: 'Inter_500Medium' }}>
+                {budgetSaveMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Outdated banner & re-run recommendation button */}
+          {isBudgetOutdated && (
+            <View style={{
+              backgroundColor: isDark ? '#332B00' : '#FFFBEB',
+              borderWidth: 1,
+              borderColor: isDark ? '#78350F' : '#FDE68A',
+              borderRadius: 10,
+              padding: 12,
+              marginBottom: 14,
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <Ionicons name="warning-outline" size={16} color="#F59E0B" />
+                <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: isDark ? '#FBBF24' : '#B45309' }}>
+                  Budget Changed
+                </Text>
+              </View>
+              <Text style={{ fontSize: 12, color: isDark ? '#D1D5DB' : '#78350F', marginBottom: 10 }}>
+                Your budget settings were updated. Re-run distribution to align allocations with your new budget.
+              </Text>
+              <Pressable
+                onPress={handleUpdateBudgetDistribution}
+                disabled={isBudgetUpdating}
+                style={{
+                  backgroundColor: '#F59E0B',
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 12,
+                  alignItems: 'center',
+                  flexDirection: 'row',
+                  justifyContent: 'center',
+                  gap: 6,
+                }}
+              >
+                {isBudgetUpdating ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh" size={14} color="#fff" />
+                    <Text style={{ color: '#fff', fontSize: 12, fontFamily: 'Inter_600SemiBold' }}>
+                      Update budget distribution
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          )}
+
+          {/* Latest recommendation breakdown */}
+          {latestBudgetRecommendation && (
+            <View style={{
+              marginTop: 6,
+              paddingTop: 12,
+              borderTopWidth: 1,
+              borderTopColor: isDark ? '#334155' : '#E2E8F0',
+            }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: colors.text }}>
+                  Recommended Distribution
+                </Text>
+                <View style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 6,
+                  backgroundColor: latestBudgetRecommendation.status === 'COMPLETE' ? '#10B98120' : '#F59E0B20',
+                }}>
+                  <Text style={{
+                    fontSize: 11,
+                    fontFamily: 'Inter_700Bold',
+                    color: latestBudgetRecommendation.status === 'COMPLETE' ? '#10B981' : '#F59E0B',
+                  }}>
+                    {latestBudgetRecommendation.status}
+                  </Text>
+                </View>
+              </View>
+
+              {latestBudgetRecommendation.overallRationale ? (
+                <Text style={{ fontSize: 12, color: colors.textSecondary, marginBottom: 10, fontStyle: 'italic' }}>
+                  "{latestBudgetRecommendation.overallRationale}"
+                </Text>
+              ) : null}
+
+              {Array.isArray(latestBudgetRecommendation.allocations) && latestBudgetRecommendation.allocations.length > 0 ? (
+                <View style={{
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderColor: isDark ? '#334155' : '#E2E8F0',
+                  overflow: 'hidden',
+                  marginBottom: 10,
+                }}>
+                  {/* Table Header */}
+                  <View style={{
+                    flexDirection: 'row',
+                    backgroundColor: isDark ? '#1E293B' : '#F1F5F9',
+                    paddingVertical: 8,
+                    paddingHorizontal: 10,
+                    borderBottomWidth: 1,
+                    borderBottomColor: isDark ? '#334155' : '#E2E8F0',
+                  }}>
+                    <Text style={{ flex: 2, fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textSecondary }}>PLATFORM</Text>
+                    <Text style={{ flex: 1, fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textSecondary, textAlign: 'center' }}>SHARE</Text>
+                    <Text style={{ flex: 1.5, fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textSecondary, textAlign: 'right' }}>MONTHLY</Text>
+                    <Text style={{ flex: 3, fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textSecondary, paddingLeft: 8 }}>WHY</Text>
+                  </View>
+                  {/* Table Rows */}
+                  {latestBudgetRecommendation.allocations.map((alloc: any, i: number) => (
+                    <View
+                      key={i}
+                      style={{
+                        flexDirection: 'row',
+                        paddingVertical: 8,
+                        paddingHorizontal: 10,
+                        borderBottomWidth: i < latestBudgetRecommendation.allocations.length - 1 ? 1 : 0,
+                        borderBottomColor: isDark ? '#1E293B' : '#F1F5F9',
+                        backgroundColor: i % 2 === 0 ? 'transparent' : (isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)'),
+                      }}
+                    >
+                      <Text style={{ flex: 2, fontSize: 12, fontFamily: 'Inter_600SemiBold', color: colors.text }}>
+                        {alloc.channel}
+                      </Text>
+                      <Text style={{ flex: 1, fontSize: 12, fontFamily: 'Inter_500Medium', color: colors.primary, textAlign: 'center' }}>
+                        {alloc.sharePercentage ? `${alloc.sharePercentage.toFixed(1)}%` : '0%'}
+                      </Text>
+                      <Text style={{ flex: 1.5, fontSize: 12, fontFamily: 'Inter_600SemiBold', color: colors.text, textAlign: 'right' }}>
+                        {alloc.allocatedAmount != null ? `${currencyInput} ${alloc.allocatedAmount.toLocaleString()}` : '-'}
+                      </Text>
+                      <Text style={{ flex: 3, fontSize: 11, color: colors.textSecondary, paddingLeft: 8 }}>
+                        {alloc.rationale || '-'}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 8 }}>
+                  {latestBudgetRecommendation.status === 'BUDGET_NOT_PROVIDED'
+                    ? 'No monthly budget entered. Enter an amount above to see channel distribution.'
+                    : latestBudgetRecommendation.status === 'ZERO_BUDGET'
+                    ? 'Monthly budget is 0. Organic/unpaid channels are prioritized.'
+                    : latestBudgetRecommendation.status === 'MISSING_CHANNELS'
+                    ? 'No channels selected yet. Run Channel Selection first.'
+                    : 'No channel allocations available.'}
+                </Text>
+              )}
+            </View>
+          )}
+
+          {/* Disclaimer */}
+          <View style={{
+            marginTop: 8,
+            padding: 10,
+            borderRadius: 8,
+            backgroundColor: isDark ? '#131D2E' : '#F0F9FF',
+            borderWidth: 1,
+            borderColor: isDark ? '#1E3A5F' : '#BAE6FD',
+          }}>
+            <Text style={{ fontSize: 11, color: isDark ? '#7DD3FC' : '#0369A1', fontFamily: 'Inter_500Medium', textAlign: 'center' }}>
+              Recommended allocation only — no money is spent automatically.
+            </Text>
+          </View>
+        </View>
+
         <View style={[styles.metaCard, { backgroundColor: isDark ? '#1E3A5F' : '#E7F3FF', borderColor: '#1877F2' }]}>
           {metaStatus && metaStatus.metaMode !== 'REAL' && !metaLoading && (
             <View style={[styles.metaWarningBanner, { backgroundColor: (isDark ? '#332B00' : '#FFF8E1') }]}>
@@ -1035,6 +1741,436 @@ export default function SettingsScreen() {
         </View>
 
 
+        {/* OWNED SOCIAL & WEBSITE CHANNELS (CANONICAL RECORD) */}
+        <View
+          testID="owned-channels-card"
+          style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+        >
+          <View style={styles.cardHeader}>
+            <View style={styles.cardTitleRow}>
+              <Ionicons name="share-social-outline" size={20} color={colors.primary} />
+              <Text style={[styles.cardTitle, { color: colors.text }]}>Owned Social & Website Channels</Text>
+            </View>
+            <View style={{
+              paddingHorizontal: 8,
+              paddingVertical: 3,
+              borderRadius: 6,
+              backgroundColor: 'rgba(124,58,237,0.16)',
+              borderWidth: 1,
+              borderColor: 'rgba(124,58,237,0.35)',
+            }}>
+              <Text style={{ fontSize: 10, fontFamily: 'Inter_700Bold', color: '#C4B5FD' }}>
+                PUBLIC CHANNEL TRACKING
+              </Text>
+            </View>
+          </View>
+          <Text style={[styles.cardSubtitle, { color: colors.textSecondary, marginBottom: 8 }]}>
+            Canonical owned channels shared across Setup, Settings, daily 24-hour acquisition, and Performance Loop. Saved URLs are never erased on validation or scrape failure.
+          </Text>
+          <View style={{
+            backgroundColor: '#131D2E',
+            borderWidth: 1,
+            borderColor: '#1E3A5F',
+            borderRadius: 8,
+            padding: 8,
+            marginBottom: 14,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            <Ionicons name="information-circle-outline" size={15} color="#7DD3FC" />
+            <Text style={{ fontSize: 11, color: '#BAE6FD', flex: 1 }}>
+              Tracks public profiles & website pages independently from Meta/LinkedIn OAuth publishing integrations above.
+            </Text>
+          </View>
+
+          {/* Explicit Loading State */}
+          {ownedChannelsLoading && !ownedChannelsLoaded ? (
+            <View
+              testID="owned-channels-loading-banner"
+              style={{
+                backgroundColor: '#1E293B',
+                borderWidth: 1,
+                borderColor: '#334155',
+                borderRadius: 10,
+                padding: 12,
+                marginBottom: 14,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 10,
+              }}
+            >
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={{ fontSize: 12, color: colors.textSecondary, fontFamily: 'Inter_500Medium' }}>
+                Loading saved owned channels for this campaign...
+              </Text>
+            </View>
+          ) : null}
+
+          {/* Explicit Load Error + Retry State */}
+          {ownedChannelsLoadError ? (
+            <View
+              testID="owned-channels-load-error-banner"
+              style={{
+                backgroundColor: '#3B1219',
+                borderWidth: 1,
+                borderColor: '#EF4444',
+                borderRadius: 10,
+                padding: 12,
+                marginBottom: 14,
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <Ionicons name="alert-circle" size={16} color="#FCA5A5" />
+                <Text style={{ fontSize: 13, fontFamily: 'Inter_700Bold', color: '#FCA5A5' }}>
+                  Unable to Load Canonical Channels
+                </Text>
+              </View>
+              <Text style={{ fontSize: 12, color: '#FECACA', marginBottom: 10 }}>
+                {ownedChannelsLoadError} Saving is disabled until channel loading succeeds so existing channels cannot be overwritten.
+              </Text>
+              <Pressable
+                testID="retry-load-owned-channels-btn"
+                onPress={() => fetchCampaignCompetitors({ forceOverwriteChannels: false })}
+                style={{
+                  alignSelf: 'flex-start',
+                  backgroundColor: '#EF4444',
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                  borderRadius: 8,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <Ionicons name="refresh" size={14} color="#fff" />
+                <Text style={{ fontSize: 12, fontFamily: 'Inter_600SemiBold', color: '#fff' }}>
+                  Retry Loading Channels
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {/* LinkedIn Identity Unresolved Banner when applicable */}
+          {(() => {
+            const liRow = ownedChannels.find((c) => String(c.platform || '').toLowerCase() === 'linkedin');
+            if (liRow && (liRow.identityStatus === 'UNRESOLVED' || liRow.lifecycleStatus === 'NEEDS_FULL_URL')) {
+              return (
+                <View
+                  testID="linkedin-unresolved-banner"
+                  style={{
+                    backgroundColor: '#332409',
+                    borderWidth: 1,
+                    borderColor: '#D97706',
+                    borderRadius: 10,
+                    padding: 12,
+                    marginBottom: 14,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <Ionicons name="warning" size={16} color="#FBBF24" />
+                    <Text style={{ fontSize: 13, fontFamily: 'Inter_700Bold', color: '#FBBF24' }}>
+                      Needs full LinkedIn URL — Slug Required Once
+                    </Text>
+                  </View>
+                  <Text style={{ fontSize: 12, color: '#FDE68A', lineHeight: 18 }}>
+                    Your LinkedIn connection was saved ({liRow.url || 'https://linkedin.com/company'}), but only the generic /company root was stored without a slug. Enter your full LinkedIn URL below (e.g. https://www.linkedin.com/company/your-slug or https://www.linkedin.com/in/your-slug) and click Save & Sync Channels.
+                  </Text>
+                </View>
+              );
+            }
+            return null;
+          })()}
+
+          {[
+            {
+              key: 'instagram',
+              label: 'Instagram',
+              icon: 'logo-instagram' as const,
+              color: '#E1306C',
+              value: ownedInstagramInput,
+              setter: setOwnedInstagramInput,
+              placeholder: 'https://www.instagram.com/yourhandle or @yourhandle',
+            },
+            {
+              key: 'tiktok',
+              label: 'TikTok',
+              icon: 'musical-notes-outline' as const,
+              color: '#38BDF8',
+              value: ownedTiktokInput,
+              setter: setOwnedTiktokInput,
+              placeholder: 'https://www.tiktok.com/@yourhandle or @yourhandle',
+            },
+            {
+              key: 'youtube',
+              label: 'YouTube',
+              icon: 'logo-youtube' as const,
+              color: '#EF4444',
+              value: ownedYoutubeInput,
+              setter: setOwnedYoutubeInput,
+              placeholder: 'https://www.youtube.com/@yourchannel',
+            },
+            {
+              key: 'linkedin',
+              label: 'LinkedIn (Company or Personal)',
+              icon: 'logo-linkedin' as const,
+              color: '#0A66C2',
+              value: ownedLinkedinInput,
+              setter: setOwnedLinkedinInput,
+              placeholder: 'https://www.linkedin.com/company/your-slug or /in/your-slug',
+            },
+            {
+              key: 'website',
+              label: 'Website Domain',
+              icon: 'globe-outline' as const,
+              color: '#10B981',
+              value: ownedWebsiteInput,
+              setter: setOwnedWebsiteInput,
+              placeholder: 'https://yourdomain.com',
+            },
+          ].map((item) => {
+            const row = ownedChannels.find((c) => String(c.platform || '').toLowerCase() === item.key);
+            const isUnresolved =
+              row?.identityStatus === 'UNRESOLVED' || row?.lifecycleStatus === 'NEEDS_FULL_URL';
+            const lifecycle = row?.lifecycleStatus || (
+              isUnresolved
+                ? 'NEEDS_FULL_URL'
+                : row?.scrapeStatus === 'FAILED'
+                  ? 'FAILED'
+                  : row?.isConfirmedEmpty
+                    ? 'VERIFIED_EMPTY'
+                    : row?.scrapeStatus === 'SUCCESS' || row?.scrapeStatus === 'PARTIAL' || (row?.storedPostsCount || 0) > 0
+                      ? 'FETCHED'
+                      : row?.url || row?.handle
+                        ? 'CONFIGURED'
+                        : 'NOT_CONNECTED'
+            );
+
+            let statusText = 'NOT CONNECTED';
+            let badgeColor = '#64748B';
+
+            if (!ownedChannelsLoaded && ownedChannelsLoading) {
+              statusText = 'LOADING...';
+              badgeColor = '#94A3B8';
+            } else if (!ownedChannelsLoaded && ownedChannelsLoadError) {
+              statusText = 'LOAD ERROR';
+              badgeColor = '#EF4444';
+            } else if (lifecycle === 'NEEDS_FULL_URL') {
+              statusText = 'Needs full LinkedIn URL';
+              badgeColor = '#F59E0B';
+            } else if (lifecycle === 'QUEUED') {
+              statusText = 'QUEUED';
+              badgeColor = '#38BDF8';
+            } else if (lifecycle === 'FETCHING') {
+              statusText = 'FETCHING';
+              badgeColor = '#60A5FA';
+            } else if (lifecycle === 'FAILED') {
+              statusText = 'FAILED';
+              badgeColor = '#EF4444';
+            } else if (lifecycle === 'VERIFIED_EMPTY') {
+              statusText = 'VERIFIED EMPTY (0 posts)';
+              badgeColor = '#94A3B8';
+            } else if (lifecycle === 'FETCHED') {
+              statusText =
+                item.key === 'website'
+                  ? 'FETCHED'
+                  : `FETCHED (${row?.storedPostsCount || 0} posts)`;
+              badgeColor = '#10B981';
+            } else if (lifecycle === 'CONFIGURED') {
+              statusText = 'CONFIGURED';
+              badgeColor = '#60A5FA';
+            }
+
+            const hasStoredChannel = Boolean(row && (row.url || row.handle));
+            const isDirty = Boolean(dirtyChannelFields[item.key]);
+
+            return (
+              <View key={item.key} style={{ marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Ionicons name={item.icon} size={16} color={item.color} />
+                    <Text style={{ fontSize: 13, fontFamily: 'Inter_600SemiBold', color: colors.text }}>
+                      {item.label}
+                    </Text>
+                    {row?.accountType ? (
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                        ({row.accountType})
+                      </Text>
+                    ) : null}
+                    {isDirty ? (
+                      <Text style={{ fontSize: 10, color: '#C4B5FD', fontFamily: 'Inter_600SemiBold' }}>
+                        • Unsaved edit
+                      </Text>
+                    ) : null}
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View
+                      testID={`owned-channel-status-${item.key}`}
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 6,
+                        backgroundColor: badgeColor + '20',
+                      }}
+                    >
+                      <Text style={{ fontSize: 10, fontFamily: 'Inter_700Bold', color: badgeColor }}>
+                        {statusText}
+                      </Text>
+                    </View>
+                    {hasStoredChannel && ownedChannelsLoaded ? (
+                      <Pressable
+                        testID={`remove-owned-channel-${item.key}`}
+                        onPress={() => handleRemoveOwnedChannel(item.key, item.label)}
+                        disabled={Boolean(removingChannelPlatform) || ownedChannelsSaving}
+                        style={{
+                          paddingHorizontal: 7,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          backgroundColor: 'rgba(239,68,68,0.14)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(239,68,68,0.35)',
+                          opacity: removingChannelPlatform === item.key ? 0.5 : 1,
+                        }}
+                      >
+                        <Text style={{ fontSize: 10, fontFamily: 'Inter_600SemiBold', color: '#FCA5A5' }}>
+                          {removingChannelPlatform === item.key ? 'Removing...' : 'Remove'}
+                        </Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                </View>
+
+                <TextInput
+                  testID={`owned-channel-input-${item.key}`}
+                  editable={ownedChannelsLoaded && !ownedChannelsSaving}
+                  style={{
+                    borderRadius: 10,
+                    borderWidth: 1,
+                    borderColor: isUnresolved
+                      ? '#F59E0B'
+                      : lifecycle === 'FAILED'
+                        ? '#EF4444'
+                        : isDirty
+                          ? colors.primary
+                          : '#334155',
+                    backgroundColor: '#1E293B',
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 13,
+                    color: colors.text,
+                    fontFamily: 'Inter_500Medium',
+                    opacity: ownedChannelsLoaded ? 1 : 0.6,
+                  }}
+                  value={item.value}
+                  onChangeText={(text) => {
+                    item.setter(text);
+                    markChannelDirty(item.key, text.trim() !== (loadedChannelUrls[item.key] || ''));
+                  }}
+                  placeholder={item.placeholder}
+                  placeholderTextColor={colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+
+                {row && (row.lastScrapedAt || row.scrapeError || row.followersCount > 0) ? (
+                  <View style={{ marginTop: 4, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 6 }}>
+                    {row.lastScrapedAt ? (
+                      <Text style={{ fontSize: 11, color: colors.textMuted }}>
+                        Last scraped: {new Date(row.lastScrapedAt).toLocaleString()}
+                        {row.nextScrapeDueAt ? ` • Next due (24h): ${new Date(row.nextScrapeDueAt).toLocaleString()}` : ''}
+                        {row.followersCount > 0 ? ` • ${row.followersCount.toLocaleString()} followers` : ''}
+                      </Text>
+                    ) : null}
+                    {row.scrapeError ? (
+                      <Text
+                        testID={`owned-channel-error-${item.key}`}
+                        style={{
+                          fontSize: 11,
+                          color: lifecycle === 'FAILED' ? '#FCA5A5' : '#FBBF24',
+                          flexShrink: 1,
+                        }}
+                      >
+                        {row.scrapeError}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+
+          {ownedChannelsError ? (
+            <View
+              testID="owned-channels-save-error"
+              style={{
+                backgroundColor: '#3B1219',
+                borderWidth: 1,
+                borderColor: '#EF4444',
+                borderRadius: 8,
+                padding: 10,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: '#FCA5A5', fontFamily: 'Inter_500Medium' }}>
+                {ownedChannelsError}
+              </Text>
+            </View>
+          ) : null}
+
+          {ownedChannelsMessage ? (
+            <View
+              testID="owned-channels-save-success"
+              style={{
+                backgroundColor: '#064E3B',
+                borderWidth: 1,
+                borderColor: '#10B981',
+                borderRadius: 8,
+                padding: 10,
+                marginBottom: 12,
+              }}
+            >
+              <Text style={{ fontSize: 12, color: '#6EE7B7', fontFamily: 'Inter_500Medium' }}>
+                {ownedChannelsMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <Pressable
+              testID="save-sync-owned-channels-btn"
+              onPress={() => handleSaveOwnedChannels(true)}
+              disabled={!ownedChannelsLoaded || ownedChannelsLoading || ownedChannelsSaving}
+              style={{
+                flex: 1,
+                backgroundColor: colors.primary,
+                borderRadius: 10,
+                paddingVertical: 12,
+                paddingHorizontal: 16,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                opacity: !ownedChannelsLoaded || ownedChannelsLoading || ownedChannelsSaving ? 0.5 : 1,
+              }}
+            >
+              {ownedChannelsSaving ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="sync-outline" size={16} color="#fff" />
+                  <Text style={{ color: '#fff', fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>
+                    {!ownedChannelsLoaded
+                      ? ownedChannelsLoading
+                        ? 'Loading Channels...'
+                        : 'Load Channels First to Save'
+                      : 'Save & Sync Channels'}
+                  </Text>
+                </>
+              )}
+            </Pressable>
+          </View>
+        </View>
+
         {/* CAMPAIGN COMPETITORS & MULTI-SOURCE MONITORING */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}>
           <View style={styles.cardHeader}>
@@ -1073,7 +2209,7 @@ export default function SettingsScreen() {
                 const isRefreshing = refreshingCompId === comp.id;
                 const sources = comp.sources || {
                   website: { platform: 'website', url: comp.websiteUrl, status: 'VERIFIED' },
-                  instagram: { platform: 'instagram', url: comp.profileLink, status: comp.profileLink ? 'VERIFIED' : 'NOT_FOUND' },
+                  instagram: { platform: 'instagram', url: null, status: 'NOT_FOUND' },
                   tiktok: { platform: 'tiktok', url: null, status: 'NOT_FOUND' },
                   linkedin: { platform: 'linkedin', url: null, status: 'NOT_FOUND' },
                   x: { platform: 'x', url: null, status: 'NOT_FOUND' },

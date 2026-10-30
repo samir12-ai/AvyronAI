@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
+import path from "path";
 
 const ACCOUNT_A = "account-aaa-111";
 const ACCOUNT_B = "account-bbb-222";
@@ -25,7 +26,7 @@ const SHARED_HANDLE = "competitor_brand";
 describe("Cache Isolation — signalCache (isDuplicateSignal / recordSignalEmission)", () => {
   it("isDuplicateSignal key includes accountId — verified in source", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/campaign-data-layer.ts",
+      path.resolve(process.cwd(), "server/campaign-data-layer.ts"),
       "utf-8"
     );
     expect(content).toContain("`${accountId}:${campaignId}:${metric}`");
@@ -33,7 +34,7 @@ describe("Cache Isolation — signalCache (isDuplicateSignal / recordSignalEmiss
 
   it("isDuplicateSignal accepts accountId as 4th parameter", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/campaign-data-layer.ts",
+      path.resolve(process.cwd(), "server/campaign-data-layer.ts"),
       "utf-8"
     );
     expect(content).toMatch(/function isDuplicateSignal\([^)]*accountId/);
@@ -41,7 +42,7 @@ describe("Cache Isolation — signalCache (isDuplicateSignal / recordSignalEmiss
 
   it("recordSignalEmission accepts accountId as 4th parameter", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/campaign-data-layer.ts",
+      path.resolve(process.cwd(), "server/campaign-data-layer.ts"),
       "utf-8"
     );
     expect(content).toMatch(/function recordSignalEmission\([^)]*accountId/);
@@ -49,7 +50,7 @@ describe("Cache Isolation — signalCache (isDuplicateSignal / recordSignalEmiss
 
   it("all call sites pass accountId as 4th argument to isDuplicateSignal", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/campaign-data-layer.ts",
+      path.resolve(process.cwd(), "server/campaign-data-layer.ts"),
       "utf-8"
     );
     const calls = content.match(/isDuplicateSignal\([^)]+\)/g) || [];
@@ -62,7 +63,7 @@ describe("Cache Isolation — signalCache (isDuplicateSignal / recordSignalEmiss
 
   it("all call sites pass accountId as 4th argument to recordSignalEmission", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/campaign-data-layer.ts",
+      path.resolve(process.cwd(), "server/campaign-data-layer.ts"),
       "utf-8"
     );
     const calls = content.match(/recordSignalEmission\([^)]+\)/g) || [];
@@ -147,7 +148,7 @@ describe("Cache Isolation — celReportCache (storeCELReport / getCachedCELRepor
 describe("Cache Isolation — integrityReports (storeIntegrityReport)", () => {
   it("storeIntegrityReport signature requires accountId as 2nd argument", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/system-integrity/routes.ts",
+      path.resolve(process.cwd(), "server/system-integrity/routes.ts"),
       "utf-8"
     );
     expect(content).toMatch(/function storeIntegrityReport\([^)]*accountId/);
@@ -156,7 +157,7 @@ describe("Cache Isolation — integrityReports (storeIntegrityReport)", () => {
 
   it("GET /api/system-integrity/:campaignId requires authMiddleware", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/system-integrity/routes.ts",
+      path.resolve(process.cwd(), "server/system-integrity/routes.ts"),
       "utf-8"
     );
     expect(content).toContain("authMiddleware");
@@ -166,7 +167,7 @@ describe("Cache Isolation — integrityReports (storeIntegrityReport)", () => {
 
   it("orchestrator passes config.accountId to storeIntegrityReport", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/orchestrator/index.ts",
+      path.resolve(process.cwd(), "server/orchestrator/index.ts"),
       "utf-8"
     );
     expect(content).toContain("storeIntegrityReport(config.campaignId, config.accountId");
@@ -174,7 +175,7 @@ describe("Cache Isolation — integrityReports (storeIntegrityReport)", () => {
 
   it("orchestrator passes config.accountId to storeCELReport", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/orchestrator/index.ts",
+      path.resolve(process.cwd(), "server/orchestrator/index.ts"),
       "utf-8"
     );
     expect(content).toContain("storeCELReport(config.campaignId, config.accountId");
@@ -229,9 +230,9 @@ describe("Cache Isolation — profileCache key scoping", () => {
   it("profileCache key includes accountId to prevent cross-account scrape cache hits", async () => {
     const mod = await import("../competitive-intelligence/profile-scraper");
     const src = await import("fs");
-    const content = src.readFileSync("/home/runner/workspace/server/competitive-intelligence/profile-scraper.ts", "utf-8");
+    const content = src.readFileSync(path.resolve(process.cwd(), "server/competitive-intelligence/profile-scraper.ts"), "utf-8");
 
-    expect(content).toContain("const cacheKey = `${accountId}:${handle}`");
+    expect(content).toContain("const cacheKey = nsCacheKey(accountId, `instagram:${handle}`)");
     expect(content).toContain("profileCache.get(cacheKey)");
     expect(content).toContain("profileCache.set(cacheKey");
   });
@@ -240,7 +241,7 @@ describe("Cache Isolation — profileCache key scoping", () => {
 describe("Cache Isolation — all in-memory Maps sweep", () => {
   it("all cache get/set calls in profile-scraper use cacheKey not bare handle", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/competitive-intelligence/profile-scraper.ts",
+      path.resolve(process.cwd(), "server/competitive-intelligence/profile-scraper.ts"),
       "utf-8"
     );
     const bareHandleGet = content.match(/profileCache\.get\(handle\)/g);
@@ -251,7 +252,7 @@ describe("Cache Isolation — all in-memory Maps sweep", () => {
 
   it("all signalCache calls in campaign-data-layer pass accountId as 4th argument", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/campaign-data-layer.ts",
+      path.resolve(process.cwd(), "server/campaign-data-layer.ts"),
       "utf-8"
     );
     const bareIsDuplicate = content.match(/isDuplicateSignal\([^)]+\)/g) || [];
@@ -268,7 +269,7 @@ describe("Cache Isolation — all in-memory Maps sweep", () => {
 
   it("aelCache uses compound accountId:campaignId key", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/analytical-enrichment-layer/routes.ts",
+      path.resolve(process.cwd(), "server/analytical-enrichment-layer/routes.ts"),
       "utf-8"
     );
     expect(content).toContain("`${accountId}:${campaignId}`");
@@ -278,7 +279,7 @@ describe("Cache Isolation — all in-memory Maps sweep", () => {
 
   it("celReportCache uses compound accountId:campaignId key", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/causal-enforcement-layer/engine.ts",
+      path.resolve(process.cwd(), "server/causal-enforcement-layer/engine.ts"),
       "utf-8"
     );
     expect(content).toContain("`${accountId}:${campaignId}`");
@@ -288,7 +289,7 @@ describe("Cache Isolation — all in-memory Maps sweep", () => {
 
   it("integrityReports uses compound accountId:campaignId key", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/system-integrity/routes.ts",
+      path.resolve(process.cwd(), "server/system-integrity/routes.ts"),
       "utf-8"
     );
     expect(content).toContain("`${accountId}:${campaignId}`");
@@ -298,7 +299,7 @@ describe("Cache Isolation — all in-memory Maps sweep", () => {
 
   it("resolveAccountId no longer contains 'return default' fallback", () => {
     const content = require("fs").readFileSync(
-      "/home/runner/workspace/server/auth.ts",
+      path.resolve(process.cwd(), "server/auth.ts"),
       "utf-8"
     );
     const resolveBlock = content.substring(

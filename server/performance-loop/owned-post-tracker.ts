@@ -56,9 +56,13 @@ export interface OwnedPostObservationInput {
   ownedProfileId: string;
   platform: string;
   posts: ScrapedPost[];
-  followers: number | null;
+  followers?: number | null;
   /** user_channel_snapshots row id of this scrape run (provenance link). */
-  scrapeSnapshotId: string | null;
+  scrapeSnapshotId?: string | null;
+  /** canonical acquisition_tasks row id of this scrape run. */
+  acquisitionTaskId?: string | null;
+  /** optional explicit observation timestamp (defaults to new Date()). */
+  observedAt?: Date;
 }
 
 export interface OwnedPostObservationResult {
@@ -73,16 +77,27 @@ export interface OwnedPostObservationResult {
   newOwnedPostIds: string[];
 }
 
-function parsePostTimestamp(raw: string | null): Date | null {
-  if (!raw) return null;
-  // Scraper timestamps are unix seconds (taken_at_timestamp) serialized as
-  // string, or ISO strings depending on path. Handle both explicitly.
-  if (/^\d+$/.test(raw)) {
-    const n = Number(raw);
+export function parsePostTimestamp(raw: string | number | Date | null | undefined): Date | null {
+  if (raw === null || raw === undefined) return null;
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : raw;
+  }
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    const d = new Date(raw < 1e12 ? raw * 1000 : raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const s = String(raw).trim();
+  if (!s) return null;
+  // Scraper timestamps are unix seconds (taken_at_timestamp / createTime) or
+  // unix milliseconds (created_at) serialized as string, or ISO strings.
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (!Number.isFinite(n) || n <= 0) return null;
     const d = new Date(n < 1e12 ? n * 1000 : n);
     return Number.isNaN(d.getTime()) ? null : d;
   }
-  const d = new Date(raw);
+  const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
@@ -95,7 +110,10 @@ function parsePostTimestamp(raw: string | null): Date | null {
 export async function recordOwnedPostObservations(
   input: OwnedPostObservationInput,
 ): Promise<OwnedPostObservationResult> {
-  const observedAt = new Date();
+  const observedAt =
+    input.observedAt instanceof Date && !Number.isNaN(input.observedAt.getTime())
+      ? input.observedAt
+      : new Date();
   const result: OwnedPostObservationResult = {
     postsSeen: input.posts.length,
     postsCreated: 0,
@@ -112,7 +130,12 @@ export async function recordOwnedPostObservations(
   const scrapedIds = input.posts.map((p) => p.postId).filter(Boolean);
   const existing = scrapedIds.length
     ? await db
-        .select({ id: ownedPosts.id, postId: ownedPosts.postId })
+        .select({
+          id: ownedPosts.id,
+          postId: ownedPosts.postId,
+          postedAt: ownedPosts.postedAt,
+          acquisitionTaskId: ownedPosts.acquisitionTaskId,
+        })
         .from(ownedPosts)
         .where(
           and(
@@ -121,7 +144,7 @@ export async function recordOwnedPostObservations(
           ),
         )
     : [];
-  const existingByPostId = new Map(existing.map((r) => [r.postId, r.id]));
+  const existingByPostId = new Map(existing.map((r) => [r.postId, r]));
 
   for (const post of input.posts) {
     if (!post.postId) {
@@ -132,10 +155,12 @@ export async function recordOwnedPostObservations(
       continue;
     }
     try {
-      const postedAt = parsePostTimestamp(post.timestamp);
-      let ownedPostId = existingByPostId.get(post.postId);
+      const parsedPostedAt = parsePostTimestamp(post.timestamp);
+      const existingRow = existingByPostId.get(post.postId);
+      let ownedPostId = existingRow?.id;
+      const effectivePostedAt = existingRow?.postedAt ?? parsedPostedAt ?? null;
 
-      if (ownedPostId) {
+      if (ownedPostId && existingRow) {
         await db
           .update(ownedPosts)
           .set({
@@ -144,7 +169,9 @@ export async function recordOwnedPostObservations(
             shortcode: post.shortcode || undefined,
             mediaType: post.mediaType || undefined,
             caption: post.caption ?? undefined,
-            postedAt: postedAt ?? undefined,
+            // Never overwrite a valid stored publication date on re-fetch; only populate if previously null
+            postedAt: existingRow.postedAt ? existingRow.postedAt : (parsedPostedAt ?? undefined),
+            acquisitionTaskId: input.acquisitionTaskId || existingRow.acquisitionTaskId || undefined,
             updatedAt: observedAt,
           })
           .where(eq(ownedPosts.id, ownedPostId));
@@ -162,9 +189,10 @@ export async function recordOwnedPostObservations(
             permalink: post.permalink || null,
             mediaType: post.mediaType || null,
             caption: post.caption,
-            postedAt,
+            postedAt: parsedPostedAt,
             firstSeenAt: observedAt,
             lastSeenAt: observedAt,
+            acquisitionTaskId: input.acquisitionTaskId || null,
             // lineage_state starts 'unmatched'; the lineage resolver is the
             // sole writer of lineage fields (D2 single-writer discipline).
           })
@@ -196,7 +224,7 @@ export async function recordOwnedPostObservations(
       result.ownedPostIds.push(ownedPostId);
 
       // ── Observation snapshot (append-only) ────────────────────────────
-      const { checkpoint, ageHours } = classifyObservation(postedAt, observedAt);
+      const { checkpoint, ageHours } = classifyObservation(effectivePostedAt, observedAt);
 
       if (checkpoint === "discovery" || checkpoint === "late" || checkpoint === "unknown_age") {
         // Non-banded: dedupe by spacing so tight re-runs don't flood history.
@@ -231,9 +259,9 @@ export async function recordOwnedPostObservations(
           observedAt,
           observationAgeHours: ageHours,
           // NULL stays NULL — never coerce a missing public metric to 0.
-          likes: post.likes,
-          comments: post.comments,
-          views: post.views,
+          likes: post.likes ?? (post as any).likesCount ?? null,
+          comments: post.comments ?? (post as any).commentsCount ?? null,
+          views: post.views ?? (post as any).viewsCount ?? (post as any).viewCount ?? null,
           followersAtObservation: input.followers,
           metricSource: "public_scrape",
           scrapeSnapshotId: input.scrapeSnapshotId,

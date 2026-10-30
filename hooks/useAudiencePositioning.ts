@@ -2,15 +2,32 @@ import { useQuery } from '@tanstack/react-query';
 import { getApiUrl, authFetch } from '@/lib/query-client';
 import type { AudiencePositioningViewModel } from '@/types/audience-positioning';
 
-export function useAudiencePositioning(campaignId: string | null | undefined) {
+export interface UseAudiencePositioningOptions {
+  planId?: string | null;
+  runId?: string | null;
+}
+
+export function useAudiencePositioning(
+  campaignId: string | null | undefined,
+  options?: UseAudiencePositioningOptions,
+) {
+  const planId = options?.planId || undefined;
+  const runId = options?.runId || undefined;
+
   return useQuery<AudiencePositioningViewModel>({
-    queryKey: ['audience-positioning', campaignId],
+    queryKey: ['audience-positioning', campaignId, planId ?? null, runId ?? null],
     queryFn: async () => {
       if (!campaignId) {
         throw new Error('campaignId is required');
       }
 
-      const url = getApiUrl(`/api/intelligence/audience-positioning/${encodeURIComponent(campaignId)}`);
+      const params = new URLSearchParams();
+      if (planId) params.set('planId', planId);
+      if (runId) params.set('runId', runId);
+      const qs = params.toString();
+      const url = getApiUrl(
+        `/api/intelligence/audience-positioning/${encodeURIComponent(campaignId)}${qs ? `?${qs}` : ''}`,
+      );
       const res = await authFetch(url);
 
       if (!res.ok) {

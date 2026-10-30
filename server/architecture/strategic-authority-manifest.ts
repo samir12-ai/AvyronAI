@@ -59,6 +59,23 @@ export const STRATEGIC_AUTHORITY_MANIFEST = {
       owner: "server/strategy/channel-selection/engine.ts:runChannelSelectionWithAIProposal",
       mode: "DYNAMIC_AI_PROPOSAL_ONLY",
     },
+    ObjectionAuthority: {
+      owner: "server/audience-engine/engine.ts:constructSegments",
+      validator: "SemanticAudienceJudge",
+      canonicalField: "audienceSegments[].objections",
+      prohibitedFallbacks: ["objectionMap", "regex", "OBJECTION_CLUSTERS", "deterministic heuristics"],
+    },
+    SignalGovernance: {
+      role: "NON_AUTHORITATIVE_CONTEXT_ONLY",
+      owner: "server/signal-governance/engine.ts:resolveSignalsForEngine",
+      blockingForbidden: true,
+      purpose: "Supporting context (desires, non-pain patterns, emotional drivers) and telemetry only",
+    },
+    SystemControl: {
+      owner: "server/system-control/engine.ts:evaluatePipelineTruthfulness",
+      role: "FINAL_INTEGRITY_VALIDATION",
+      validatesModernPipeline: true,
+    },
     PlanSynthesis: {
       owner: "server/orchestrator/plan-synthesis.ts:assemblePlan",
       mode: "ASSEMBLER_ONLY",

@@ -29,8 +29,43 @@ interface LiveStrategyRunModalProps {
     primaryChannel: string;
     lanesCount: number;
   } | null;
+  continuationPlan?: {
+    canContinue: boolean;
+    sourceJobId?: string | null;
+    resumeFromStage?: string | null;
+    resumeFromStageLabel?: string | null;
+    reusedStages?: Array<{
+      engineId: string;
+      stageName: string;
+      stageNumber: number;
+      sourceJobId: string;
+      snapshotId: string;
+      proposalStatus?: string;
+    }>;
+    remainingStages?: Array<{
+      engineId: string;
+      stageName: string;
+      stageNumber: number;
+    }>;
+    missingPrerequisite?: {
+      engineId: string;
+      stageName: string;
+      reason: string;
+      recoveryAction: string;
+    } | null;
+    explanation?: string;
+    interruptionDiagnostics?: {
+      category: string;
+      isProviderInterruption: boolean;
+      canContinueAfterCreditsRestored: boolean;
+      userMessage: string;
+    } | null;
+  } | null;
+  isContinuing?: boolean;
   onViewStrategy: () => void;
   onRetry?: () => void;
+  onContinuePipeline?: (fromStage?: string) => void;
+  onStartFresh?: () => void;
 }
 
 export function LiveStrategyRunModal({
@@ -45,10 +80,124 @@ export function LiveStrategyRunModal({
   isCompleted,
   isFailed,
   completionData,
+  continuationPlan,
+  isContinuing = false,
   onViewStrategy,
   onRetry,
+  onContinuePipeline,
+  onStartFresh,
 }: LiveStrategyRunModalProps) {
   if (!visible) return null;
+
+  const reusedEngineMap = new Map(
+    (continuationPlan?.reusedStages || []).map((s) => [s.engineId, s])
+  );
+  const reusedCount =
+    stages.filter((s) => s.wasReused).length ||
+    (continuationPlan?.reusedStages?.length ?? 0);
+
+  const primaryBlockingStage = stages.find(
+    (s) =>
+      (s.status === 'BLOCKED' || s.status === 'FAILED') &&
+      !s.upstreamBlocked &&
+      s.rawStatus !== 'SKIPPED' &&
+      !/^Skipped\s*[—-]/i.test(s.displayMessage || '')
+  );
+  const failureCat =
+    continuationPlan?.interruptionDiagnostics?.category ||
+    primaryBlockingStage?.failureCategory;
+  const isBillingFailure = Boolean(
+    failureCat === 'BILLING_EXHAUSTED' ||
+      /BILLING_EXHAUSTED|AI_BUDGET_EXCEEDED|no credits remaining|credit balance is too low|monthly spending limit|insufficient_quota|exceeded your current quota/i.test(
+        primaryBlockingStage?.displayMessage || ''
+      )
+  );
+  const isRateLimitOrProviderFailure = Boolean(
+    failureCat === 'RATE_LIMITED' ||
+      failureCat === 'PROVIDER_UNAVAILABLE' ||
+      /RATE_LIMITED|PROVIDER_UNAVAILABLE|rate limit|service unavailable/i.test(
+        primaryBlockingStage?.displayMessage || ''
+      )
+  );
+  const isMalformedOutputFailure = Boolean(
+    failureCat === 'MALFORMED_OUTPUT' ||
+      /MALFORMED_OUTPUT|unparseable|malformed|JSON_PARSE_FAILED/i.test(
+        primaryBlockingStage?.displayMessage || ''
+      )
+  );
+  const isTechnicalOrContractFailure = Boolean(
+    isBillingFailure ||
+      isRateLimitOrProviderFailure ||
+      isMalformedOutputFailure ||
+      (primaryBlockingStage &&
+        (failureCat === 'JUDGE_CONTRACT_FAILURE' ||
+          failureCat === 'TECHNICAL_EXECUTION_FAILURE' ||
+          /Judge contract failure|Judge technical failure|Technical failure|JUDGE_|CLAIM_IDENTITY_CONFLICT|CONTRACT_FAILURE|NOT_EVALUATED/i.test(
+            primaryBlockingStage.displayMessage || ''
+          )))
+  );
+  const isInsufficientEvidenceFailure = Boolean(
+    primaryBlockingStage &&
+      (failureCat === 'INSUFFICIENT_EVIDENCE' ||
+        failureCat === 'AUTHORITY_VACUUM')
+  );
+
+  const failedHeaderSubtitle =
+    continuationPlan?.interruptionDiagnostics?.isProviderInterruption &&
+    continuationPlan?.interruptionDiagnostics?.userMessage
+      ? continuationPlan.interruptionDiagnostics.userMessage
+      : isBillingFailure
+      ? `Execution paused in ${primaryBlockingStage?.name || 'an upstream stage'}: AI provider billing or credit limit reached (BILLING_EXHAUSTED). All completed upstream stages and market evidence are preserved.`
+      : isRateLimitOrProviderFailure
+      ? `Execution paused in ${primaryBlockingStage?.name || 'an upstream stage'}: AI provider rate limit or temporary unavailability (${failureCat || 'PROVIDER_UNAVAILABLE'}). Completed upstream stages are preserved.`
+      : isMalformedOutputFailure
+      ? `Execution halted in ${primaryBlockingStage?.name || 'an upstream stage'} due to malformed model/Judge output (MALFORMED_OUTPUT — not a semantic strategy rejection).`
+      : isTechnicalOrContractFailure
+      ? `Execution halted in ${primaryBlockingStage?.name || 'an upstream stage'} due to a technical validation error (not insufficient market evidence).`
+      : isInsufficientEvidenceFailure
+      ? primaryBlockingStage?.displayMessage ||
+        'Additional market or customer evidence is required before this stage can proceed.'
+      : primaryBlockingStage?.displayMessage ||
+        'Pipeline paused before final plan synthesis completed.';
+
+  const dynamicScopeText =
+    continuationPlan?.explanation ||
+    (reusedCount > 0 && (continuationPlan?.resumeFromStageLabel || primaryBlockingStage?.name)
+      ? `Continue from ${continuationPlan?.resumeFromStageLabel || primaryBlockingStage?.name}. ${reusedCount} completed stage${reusedCount === 1 ? '' : 's'} will be reused.`
+      : null);
+
+  const failedFooterMessage = dynamicScopeText
+    ? dynamicScopeText
+    : isBillingFailure
+    ? 'Provider billing limit reached (BILLING_EXHAUSTED). Continue Pipeline will reuse completed upstream stages without re-scraping.'
+    : isRateLimitOrProviderFailure
+    ? 'Temporary provider rate limit or outage. Continue Pipeline will reuse completed upstream stages without re-scraping.'
+    : isMalformedOutputFailure
+    ? 'Model returned truncated/malformed JSON (MALFORMED_OUTPUT). Continue Pipeline will reuse completed upstream stages.'
+    : isTechnicalOrContractFailure
+    ? `${
+        primaryBlockingStage?.displayMessage ||
+        'Execution halted due to a technical or Judge-contract error.'
+      } Continue Pipeline reuses completed upstream stages.`
+    : isInsufficientEvidenceFailure
+    ? primaryBlockingStage?.displayMessage ||
+      'Additional market or customer evidence is required before this stage can proceed.'
+    : 'Continue Pipeline reuses validated upstream stages and resumes from the first unfinished stage.';
+
+  const handlePrimaryContinue = () => {
+    if (isContinuing) return;
+    if (onContinuePipeline) {
+      onContinuePipeline(
+        continuationPlan?.missingPrerequisite?.engineId ||
+          continuationPlan?.resumeFromStage ||
+          undefined
+      );
+    } else if (onRetry) {
+      onRetry();
+    } else {
+      onClose();
+    }
+  };
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
@@ -64,6 +213,8 @@ export function LiveStrategyRunModal({
                     ? 'STRATEGY READY'
                     : isFailed
                     ? 'STRATEGY GENERATION NEEDS ATTENTION'
+                    : reusedCount > 0
+                    ? 'CONTINUING STRATEGY PIPELINE'
                     : 'LIVE STRATEGY ORCHESTRATION'}
                 </Text>
               </View>
@@ -72,13 +223,17 @@ export function LiveStrategyRunModal({
                   ? 'Your Strategy is Ready'
                   : isFailed
                   ? 'Orchestration Paused'
+                  : reusedCount > 0
+                  ? 'Continuing Your Strategy Pipeline'
                   : 'Generating Your Strategy'}
               </Text>
               <Text style={st.headerSubtitle}>
                 {isCompleted
                   ? 'Avyron has analyzed your business, market, buyers, and constructed a verified strategy.'
                   : isFailed
-                  ? 'We encountered an inconsistency and could not validate with enough confidence.'
+                  ? failedHeaderSubtitle
+                  : reusedCount > 0
+                  ? `Reused ${reusedCount} validated upstream stage${reusedCount === 1 ? '' : 's'} — executing remaining stages through final plan synthesis.`
                   : 'Avyron is analyzing your business, market, buyers, and strategic options in real time.'}
               </Text>
             </View>
@@ -86,6 +241,28 @@ export function LiveStrategyRunModal({
               <Feather name="x" size={18} color="#94A3B8" />
             </Pressable>
           </View>
+
+          {/* Continuation Scope & Prerequisite Banner when Paused */}
+          {isFailed && (dynamicScopeText || continuationPlan?.missingPrerequisite) && (
+            <View style={st.continuationScopeBanner}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <Feather name="fast-forward" size={14} color="#34D399" />
+                <Text style={st.continuationScopeTitle}>
+                  {continuationPlan?.missingPrerequisite
+                    ? `PREREQUISITE STAGE REQUIRED: ${continuationPlan.missingPrerequisite.stageName.toUpperCase()}`
+                    : 'VERIFIED CONTINUATION SCOPE'}
+                </Text>
+              </View>
+              {dynamicScopeText && (
+                <Text style={st.continuationScopeBody}>{dynamicScopeText}</Text>
+              )}
+              {continuationPlan?.missingPrerequisite && (
+                <Text style={[st.continuationScopeBody, { color: '#FCD34D', marginTop: 4 }]}>
+                  {continuationPlan.missingPrerequisite.reason} {continuationPlan.missingPrerequisite.recoveryAction}
+                </Text>
+              )}
+            </View>
+          )}
 
           {/* Progress Bar */}
           {!isCompleted && !isFailed && (
@@ -158,6 +335,18 @@ export function LiveStrategyRunModal({
                 const isWaiting = stage.status === 'WAITING';
                 const isError = stage.status === 'FAILED';
                 const isBlocked = stage.status === 'BLOCKED';
+                const reusedMeta = reusedEngineMap.get(stage.id);
+                const isReused = Boolean(stage.wasReused || (isFailed && reusedMeta));
+                const proposalStatus = stage.proposalStatus || reusedMeta?.proposalStatus;
+                const isProposed =
+                  proposalStatus === 'PROPOSED' || proposalStatus === 'STRATEGIC_HYPOTHESIS';
+                const isSkippedUpstream =
+                  isBlocked &&
+                  Boolean(
+                    stage.upstreamBlocked ||
+                      stage.rawStatus === 'SKIPPED' ||
+                      /^Skipped\s*[—-]/i.test(stage.displayMessage || '')
+                  );
 
                 return (
                   <View
@@ -166,7 +355,7 @@ export function LiveStrategyRunModal({
                       st.stageRow,
                       isRunning && st.stageRowRunning,
                       isRefining && st.stageRowRefining,
-                      isDone && st.stageRowDone,
+                      (isDone || isPartial) && st.stageRowDone,
                     ]}
                   >
                     <View style={st.stageIndexCol}>
@@ -176,9 +365,20 @@ export function LiveStrategyRunModal({
                     </View>
 
                     <View style={st.stageInfoCol}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <Text style={st.stageCategoryText}>{stage.category}</Text>
                         <Text style={st.stageNameText}>{stage.name}</Text>
+                        {isReused && (
+                          <View style={st.reusedBadge}>
+                            <Feather name="corner-up-right" size={9} color="#34D399" />
+                            <Text style={st.reusedBadgeText}>REUSED</Text>
+                          </View>
+                        )}
+                        {isProposed && (
+                          <View style={st.proposedBadge}>
+                            <Text style={st.proposedBadgeText}>PROPOSED HYPOTHESIS</Text>
+                          </View>
+                        )}
                       </View>
                       <Text style={st.stageMessageText} numberOfLines={2}>
                         {stage.displayMessage}
@@ -207,13 +407,17 @@ export function LiveStrategyRunModal({
                       {isDone && (
                         <View style={[st.statusPill, st.statusPillDone]}>
                           <Feather name="check" size={12} color="#34D399" />
-                          <Text style={[st.statusPillText, { color: '#34D399' }]}>COMPLETED</Text>
+                          <Text style={[st.statusPillText, { color: '#34D399' }]}>
+                            {isReused ? 'REUSED' : 'COMPLETED'}
+                          </Text>
                         </View>
                       )}
                       {isPartial && (
                         <View style={[st.statusPill, st.statusPillPartial]}>
-                          <Feather name="alert-triangle" size={11} color="#F59E0B" />
-                          <Text style={[st.statusPillText, { color: '#F59E0B' }]}>PARTIAL</Text>
+                          <Feather name="check" size={11} color="#F59E0B" />
+                          <Text style={[st.statusPillText, { color: '#F59E0B' }]}>
+                            {isReused ? 'REUSED (PROPOSED)' : 'PARTIAL'}
+                          </Text>
                         </View>
                       )}
                       {isWaiting && (
@@ -224,7 +428,9 @@ export function LiveStrategyRunModal({
                       {isBlocked && (
                         <View style={[st.statusPill, st.statusPillBlocked]}>
                           <Feather name="lock" size={11} color="#94A3B8" />
-                          <Text style={[st.statusPillText, { color: '#94A3B8' }]}>BLOCKED</Text>
+                          <Text style={[st.statusPillText, { color: '#94A3B8' }]}>
+                            {isSkippedUpstream ? 'SKIPPED' : 'BLOCKED'}
+                          </Text>
                         </View>
                       )}
                       {isError && (
@@ -244,18 +450,46 @@ export function LiveStrategyRunModal({
           {isFailed && (
             <View style={st.failureFooter}>
               <Text style={st.failureText}>
-                We couldn't validate all strategic engines with sufficient confidence.
+                {failedFooterMessage}
               </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 <Pressable
                   style={[st.retryBtn, { backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#334155' }]}
                   onPress={onClose}
                 >
                   <Text style={[st.retryBtnText, { color: '#94A3B8' }]}>DISMISS</Text>
                 </Pressable>
-                <Pressable style={st.retryBtn} onPress={onRetry || onClose}>
-                  <Ionicons name="refresh" size={14} color="#FFFFFF" />
-                  <Text style={st.retryBtnText}>TRY AGAIN</Text>
+                {onStartFresh && (
+                  <Pressable
+                    style={[st.retryBtn, { backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#475569' }]}
+                    onPress={onStartFresh}
+                    disabled={isContinuing}
+                  >
+                    <Feather name="rotate-ccw" size={12} color="#CBD5E1" />
+                    <Text style={[st.retryBtnText, { color: '#CBD5E1' }]}>START FRESH</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  style={[
+                    st.retryBtn,
+                    { backgroundColor: '#10B981' },
+                    isContinuing && { opacity: 0.6 },
+                  ]}
+                  onPress={handlePrimaryContinue}
+                  disabled={isContinuing}
+                >
+                  {isContinuing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Ionicons name="play" size={14} color="#FFFFFF" />
+                  )}
+                  <Text style={st.retryBtnText}>
+                    {isContinuing
+                      ? 'CONTINUING...'
+                      : continuationPlan?.missingPrerequisite
+                      ? `CONTINUE FROM ${continuationPlan.missingPrerequisite.stageName.toUpperCase()}`
+                      : 'CONTINUE PIPELINE'}
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -571,4 +805,54 @@ const st = StyleSheet.create({
     fontWeight: '700',
     fontSize: 12,
   },
+  continuationScopeBanner: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#064E3B25',
+    borderBottomWidth: 1,
+    borderColor: '#10B98140',
+  },
+  continuationScopeTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#34D399',
+    letterSpacing: 0.7,
+  },
+  continuationScopeBody: {
+    fontSize: 12,
+    color: '#D1FAE5',
+    lineHeight: 17,
+  },
+  reusedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#10B98118',
+    borderWidth: 1,
+    borderColor: '#10B98145',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  reusedBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#34D399',
+    letterSpacing: 0.5,
+  },
+  proposedBadge: {
+    backgroundColor: '#F59E0B18',
+    borderWidth: 1,
+    borderColor: '#F59E0B45',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  proposedBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#FBBF24',
+    letterSpacing: 0.5,
+  },
 });
+

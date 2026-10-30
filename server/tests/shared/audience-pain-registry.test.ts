@@ -4,9 +4,9 @@ import {
   buildAudiencePainRegistry, 
   extractCanonicalSegmentPains, 
   selectPainForUse, 
-  selectPainsForUse 
+  selectPainsForUse,
 } from "../../shared/audience-pain-registry";
-import { judgeProductFitStructural } from "../../shared/pain-classifier";
+import { runProductAssessmentForPain } from "../../strategic-reasoning/product-assessment";
 
 describe("Audience Pain Registry & Canonical Segment Binding", () => {
   const lineage = { accountId: "test_acc", audienceSnapshotId: "test_snap" };
@@ -121,53 +121,89 @@ describe("Audience Pain Registry & Canonical Segment Binding", () => {
     expect(registry[0].targetCoverageAuthorityId).toBe("tc_auth_999");
   });
 
-  it("10 & 11 & 12 & 13 & 14. Product Fit structural judge validates fit taxonomy and rejects false bridges", () => {
-    const rawPains = [
-      { claimId: "p_direct", claim: "Ad design takes too long", evidenceUids: ["EV:1"], segmentIds: ["seg_1"] },
-      { claimId: "p_strategic", claim: "Burnout from manual work", evidenceUids: ["EV:2"], segmentIds: ["seg_1"] },
-      { claimId: "p_unsupported", claim: "Credit card charges fail", evidenceUids: ["EV:3"], segmentIds: ["seg_1"] }
+  it("10 & 11 & 12 & 13 & 14. Product Assessment validates fit taxonomy deterministically", async () => {
+    const jobId = "job_pa_test";
+    const coId = "co_pa_test";
+    const buId = "bu_pa_test";
+    const productTruthFacts = [
+      { factId: "fact_1", statement: "AI Creative automation", factType: "CAPABILITY" },
+      { factId: "fact_2", statement: "Strategic planning intelligence", factType: "CAPABILITY" },
     ];
-    const registry = buildAudiencePainRegistry(rawPains, lineage);
 
-    // Test structural judge over proposed records
-    const fitRecords = [
-      {
+    const directRes = await runProductAssessmentForPain({
+      painId: "p_direct",
+      canonicalPain: "Ad design takes too long",
+      campaignOfferingId: coId,
+      businessUnderstandingAuthorityId: buId,
+      productTruthFacts,
+      accountId: lineage.accountId,
+      campaignId: "camp_1",
+      jobId,
+      existingAssessment: {
+        productAssessmentAuthorityId: `pa_${jobId}_p_direct`,
+        status: "COMPLETE",
+        fitType: "DIRECT_FIT",
+        jobId,
+        accountId: lineage.accountId,
+        campaignId: "camp_1",
         painId: "p_direct",
-        classification: "SUPPORTING" as const,
-        productFit: "ELIGIBLE" as const,
-        fitType: "DIRECT_FIT" as const,
-        requiredCapability: "Automate ad design",
-        matchedProductCapability: "AI Creative automation",
-        reason: "Valid direct capability executes the task"
+        campaignOfferingId: coId,
+        productTruthFactIds: ["fact_1"],
+        reason: "Valid direct capability executes the task",
       },
-      {
-        painId: "p_strategic",
-        classification: "SUPPORTING" as const,
-        productFit: "ELIGIBLE" as const,
-        fitType: "STRATEGIC_FIT" as const,
-        requiredCapability: "Reduce operational burnout",
-        matchedProductCapability: "Strategic planning intelligence",
-        strategicBridge: "Provides upstream strategic focus so teams do not waste energy on wrong angles",
-        boundary: "Does not perform literal copywriting execution",
-        reason: "Valid bounded strategic relationship"
-      },
-      {
-        painId: "p_unsupported",
-        classification: "SUPPORTING" as const,
-        productFit: "INELIGIBLE" as const,
-        fitType: "NOT_FIT" as const,
-        requiredCapability: "Fix credit card billing",
-        matchedProductCapability: "None",
-        reason: "Product has no payment processing or billing capabilities"
-      }
-    ];
+    });
+    expect(directRes.status).toBe("COMPLETE");
+    expect(directRes.fitType).toBe("DIRECT_FIT");
 
-    const result = judgeProductFitStructural(registry, fitRecords);
-    expect(result.accepted.size).toBe(3);
-    expect(result.accepted.get("p_direct")?.fitType).toBe("DIRECT_FIT");
-    expect(result.accepted.get("p_strategic")?.fitType).toBe("STRATEGIC_FIT");
-    expect(result.accepted.get("p_unsupported")?.fitType).toBe("NOT_FIT");
-    expect(result.accepted.get("p_unsupported")?.productFit).toBe("INELIGIBLE");
+    const strategicRes = await runProductAssessmentForPain({
+      painId: "p_strategic",
+      canonicalPain: "Burnout from manual work",
+      campaignOfferingId: coId,
+      businessUnderstandingAuthorityId: buId,
+      productTruthFacts,
+      accountId: lineage.accountId,
+      campaignId: "camp_1",
+      jobId,
+      existingAssessment: {
+        productAssessmentAuthorityId: `pa_${jobId}_p_strategic`,
+        status: "COMPLETE",
+        fitType: "STRATEGIC_FIT",
+        jobId,
+        accountId: lineage.accountId,
+        campaignId: "camp_1",
+        painId: "p_strategic",
+        campaignOfferingId: coId,
+        productTruthFactIds: ["fact_2"],
+        reason: "Valid bounded strategic relationship",
+      },
+    });
+    expect(strategicRes.status).toBe("COMPLETE");
+    expect(strategicRes.fitType).toBe("STRATEGIC_FIT");
+
+    const notFitRes = await runProductAssessmentForPain({
+      painId: "p_unsupported",
+      canonicalPain: "Credit card charges fail",
+      campaignOfferingId: coId,
+      businessUnderstandingAuthorityId: buId,
+      productTruthFacts,
+      accountId: lineage.accountId,
+      campaignId: "camp_1",
+      jobId,
+      existingAssessment: {
+        productAssessmentAuthorityId: `pa_${jobId}_p_unsupported`,
+        status: "COMPLETE",
+        fitType: "NOT_FIT",
+        jobId,
+        accountId: lineage.accountId,
+        campaignId: "camp_1",
+        painId: "p_unsupported",
+        campaignOfferingId: coId,
+        productTruthFactIds: ["fact_1", "fact_2"],
+        reason: "Product has no payment processing or billing capabilities",
+      },
+    });
+    expect(notFitRes.status).toBe("COMPLETE");
+    expect(notFitRes.fitType).toBe("NOT_FIT");
   });
 
   it("15 & 16 & 17 & 18 & 19 & 20. Supports multiple CORE pains and ensures non-DIRECT_FIT cannot become CORE", () => {

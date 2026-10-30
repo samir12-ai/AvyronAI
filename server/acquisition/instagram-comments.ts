@@ -41,6 +41,7 @@ export interface ActorComment {
 
 export interface CommentActorRunMeta {
   runId: string | null;
+  datasetId: string | null;
   actorId: string;
   requestedPosts: number;
   itemsReceived: number;
@@ -48,6 +49,7 @@ export interface CommentActorRunMeta {
   unmatchedItems: number;
   perUrlErrors: { url: string; error: string }[];
   durationMs: number;
+  usageUsd: number | null;
   /** Apify-reported usage if present, else comment-count estimate. */
   estimatedCostUsd: number;
 }
@@ -82,6 +84,7 @@ export async function scrapeInstagramCommentsViaActor(opts: {
   const { posts, maxCommentsPerPost } = opts;
   const emptyMeta: CommentActorRunMeta = {
     runId: null,
+    datasetId: null,
     actorId: COMMENT_ACTOR_ID,
     requestedPosts: posts.length,
     itemsReceived: 0,
@@ -89,6 +92,7 @@ export async function scrapeInstagramCommentsViaActor(opts: {
     unmatchedItems: 0,
     perUrlErrors: [],
     durationMs: 0,
+    usageUsd: null,
     estimatedCostUsd: 0,
   };
 
@@ -172,6 +176,7 @@ export async function scrapeInstagramCommentsViaActor(opts: {
 
   const meta: CommentActorRunMeta = {
     runId: run.runId,
+    datasetId: run.datasetId || null,
     actorId: COMMENT_ACTOR_ID,
     requestedPosts: directUrls.length,
     itemsReceived: run.items.length,
@@ -179,11 +184,12 @@ export async function scrapeInstagramCommentsViaActor(opts: {
     unmatchedItems: unmatched,
     perUrlErrors,
     durationMs: run.durationMs,
+    usageUsd: run.usageUsd ?? null,
     estimatedCostUsd: run.usageUsd ?? Number((comments.length * EST_COST_PER_COMMENT_USD).toFixed(4)),
   };
 
   console.log(
-    `[IgCommentActor] run=${meta.runId} posts=${meta.requestedPosts} items=${meta.itemsReceived} mapped=${meta.commentsMapped} unmatched=${meta.unmatchedItems} urlErrors=${meta.perUrlErrors.length} cost≈$${meta.estimatedCostUsd} in ${Math.round(meta.durationMs / 1000)}s`,
+    `[IgCommentActor] run=${meta.runId} dataset=${meta.datasetId} posts=${meta.requestedPosts} items=${meta.itemsReceived} mapped=${meta.commentsMapped} unmatched=${meta.unmatchedItems} urlErrors=${meta.perUrlErrors.length} cost≈$${meta.estimatedCostUsd} in ${Math.round(meta.durationMs / 1000)}s`,
   );
 
   return { ok: true, comments, meta };

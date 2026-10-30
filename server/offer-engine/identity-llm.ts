@@ -4,6 +4,7 @@ import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enr
 import type { OfferIdentityReasoning } from "./types";
 import type { ProductAnchor } from "../shared/strategic-doctrine";
 import { buildGroundingContract, buildAelReferenceIndex, checkGroundingContract } from "../shared/grounding-contract";
+import { evaluateClaimSemanticEntailment } from "../shared/claim-entailment";
 
 function buildPrompt(args: {
   offerName: string;
@@ -66,12 +67,13 @@ ${rejectedBlock}
 ${groundingContractBlock}
 ═══ HARD RULES ═══
 1. identityPayoff MUST start with "This is for the kind of person who ..." and describe the buyer's identity (not features).
-2. commercialReasoning MUST explain the buyer's commercial situation in one paragraph: what their P&L / pipeline / scoreboard looks like and why this offer changes it.
-3. valueTranslation MUST translate the emotional payoff into an economic statement (time saved, revenue gained, loss avoided), citing [PAIN#]/[DES#] or RC#.
+2. commercialReasoning MUST explain the buyer's commercial situation in one paragraph: what their P&L / pipeline / scoreboard or gifting/purchase stakes look like and why this offer's verified workflow changes it.
+3. valueTranslation MUST translate the emotional payoff into a concrete risk/value statement (time saved, wasted spend avoided, purchase regret reduced), citing [PAIN#]/[DES#] or RC#.
 4. rejectedAlternatives must list at least 2 alternative framings you considered and explain why they were rejected (cite evidence).
 5. NO marketing jargon: no "transform", "unlock", "scale", "leverage", "synergy", "next-level".
 6. Do NOT contradict the chosen Cialdini principle.
-7. Return ONLY valid JSON.
+7. STRICT FACTUAL & COMPETITIVE BOUNDARY: Do NOT claim guaranteed emotional outcomes ("ensuring the final song authentically reflects...", "guaranteeing emotional impact", "never generic") or invent competitor internal architecture ("black-box single output", "mass-produced automated prompt workflows", "template-bound services") or unverified product features ("multi-version preview selection", "lifetime cloud hosting") absent from the Grounding Contract. PAYMENT-TRIGGER FIDELITY: Never rewrite conditional payment triggers (such as creating a trial song for free and paying when gifting or obtaining the final deliverables) into satisfaction-contingent payment policies ("pay only when satisfied", "only pay for a song they love and are satisfied with") unless explicitly stated in the Grounding Contract, and avoid unqualified "risk-free" claims. Frame the value around how the verified workflow (e.g. structured input, free trial preview before purchasing for gifting, and verified delivery assets) helps the buyer evaluate fit before committing.
+8. Return ONLY valid JSON.
 
 Return JSON:
 {

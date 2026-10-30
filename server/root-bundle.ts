@@ -25,9 +25,11 @@ import {
   calendarEntries,
   requiredWork,
   contentDna,
+  strategyRoots,
 } from "../shared/schema";
 import { resolveAccountId } from "./auth";
 import { assertCampaignBelongsTo, assertPlanBelongsTo, handleOwnershipError } from "./auth-helpers";
+import { validateBundleLineageCompatibility } from "./shared/dependency-contract";
 
 const safeJson = (v: any) => {
   try { return typeof v === "string" ? JSON.parse(v) : v; } catch { return null; }
@@ -109,8 +111,18 @@ export function computeStrategyHash(bundle: {
   return crypto.createHash("sha256").update(data).digest("hex").substring(0, 16);
 }
 
-export async function buildRootBundle(campaignId: string, accountId: string) {
-  const [bizData, campaign, campSel] = await Promise.all([
+export interface RootBundleLineageOptions {
+  jobId?: string | null;
+  strategyRoot?: any | null;
+  selectedSnapshotIds?: Record<string, string | null | undefined>;
+}
+
+export async function buildRootBundle(
+  campaignId: string,
+  accountId: string,
+  options?: RootBundleLineageOptions,
+) {
+  const [bizData, campaign, campSel, activeRootRow] = await Promise.all([
     db.select().from(businessDataLayer)
       .where(and(eq(businessDataLayer.campaignId, campaignId), eq(businessDataLayer.accountId, accountId)))
       .orderBy(desc(businessDataLayer.createdAt)).limit(1).then(r => r[0]),
@@ -119,51 +131,131 @@ export async function buildRootBundle(campaignId: string, accountId: string) {
     db.select().from(campaignSelections)
       .where(and(eq(campaignSelections.selectedCampaignId, campaignId), eq(campaignSelections.accountId, accountId)))
       .orderBy(desc(campaignSelections.selectedAt)).limit(1).then(r => r[0]),
+    options?.strategyRoot
+      ? Promise.resolve(options.strategyRoot)
+      : db.select().from(strategyRoots)
+          .where(and(
+            eq(strategyRoots.campaignId, campaignId),
+            eq(strategyRoots.accountId, accountId),
+            eq(strategyRoots.status, "ACTIVE"),
+          ))
+          .orderBy(desc(strategyRoots.createdAt))
+          .limit(1)
+          .then(r => r[0] || null),
   ]);
+
+  const pin = options?.selectedSnapshotIds || {};
+  const rootId = activeRootRow?.id || null;
+  const pinnedMiId = pin.market_intelligence || activeRootRow?.miSnapshotId || null;
+  const pinnedAudId = pin.audience || activeRootRow?.audienceSnapshotId || null;
+  const pinnedPosId = pin.positioning || activeRootRow?.positioningSnapshotId || null;
+  const pinnedDiffId = pin.differentiation || activeRootRow?.differentiationSnapshotId || null;
+  const pinnedMechId = pin.mechanism || activeRootRow?.mechanismSnapshotId || null;
+  const pinnedOfferId = pin.offer || null;
+  const pinnedFunnelId = pin.funnel || null;
+  const pinnedAwareId = pin.awareness || null;
+  const pinnedPersId = pin.persuasion || null;
+  const pinnedChannelId = pin.channel_selection || null;
+  const pinnedIterId = pin.iteration || null;
+  const pinnedRetId = pin.retention || null;
+  const pinnedBudgetId = pin.budget_governor || null;
+  const pinnedStatValId = pin.statistical_validation || null;
 
   const [
     miData, audData, posData, diffData, offerData,
     funnelData, awarenessData, persuasionData, channelData,
     iterData, retentionData, budgetData, statValData,
   ] = await Promise.all([
-    db.select({ marketDiagnosis: miSnapshots.marketDiagnosis }).from(miSnapshots)
-      .where(and(eq(miSnapshots.accountId, accountId), eq(miSnapshots.campaignId, campaignId)))
+    db.select({ id: miSnapshots.id, marketDiagnosis: miSnapshots.marketDiagnosis }).from(miSnapshots)
+      .where(and(
+        eq(miSnapshots.accountId, accountId),
+        eq(miSnapshots.campaignId, campaignId),
+        ...(pinnedMiId ? [eq(miSnapshots.id, pinnedMiId)] : []),
+      ))
       .orderBy(desc(miSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers })
-      .from(audienceSnapshots).where(and(eq(audienceSnapshots.accountId, accountId), eq(audienceSnapshots.campaignId, campaignId)))
+    db.select({ id: audienceSnapshots.id, audiencePains: audienceSnapshots.audiencePains, audienceSegments: audienceSnapshots.audienceSegments, emotionalDrivers: audienceSnapshots.emotionalDrivers })
+      .from(audienceSnapshots).where(and(
+        eq(audienceSnapshots.accountId, accountId),
+        eq(audienceSnapshots.campaignId, campaignId),
+        ...(pinnedAudId ? [eq(audienceSnapshots.id, pinnedAudId)] : []),
+      ))
       .orderBy(desc(audienceSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection })
-      .from(positioningSnapshots).where(and(eq(positioningSnapshots.accountId, accountId), eq(positioningSnapshots.campaignId, campaignId)))
+    db.select({ id: positioningSnapshots.id, territories: positioningSnapshots.territories, narrativeDirection: positioningSnapshots.narrativeDirection })
+      .from(positioningSnapshots).where(and(
+        eq(positioningSnapshots.accountId, accountId),
+        eq(positioningSnapshots.campaignId, campaignId),
+        ...(pinnedPosId ? [eq(positioningSnapshots.id, pinnedPosId)] : []),
+      ))
       .orderBy(desc(positioningSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode })
-      .from(differentiationSnapshots).where(and(eq(differentiationSnapshots.accountId, accountId), eq(differentiationSnapshots.campaignId, campaignId)))
+    db.select({ id: differentiationSnapshots.id, differentiationPillars: differentiationSnapshots.differentiationPillars, authorityMode: differentiationSnapshots.authorityMode })
+      .from(differentiationSnapshots).where(and(
+        eq(differentiationSnapshots.accountId, accountId),
+        eq(differentiationSnapshots.campaignId, campaignId),
+        ...(pinnedDiffId ? [eq(differentiationSnapshots.id, pinnedDiffId)] : []),
+      ))
       .orderBy(desc(differentiationSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ primaryOffer: offerSnapshots.primaryOffer })
-      .from(offerSnapshots).where(and(eq(offerSnapshots.accountId, accountId), eq(offerSnapshots.campaignId, campaignId)))
+    db.select({ id: offerSnapshots.id, primaryOffer: offerSnapshots.primaryOffer })
+      .from(offerSnapshots).where(and(
+        eq(offerSnapshots.accountId, accountId),
+        eq(offerSnapshots.campaignId, campaignId),
+        ...(pinnedOfferId ? [eq(offerSnapshots.id, pinnedOfferId)] : rootId && offerSnapshots.strategyRootId ? [eq(offerSnapshots.strategyRootId, rootId)] : []),
+      ))
       .orderBy(desc(offerSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ primaryFunnel: funnelSnapshots.primaryFunnel })
-      .from(funnelSnapshots).where(and(eq(funnelSnapshots.accountId, accountId), eq(funnelSnapshots.campaignId, campaignId)))
+    db.select({ id: funnelSnapshots.id, primaryFunnel: funnelSnapshots.primaryFunnel })
+      .from(funnelSnapshots).where(and(
+        eq(funnelSnapshots.accountId, accountId),
+        eq(funnelSnapshots.campaignId, campaignId),
+        ...(pinnedFunnelId ? [eq(funnelSnapshots.id, pinnedFunnelId)] : rootId && funnelSnapshots.strategyRootId ? [eq(funnelSnapshots.strategyRootId, rootId)] : []),
+      ))
       .orderBy(desc(funnelSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore })
-      .from(awarenessSnapshots).where(and(eq(awarenessSnapshots.accountId, accountId), eq(awarenessSnapshots.campaignId, campaignId)))
+    db.select({ id: awarenessSnapshots.id, primaryRoute: awarenessSnapshots.primaryRoute, awarenessStrengthScore: awarenessSnapshots.awarenessStrengthScore })
+      .from(awarenessSnapshots).where(and(
+        eq(awarenessSnapshots.accountId, accountId),
+        eq(awarenessSnapshots.campaignId, campaignId),
+        ...(pinnedAwareId ? [eq(awarenessSnapshots.id, pinnedAwareId)] : pinnedPosId ? [eq(awarenessSnapshots.positioningSnapshotId, pinnedPosId)] : []),
+      ))
       .orderBy(desc(awarenessSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ primaryRoute: persuasionSnapshots.primaryRoute })
-      .from(persuasionSnapshots).where(and(eq(persuasionSnapshots.accountId, accountId), eq(persuasionSnapshots.campaignId, campaignId)))
+    db.select({ id: persuasionSnapshots.id, primaryRoute: persuasionSnapshots.primaryRoute })
+      .from(persuasionSnapshots).where(and(
+        eq(persuasionSnapshots.accountId, accountId),
+        eq(persuasionSnapshots.campaignId, campaignId),
+        ...(pinnedPersId ? [eq(persuasionSnapshots.id, pinnedPersId)] : []),
+      ))
       .orderBy(desc(persuasionSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ result: channelSelectionSnapshots.result })
-      .from(channelSelectionSnapshots).where(and(eq(channelSelectionSnapshots.accountId, accountId), eq(channelSelectionSnapshots.campaignId, campaignId)))
+    db.select({ id: channelSelectionSnapshots.id, result: channelSelectionSnapshots.result })
+      .from(channelSelectionSnapshots).where(and(
+        eq(channelSelectionSnapshots.accountId, accountId),
+        eq(channelSelectionSnapshots.campaignId, campaignId),
+        ...(pinnedChannelId ? [eq(channelSelectionSnapshots.id, pinnedChannelId)] : []),
+      ))
       .orderBy(desc(channelSelectionSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ result: iterationSnapshots.result })
-      .from(iterationSnapshots).where(and(eq(iterationSnapshots.accountId, accountId), eq(iterationSnapshots.campaignId, campaignId)))
+    db.select({ id: iterationSnapshots.id, result: iterationSnapshots.result })
+      .from(iterationSnapshots).where(and(
+        eq(iterationSnapshots.accountId, accountId),
+        eq(iterationSnapshots.campaignId, campaignId),
+        ...(pinnedIterId && !String(pinnedIterId).startsWith("iter_skipped_") ? [eq(iterationSnapshots.id, pinnedIterId)] : []),
+      ))
       .orderBy(desc(iterationSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ result: retentionSnapshots.result })
-      .from(retentionSnapshots).where(and(eq(retentionSnapshots.accountId, accountId), eq(retentionSnapshots.campaignId, campaignId)))
+    db.select({ id: retentionSnapshots.id, result: retentionSnapshots.result })
+      .from(retentionSnapshots).where(and(
+        eq(retentionSnapshots.accountId, accountId),
+        eq(retentionSnapshots.campaignId, campaignId),
+        ...(pinnedRetId && !String(pinnedRetId).startsWith("ret_skipped_") ? [eq(retentionSnapshots.id, pinnedRetId)] : []),
+      ))
       .orderBy(desc(retentionSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ result: budgetGovernorSnapshots.result })
-      .from(budgetGovernorSnapshots).where(and(eq(budgetGovernorSnapshots.accountId, accountId), eq(budgetGovernorSnapshots.campaignId, campaignId)))
+    db.select({ id: budgetGovernorSnapshots.id, result: budgetGovernorSnapshots.result })
+      .from(budgetGovernorSnapshots).where(and(
+        eq(budgetGovernorSnapshots.accountId, accountId),
+        eq(budgetGovernorSnapshots.campaignId, campaignId),
+        ...(pinnedBudgetId ? [eq(budgetGovernorSnapshots.id, pinnedBudgetId)] : []),
+      ))
       .orderBy(desc(budgetGovernorSnapshots.createdAt)).limit(1).then(r => r[0]),
-    db.select({ result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore })
-      .from(strategyValidationSnapshots).where(and(eq(strategyValidationSnapshots.accountId, accountId), eq(strategyValidationSnapshots.campaignId, campaignId)))
+    db.select({ id: strategyValidationSnapshots.id, result: strategyValidationSnapshots.result, confidenceScore: strategyValidationSnapshots.confidenceScore })
+      .from(strategyValidationSnapshots).where(and(
+        eq(strategyValidationSnapshots.accountId, accountId),
+        eq(strategyValidationSnapshots.campaignId, campaignId),
+        ...(pinnedStatValId ? [eq(strategyValidationSnapshots.id, pinnedStatValId)] : []),
+      ))
       .orderBy(desc(strategyValidationSnapshots.createdAt)).limit(1).then(r => r[0]),
   ]);
 
@@ -185,7 +277,7 @@ export async function buildRootBundle(campaignId: string, accountId: string) {
     businessModel: bizData?.businessType || undefined,
     offerType: offer?.offerName || bizData?.coreOffer || undefined,
     pricePoint: bizData?.priceRange || undefined,
-    marketLocation: bizData?.businessLocation || undefined,
+    marketLocation: campSel?.campaignLocation?.trim() || bizData?.businessLocation || undefined,
     targetSegment: `${bizData?.targetAudienceAge || ""} ${bizData?.targetAudienceSegment || ""}`.trim() || undefined,
     availableBudget: bizData?.monthlyBudget || undefined,
     timeHorizon: campaign?.totalDays ? `${campaign.totalDays} days` : undefined,
@@ -203,8 +295,8 @@ export async function buildRootBundle(campaignId: string, accountId: string) {
 
   const contentRoots: ContentRoots = {
     messagingAngles: territories.length > 0 ? territories.map((t: any) => t.name || t) : undefined,
-    objections: pains.length > 0 ? pains.map((p: any) => p.pain || p.name || p).slice(0, 5) : undefined,
-    contentPillars: pillars.length > 0 ? pillars.map((p: any) => p.name || p).slice(0, 5) : undefined,
+    objections: pains.length > 0 ? pains.map((p: any) => p.canonical || p.originalStatement || p.pain || p.name || p).slice(0, 5) : undefined,
+    contentPillars: pillars.length > 0 ? pillars.map((p: any) => p.name || p.pillarName || p.claim || p).slice(0, 5) : undefined,
     contentCadence: undefined,
     creativeTestingPriorities: undefined,
   };
@@ -227,9 +319,29 @@ export async function buildRootBundle(campaignId: string, accountId: string) {
     businessRoots, funnelRoots, contentRoots, executionRoots, mathRoots,
   });
 
+  const selectedSnapshotIdsRecord = {
+    market_intelligence: miData?.id || pinnedMiId || null,
+    audience: audData?.id || pinnedAudId || null,
+    positioning: posData?.id || pinnedPosId || null,
+    differentiation: diffData?.id || pinnedDiffId || null,
+    mechanism: pinnedMechId || null,
+    offer: offerData?.id || pinnedOfferId || null,
+    awareness: awarenessData?.id || pinnedAwareId || null,
+    funnel: funnelData?.id || pinnedFunnelId || null,
+    persuasion: persuasionData?.id || pinnedPersId || null,
+    channel_selection: channelData?.id || pinnedChannelId || null,
+    budget_governor: budgetData?.id || pinnedBudgetId || null,
+    statistical_validation: statValData?.id || pinnedStatValId || null,
+    iteration: iterData?.id || pinnedIterId || null,
+    retention: retentionData?.id || pinnedRetId || null,
+  };
+
   const sourceSnapshot = JSON.stringify({
     hasBizData: !!bizData,
     hasCampaign: !!campaign,
+    jobId: options?.jobId || activeRootRow?.runId || null,
+    strategyRootId: rootId,
+    selectedSnapshotIds: selectedSnapshotIdsRecord,
     engineCount: [miData, audData, posData, diffData, offerData, funnelData, awarenessData, persuasionData, channelData, iterData, retentionData, budgetData, statValData].filter(Boolean).length,
   });
 
@@ -241,6 +353,7 @@ export async function buildRootBundle(campaignId: string, accountId: string) {
     mathRoots,
     strategyHash,
     sourceSnapshot,
+    selectedSnapshotIds: selectedSnapshotIdsRecord,
   };
 }
 
@@ -265,11 +378,32 @@ export async function getNextVersion(campaignId: string, accountId: string): Pro
   return (latest?.version || 0) + 1;
 }
 
-export async function lockRootBundle(campaignId: string, accountId: string): Promise<{
+export async function lockRootBundle(
+  campaignId: string,
+  accountId: string,
+  options?: RootBundleLineageOptions,
+): Promise<{
   id: string;
   version: number;
   strategyHash: string;
 }> {
+  const built = await buildRootBundle(campaignId, accountId, options);
+  const lineageValidation = await validateBundleLineageCompatibility({
+    miSnapshotId: built.selectedSnapshotIds?.market_intelligence,
+    audienceSnapshotId: built.selectedSnapshotIds?.audience,
+    differentiationSnapshotId: built.selectedSnapshotIds?.differentiation,
+    positioningSnapshotId: built.selectedSnapshotIds?.positioning,
+    mechanismSnapshotId: built.selectedSnapshotIds?.mechanism,
+    offerSnapshotId: built.selectedSnapshotIds?.offer,
+    awarenessSnapshotId: built.selectedSnapshotIds?.awareness,
+  });
+  if (!lineageValidation.compatible) {
+    const mismatchSummary = lineageValidation.mismatches
+      .map(m => `${m.engine}(${m.snapshotId || "none"}): ${m.reason}`)
+      .join("; ");
+    throw new Error(`[RootBundle] LINEAGE_MISMATCH_REJECTED: Cannot lock root bundle with incompatible dependencies: ${mismatchSummary}`);
+  }
+
   await db.update(rootBundles)
     .set({ status: "stale", staleAt: new Date(), staleReason: "new_version_created" })
     .where(and(
@@ -278,7 +412,6 @@ export async function lockRootBundle(campaignId: string, accountId: string): Pro
       eq(rootBundles.status, "active"),
     ));
 
-  const built = await buildRootBundle(campaignId, accountId);
   const version = await getNextVersion(campaignId, accountId);
 
   const [inserted] = await db.insert(rootBundles).values({
@@ -314,7 +447,29 @@ export async function detectStaleness(campaignId: string, accountId: string): Pr
   const active = await getActiveRootBundle(campaignId, accountId);
   if (!active) return { isStale: false, reason: null, currentHash: null, activeHash: null };
 
-  const currentData = await buildRootBundle(campaignId, accountId);
+  const activeSrc = safeJson(active.sourceSnapshot) || {};
+  const [latestActiveRoot] = await db
+    .select({ id: strategyRoots.id })
+    .from(strategyRoots)
+    .where(and(
+      eq(strategyRoots.campaignId, campaignId),
+      eq(strategyRoots.accountId, accountId),
+      eq(strategyRoots.status, "ACTIVE"),
+    ))
+    .orderBy(desc(strategyRoots.createdAt))
+    .limit(1);
+  const rootUnchanged =
+    !activeSrc.strategyRootId ||
+    !latestActiveRoot ||
+    String(latestActiveRoot.id) === String(activeSrc.strategyRootId);
+
+  const currentData = await buildRootBundle(
+    campaignId,
+    accountId,
+    rootUnchanged && activeSrc.selectedSnapshotIds
+      ? { jobId: activeSrc.jobId, selectedSnapshotIds: activeSrc.selectedSnapshotIds }
+      : undefined,
+  );
   const currentHash = currentData.strategyHash;
   const activeHash = active.strategyHash;
 
@@ -361,8 +516,28 @@ export async function validateRootIntegrity(planId: string): Promise<{
 
   if (!bundle) {
     issues.push("Root bundle referenced by plan no longer exists");
-  } else if (bundle.status === "stale") {
-    issues.push(`Root bundle v${bundle.version} is stale: ${bundle.staleReason || "newer version available"}`);
+  } else {
+    if (bundle.status === "stale") {
+      issues.push(`Root bundle v${bundle.version} is stale: ${bundle.staleReason || "newer version available"}`);
+    }
+    const bundleSource = safeJson(bundle.sourceSnapshot) || {};
+    const selSnaps = bundleSource.selectedSnapshotIds || {};
+    if (selSnaps && (selSnaps.market_intelligence || selSnaps.differentiation || selSnaps.positioning)) {
+      const lineageCheck = await validateBundleLineageCompatibility({
+        miSnapshotId: selSnaps.market_intelligence,
+        audienceSnapshotId: selSnaps.audience,
+        differentiationSnapshotId: selSnaps.differentiation,
+        positioningSnapshotId: selSnaps.positioning,
+        mechanismSnapshotId: selSnaps.mechanism,
+        offerSnapshotId: selSnaps.offer,
+        awarenessSnapshotId: selSnaps.awareness,
+      });
+      if (!lineageCheck.compatible) {
+        for (const m of lineageCheck.mismatches) {
+          issues.push(`Lineage mismatch in ${m.engine} (${m.snapshotId}): ${m.reason}`);
+        }
+      }
+    }
   }
 
   const calMismatchCount = await db.select({

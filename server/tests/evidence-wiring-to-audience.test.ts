@@ -55,11 +55,10 @@ describe("Audience Engine Evidence Wiring & Boundary Gates", () => {
       accountId: testAcc,
       campaignId: testCamp,
       name: "Test Modest Apparel",
-      platform: "instagram",
-      profileLink: "https://instagram.com/testmodestapparel",
       businessType: "Competitor",
       primaryObjective: "Engagement",
       isActive: true,
+      strategicRole: "DIRECT",
       tier: "A",
     });
 

@@ -187,14 +187,6 @@ export default function IntroScreen() {
                 <Text style={styles.secondaryTimeNote}>Takes only a few minutes.</Text>
               </View>
 
-              {/* Trust Footer */}
-              <View style={styles.trustFooter}>
-                <Ionicons name="shield-checkmark-outline" size={13} color="#475569" style={{ marginRight: 6 }} />
-                <Text style={styles.trustFooterText}>
-                  Enterprise-grade encryption · SOC 2 & GDPR compliant architecture
-                </Text>
-              </View>
-
             </Animated.View>
           </ScrollView>
         </View>
@@ -228,11 +220,11 @@ export default function IntroScreen() {
                 <View style={styles.pillarsGrid}>
                   <View style={styles.pillarItem}>
                     <View style={styles.pillarIconBox}>
-                      <Ionicons name="shield-checkmark" size={16} color="#A78BFA" />
+                      <Ionicons name="git-merge-outline" size={16} color="#A78BFA" />
                     </View>
                     <View style={styles.pillarTextBox}>
-                      <Text style={styles.pillarTitle}>Enterprise Security</Text>
-                      <Text style={styles.pillarDetail}>SOC 2 Type II compliant & GDPR ready</Text>
+                      <Text style={styles.pillarTitle}>Unified Architecture</Text>
+                      <Text style={styles.pillarDetail}>Continuous alignment from signals to execution</Text>
                     </View>
                   </View>
 

@@ -31,6 +31,12 @@ import { db } from "../db";
 import {
   evidenceRegistry,
   reasoningRuns,
+  ciCompetitorPosts,
+  ciCompetitorComments,
+  ciCompetitorReviews,
+  marketVoiceEvidence,
+  competitorWebsiteSnapshots,
+  businessUnderstandingSnapshots,
   type EvidenceRegistryRow,
 } from "../../shared/schema";
 
@@ -45,7 +51,14 @@ export type EvidenceKind =
   | "objective"
   | "competitor"
   | "historical_finding"
-  | "causal_claim";
+  | "causal_claim"
+  | "social_post"
+  | "social_comment"
+  | "customer_review"
+  | "market_voice_quote"
+  | "website_snapshot"
+  | "competitor_understanding"
+  | "product_truth";
 
 export interface RegistryEntry {
   kind: EvidenceKind;
@@ -84,6 +97,110 @@ export function versionedSourceId(rowId: string, content: string): string {
  */
 export function aelEvidenceUid(aelSnapshotId: string, alias: string, detail: string): string {
   return evidenceUidFor("causal_claim", "ael_snapshots", versionedSourceId(`${aelSnapshotId}:${alias}`, detail));
+}
+
+/**
+ * Recursively stringifies an object with sorted keys for deterministic hashing.
+ */
+export function canonicalJsonStringify(obj: unknown): string {
+  if (obj === null || typeof obj !== "object") {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    return `[${obj.map((item) => canonicalJsonStringify(item)).join(",")}]`;
+  }
+  const record = obj as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJsonStringify(record[k])}`).join(",")}}`;
+}
+
+/**
+ * Computes a stable SHA-256 hash for any content payload (string or object).
+ */
+export function computeStableContentHash(content: unknown): string {
+  if (content === null || content === undefined) {
+    return createHash("sha256").update("").digest("hex");
+  }
+  if (typeof content === "string") {
+    return createHash("sha256").update(content.trim()).digest("hex");
+  }
+  return createHash("sha256").update(canonicalJsonStringify(content)).digest("hex");
+}
+
+/**
+ * Builds a deterministic canonical UID: EV:<kind>:<sourceTable>:<rawId>@<hash12>
+ */
+export function canonicalEvidenceUid(
+  kind: EvidenceKind,
+  sourceTable: string,
+  rawId: string,
+  contentOrHash: unknown
+): string {
+  let hash12: string;
+  if (typeof contentOrHash === "string" && /^[a-f0-9]{12}$/i.test(contentOrHash)) {
+    hash12 = contentOrHash.toLowerCase();
+  } else {
+    hash12 = computeStableContentHash(contentOrHash).slice(0, 12);
+  }
+  return `EV:${kind}:${sourceTable}:${rawId}@${hash12}`;
+}
+
+export interface ParsedEvidenceUid {
+  kind: string;
+  sourceTable: string;
+  sourceId: string;
+  rawSourceId: string;
+  contentHash12: string | null;
+}
+
+/**
+ * Decomposes an evidence UID into its constituent parts.
+ */
+export function parseEvidenceUid(uid: string): ParsedEvidenceUid | null {
+  if (!uid || typeof uid !== "string" || !uid.startsWith("EV:")) {
+    return null;
+  }
+  const parts = uid.split(":");
+  if (parts.length < 4) {
+    return null;
+  }
+  const kind = parts[1];
+  const sourceTable = parts[2];
+  const sourceId = parts.slice(3).join(":");
+  const [rawSourceId, contentHash12] = sourceId.split("@");
+
+  return {
+    kind,
+    sourceTable,
+    sourceId,
+    rawSourceId,
+    contentHash12: contentHash12 || null,
+  };
+}
+
+export interface UnifiedEvidenceItem {
+  id: string; // canonical UID (e.g. EV:<kind>:<source_table>:<versionedSourceId>)
+  kind: EvidenceKind;
+  sourceTable: string;
+  sourceId: string; // raw DB row id or external item id
+  versionedSourceId: string; // <rowId>@<hash12>
+  contentHash: string; // sha256 or hash12
+  title?: string | null;
+  textSnippet: string; // normalized readable snippet or content preview
+  authorIdentifier?: string | null; // hashed/anonymized author where privacy applies (reviews/comments)
+  platform?: string | null; // GOOGLE_REVIEWS, TIKTOK, INSTAGRAM, YOUTUBE, REDDIT, etc.
+  observedAt: Date;
+  publishedAt?: Date | null;
+  verificationStatus?: string | null; // e.g. "VERIFIED", "DISCOVERED", "COMPLETE"
+  provenance?: {
+    platform?: string;
+    actorId?: string | null;
+    url?: string | null;
+    rating?: number | null;
+    sentiment?: string | null;
+    extra?: Record<string, unknown>;
+  };
+  supersedesUid?: string | null;
 }
 
 /**
@@ -188,3 +305,263 @@ export async function recordReasoningRun(args: {
     return null;
   }
 }
+
+/**
+ * Resolves a single evidence reference into a unified evidence item.
+ */
+export async function resolveEvidenceItem(params: {
+  accountId: string;
+  campaignId: string;
+  uid: string;
+}): Promise<UnifiedEvidenceItem | null> {
+  const batch = await resolveEvidenceItemsBatch({
+    accountId: params.accountId,
+    campaignId: params.campaignId,
+    uids: [params.uid],
+  });
+  return batch[params.uid] || null;
+}
+
+/**
+ * Efficiently batch-resolves multiple evidence UIDs across heterogeneous source tables.
+ * Employs grouped inArray queries to ensure O(tables) database round-trips.
+ */
+export async function resolveEvidenceItemsBatch(params: {
+  accountId: string;
+  campaignId: string;
+  uids: string[];
+}): Promise<Record<string, UnifiedEvidenceItem>> {
+  const { accountId, campaignId, uids } = params;
+  const results: Record<string, UnifiedEvidenceItem> = {};
+  if (!uids || uids.length === 0) return results;
+
+  const uniqueUids = Array.from(new Set(uids.filter(Boolean)));
+
+  // 1. Check existing rows in evidence_registry first
+  try {
+    const registryRows = await getEvidenceByUids(accountId, campaignId, uniqueUids);
+    for (const row of registryRows) {
+      const [rawId, hashPart] = row.sourceId.split("@");
+      results[row.evidenceUid] = {
+        id: row.evidenceUid,
+        kind: row.kind as EvidenceKind,
+        sourceTable: row.sourceTable,
+        sourceId: rawId,
+        versionedSourceId: row.sourceId,
+        contentHash: hashPart || computeStableContentHash(row.detail).slice(0, 12),
+        title: row.label,
+        textSnippet: row.detail,
+        observedAt: row.observedAt,
+        supersedesUid: row.supersedesUid,
+      };
+    }
+  } catch (err) {
+    console.warn(`${LOG} Registry lookup error (continuing with source resolution):`, err);
+  }
+
+  // 2. Identify missing UIDs that require source table resolution
+  const missingUids = uniqueUids.filter((uid) => !results[uid]);
+  if (missingUids.length === 0) return results;
+
+  // Group missing UIDs by sourceTable
+  const byTable: Record<string, Array<{ uid: string; parsed: ParsedEvidenceUid }>> = {};
+  for (const uid of missingUids) {
+    const parsed = parseEvidenceUid(uid);
+    if (!parsed) continue;
+    if (!byTable[parsed.sourceTable]) byTable[parsed.sourceTable] = [];
+    byTable[parsed.sourceTable].push({ uid, parsed });
+  }
+
+  // Execute grouped fetches by table
+  for (const [table, items] of Object.entries(byTable)) {
+    try {
+      const rawIds = Array.from(new Set(items.map((it) => it.parsed.rawSourceId)));
+
+      if (table === "ci_competitor_posts") {
+        const rows = await db
+          .select()
+          .from(ciCompetitorPosts)
+          .where(and(eq(ciCompetitorPosts.accountId, accountId), inArray(ciCompetitorPosts.id, rawIds)));
+
+        const rowMap = new Map(rows.map((r) => [r.id, r]));
+        for (const item of items) {
+          const row = rowMap.get(item.parsed.rawSourceId);
+          if (row) {
+            const snippet = row.caption || row.hookText || row.transcript || "";
+            const contentHash = computeStableContentHash(snippet);
+            results[item.uid] = {
+              id: item.uid,
+              kind: (item.parsed.kind as EvidenceKind) || "social_post",
+              sourceTable: table,
+              sourceId: row.id,
+              versionedSourceId: `${row.id}@${contentHash.slice(0, 12)}`,
+              contentHash,
+              title: row.hookText || null,
+              textSnippet: snippet,
+              authorIdentifier: row.sourceId || null,
+              platform: row.platform,
+              observedAt: row.createdAt || new Date(),
+              publishedAt: row.timestamp,
+              verificationStatus: "VERIFIED",
+              provenance: {
+                platform: row.platform,
+                url: row.permalink,
+              },
+            };
+          }
+        }
+      } else if (table === "ci_competitor_comments") {
+        const rows = await db
+          .select()
+          .from(ciCompetitorComments)
+          .where(and(eq(ciCompetitorComments.accountId, accountId), inArray(ciCompetitorComments.id, rawIds)));
+
+        const rowMap = new Map(rows.map((r) => [r.id, r]));
+        for (const item of items) {
+          const row = rowMap.get(item.parsed.rawSourceId);
+          if (row) {
+            const snippet = row.commentText || "";
+            const contentHash = computeStableContentHash(snippet);
+            results[item.uid] = {
+              id: item.uid,
+              kind: (item.parsed.kind as EvidenceKind) || "social_comment",
+              sourceTable: table,
+              sourceId: row.id,
+              versionedSourceId: `${row.id}@${contentHash.slice(0, 12)}`,
+              contentHash,
+              textSnippet: snippet,
+              authorIdentifier: row.authorHash || null,
+              observedAt: row.createdAt || new Date(),
+              publishedAt: row.timestamp,
+              verificationStatus: row.filterStatus || "VERIFIED",
+            };
+          }
+        }
+      } else if (table === "ci_competitor_reviews") {
+        const rows = await db
+          .select()
+          .from(ciCompetitorReviews)
+          .where(and(eq(ciCompetitorReviews.accountId, accountId), inArray(ciCompetitorReviews.id, rawIds)));
+
+        const rowMap = new Map(rows.map((r) => [r.id, r]));
+        for (const item of items) {
+          const row = rowMap.get(item.parsed.rawSourceId);
+          if (row) {
+            const snippet = row.reviewText || "";
+            const contentHash = computeStableContentHash(snippet);
+            results[item.uid] = {
+              id: item.uid,
+              kind: (item.parsed.kind as EvidenceKind) || "customer_review",
+              sourceTable: table,
+              sourceId: row.id,
+              versionedSourceId: `${row.id}@${contentHash.slice(0, 12)}`,
+              contentHash,
+              title: row.reviewId || null,
+              textSnippet: snippet,
+              authorIdentifier: row.authorHash || null,
+              platform: row.platform,
+              observedAt: row.scrapedAt || row.createdAt || new Date(),
+              publishedAt: row.reviewDate,
+              verificationStatus: "VERIFIED",
+              provenance: {
+                platform: row.platform,
+                rating: row.rating,
+              },
+            };
+          }
+        }
+      } else if (table === "market_voice_evidence") {
+        const rows = await db
+          .select()
+          .from(marketVoiceEvidence)
+          .where(and(eq(marketVoiceEvidence.accountId, accountId), inArray(marketVoiceEvidence.id, rawIds)));
+
+        const rowMap = new Map(rows.map((r) => [r.id, r]));
+        for (const item of items) {
+          const row = rowMap.get(item.parsed.rawSourceId);
+          if (row) {
+            const snippet = row.verbatimText || "";
+            const contentHash = computeStableContentHash(snippet);
+            results[item.uid] = {
+              id: item.uid,
+              kind: (item.parsed.kind as EvidenceKind) || "market_voice_quote",
+              sourceTable: table,
+              sourceId: row.id,
+              versionedSourceId: `${row.id}@${contentHash.slice(0, 12)}`,
+              contentHash,
+              textSnippet: snippet,
+              authorIdentifier: row.authorHash || null,
+              platform: row.platform,
+              observedAt: row.createdAt || new Date(),
+              publishedAt: row.publishedAt,
+              verificationStatus: row.eligibilityVerdict || "VERIFIED",
+              provenance: {
+                platform: row.platform,
+                url: row.externalUrl,
+              },
+            };
+          }
+        }
+      } else if (table === "competitor_website_snapshots") {
+        const rows = await db
+          .select()
+          .from(competitorWebsiteSnapshots)
+          .where(and(eq(competitorWebsiteSnapshots.accountId, accountId), inArray(competitorWebsiteSnapshots.id, rawIds)));
+
+        const rowMap = new Map(rows.map((r) => [r.id, r]));
+        for (const item of items) {
+          const row = rowMap.get(item.parsed.rawSourceId);
+          if (row) {
+            results[item.uid] = {
+              id: item.uid,
+              kind: (item.parsed.kind as EvidenceKind) || "website_snapshot",
+              sourceTable: table,
+              sourceId: row.id,
+              versionedSourceId: `${row.id}@${(row.contentHash || "").slice(0, 12)}`,
+              contentHash: row.contentHash || "",
+              title: row.websiteUrl,
+              textSnippet: `Competitor website snapshot for ${row.websiteUrl}`,
+              observedAt: row.createdAt || new Date(),
+              verificationStatus: row.status,
+              provenance: {
+                url: row.websiteUrl,
+              },
+            };
+          }
+        }
+      } else if (table === "business_understanding_snapshots") {
+        const rows = await db
+          .select()
+          .from(businessUnderstandingSnapshots)
+          .where(and(eq(businessUnderstandingSnapshots.accountId, accountId), inArray(businessUnderstandingSnapshots.id, rawIds)));
+
+        const rowMap = new Map(rows.map((r) => [r.id, r]));
+        for (const item of items) {
+          const row = rowMap.get(item.parsed.rawSourceId);
+          if (row) {
+            const bu = (row.businessUnderstanding || {}) as any;
+            const summary = bu.coreOfferingSummary || bu.summary || JSON.stringify(bu).slice(0, 200);
+            const contentHash = computeStableContentHash(summary);
+            results[item.uid] = {
+              id: item.uid,
+              kind: (item.parsed.kind as EvidenceKind) || "product_truth",
+              sourceTable: table,
+              sourceId: row.id,
+              versionedSourceId: `${row.id}@${contentHash.slice(0, 12)}`,
+              contentHash,
+              title: bu.businessName || "Business Understanding",
+              textSnippet: summary,
+              observedAt: row.createdAt || new Date(),
+              verificationStatus: row.status,
+            };
+          }
+        }
+      }
+    } catch (tblErr) {
+      console.warn(`${LOG} Error resolving items for table ${table}:`, tblErr);
+    }
+  }
+
+  return results;
+}
+

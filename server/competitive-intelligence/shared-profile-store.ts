@@ -353,7 +353,7 @@ export interface StaleSharedProfile {
     competitorId: string;
     accountId: string;
     name: string;
-    profileLink: string;
+    websiteUrl?: string;
   }>;
 }
 
@@ -376,7 +376,7 @@ export async function getStaleSharedProfiles(maxAgeHours: number = 12): Promise<
         id: ciCompetitors.id,
         accountId: ciCompetitors.accountId,
         name: ciCompetitors.name,
-        profileLink: ciCompetitors.profileLink,
+        
       })
       .from(ciCompetitors)
       .where(
@@ -403,7 +403,7 @@ export async function getStaleSharedProfiles(maxAgeHours: number = 12): Promise<
         competitorId: c.id,
         accountId: c.accountId,
         name: c.name,
-        profileLink: c.profileLink,
+        
       })),
     });
   }

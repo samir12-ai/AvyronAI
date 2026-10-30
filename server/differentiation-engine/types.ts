@@ -1,4 +1,51 @@
 
+import { type StrategicLane } from "../shared/lane-grouper";
+
+export type MIInput = any;
+export interface AudienceInput {
+  painRegistry?: any[];
+  audienceSegments?: any[];
+  audiencePains?: any[];
+  productTruthFacts?: any[];
+  strategicLanes?: StrategicLane[];
+  marketPains?: string[];
+  [key: string]: any;
+}
+export type ProfileInput = any;
+
+export type ComparisonBaselineEvidenceBasis =
+  | "COMPETITOR_FACT"
+  | "COMPETITOR_CUSTOMER_VOICE"
+  | "UNATTRIBUTED_MARKET_VOICE"
+  | "STRATEGIC_MARKET_EMPHASIS";
+
+export interface CanonicalCustomerEvidenceItem {
+  customerEvidenceId: string;
+  rawEvidenceUids: string[];
+  painIds: string[];
+  origin: "MARKET_VOICE" | "COMPETITOR_COMMENT" | "COMPETITOR_REVIEW" | "BENCHMARK";
+  actorType: "CUSTOMER" | "MARKET_VOICE";
+  platform: string;
+  author?: string;
+  url?: string;
+  verbatimText: string;
+  competitorId?: string;
+  competitorName?: string;
+  offeringId?: string;
+  productOrVariantScope?: string;
+  semanticScope?: string;
+  transferability?: string;
+  isAllegation: boolean;
+  rawEvidenceReference?: {
+    table: "market_voice_evidence" | "ci_competitor_comments" | "ci_competitor_reviews";
+    id: string;
+  };
+  accountId?: string;
+  campaignId?: string;
+  campaignOfferingId?: string;
+  snapshotId?: string;
+}
+
 export interface CanonicalDifferentiationInput {
   lineage: {
     accountId: string;
@@ -6,6 +53,10 @@ export interface CanonicalDifferentiationInput {
     jobId: string;
     audienceSnapshotId: string;
     miSnapshotId: string;
+    campaignOfferingId?: string;
+    productTruthSnapshotId?: string;
+    productTruthFingerprint?: string;
+    evidenceManifestFingerprint?: string;
   };
   corePains: Array<{
     painId: string;
@@ -18,18 +69,45 @@ export interface CanonicalDifferentiationInput {
     requiredCapability: string;
     matchedProductCapability: string;
     productTruthFactIds: string[];
+    evidenceUids?: string[];
+    customerEvidenceIds?: string[];
+    customerEvidence?: CanonicalCustomerEvidenceItem[];
   }>;
   productTruth: Array<{
-    factId: string;
+    factId?: string;
+    productTruthFactId?: string;
+    factType?: string;
     fact: string;
+    statement?: string;
+    status?: string;
+    rationale?: string;
+    evidenceRefIds?: string[];
+    campaignOfferingId?: string;
+    sourceRef?: string;
+    scope?: string;
+    qualifications?: string[];
   }>;
   competitiveAuthority: Array<{
     miAuthorityId: string;
     competitorId: string;
+    competitorName?: string;
     factType: string;
     fact: string;
+    sourceScope?: "OBSERVED_COMPETITOR" | "CATEGORY_SIGNAL";
     miSnapshotId: string;
   }>;
+  customerEvidence?: CanonicalCustomerEvidenceItem[];
+  ourProductFacts?: any[];
+  miFacts?: any[];
+  strategicLanes?: StrategicLane[];
+  marketContext?: {
+    marketState?: string;
+    marketDiagnosis?: string;
+    opportunitySignals?: string[];
+    threatSignals?: string[];
+    marketPains?: string[];
+    categoryMaturity?: string;
+  };
 }
 
 export type PainDispositionCode =
@@ -55,7 +133,9 @@ export interface DifferentiationCandidate {
   comparisonBaseline: {
     statement: string;
     miAuthorityIds: string[];
+    customerEvidenceIds?: string[];
     competitorIds: string[];
+    evidenceBasisType?: ComparisonBaselineEvidenceBasis;
   };
   distinctiveProperty: string;
   productTruthFactIds: string[];
@@ -63,7 +143,23 @@ export interface DifferentiationCandidate {
   mechanismStatus: MechanismStatus;
   mechanismName: string | null;
   proofBoundary: string;
+  strategicForm?: "DOCUMENTED_COMPARATIVE_CONTRAST" | "STRATEGIC_MARKET_EMPHASIS";
+  ourEstablishedFacts?: string[];
+  competitorContrastingFacts?: string[];
+  customerEvidenceIds?: string[];
   isJudgeApproved?: boolean;
+  approvalFingerprint?: string;
+  evidenceDependencyIds?: string[];
+  targetedBaselineRepairAudit?: {
+    repairedFromDefectCode: string;
+    resolutionMode:
+      | "RESTORED_COMPETITOR_CUSTOMER_VOICE"
+      | "RESTORED_COMPETITOR_FACT"
+      | "NARROWED_UNATTRIBUTED_CONCERN"
+      | "NEUTRALIZED_STRATEGIC_EMPHASIS";
+    verifiedDeterministically: boolean;
+    notes: string;
+  };
 }
 
 export type JudgeRejectionCode =
@@ -73,30 +169,55 @@ export type JudgeRejectionCode =
   | "PRODUCT_TRUTH_UNSUPPORTED"
   | "MI_BASELINE_UNSUPPORTED"
   | "COMPETITIVE_SCOPE_OVERCLAIM"
+  | "UNSUPPORTED_NEGATIVE_CLAIM"
   | "MECHANISM_HALLUCINATED"
   | "PAIN_MEANING_DRIFT"
   | "BUYER_VALUE_NOT_ESTABLISHED"
   | "LINEAGE_REFERENCE_INVALID"
   | "STRUCTURAL_DISPOSITION_MISSING"
-  | "SPECIFICITY_LACKING";
+  | "SPECIFICITY_LACKING"
+  | "COMMERCIAL_MEANINGFULNESS";
 
 export interface JudgeDefect {
   differentiationId?: string;
   painId?: string;
   code: JudgeRejectionCode;
   reason: string;
+  unsupportedStatement?: string;
+  missingOrContradictedAuthority?: string;
+  whatEvidenceEstablishes?: string;
+  usableComponents?: string[];
   rejectedFields: string[];
   fixDirective: string;
 }
 
+export interface DifferentiationJudgeAssessmentDetails {
+  productFactualSupport: boolean;
+  competitiveFactualSupport: boolean;
+  audienceLaneRelevance: boolean;
+  commercialMeaningfulness: boolean;
+  strategicRoleValidity: boolean;
+  evidenceCompleteness: boolean;
+}
+
 export interface DifferentiationJudgeOutput {
   valid: boolean;
+  assessmentsCompleted: boolean;
+  assessmentDetails: DifferentiationJudgeAssessmentDetails;
   defects: JudgeDefect[];
+  overallVerdictRationale: string;
 }
+
+export type DifferentiationFailureCategory =
+  | "SEMANTIC_REJECTION"
+  | "MISSING_EVIDENCE_HANDOFF"
+  | "TECHNICAL_EXECUTION_FAILURE";
 
 export interface DifferentiationResult {
   status: string;
   statusMessage?: string;
+  errorCode?: string;
+  failureCategory?: DifferentiationFailureCategory;
   differentiations: DifferentiationCandidate[];
   pillars?: any[];
   claimStructures?: any[];
@@ -105,6 +226,9 @@ export interface DifferentiationResult {
   confidenceScore: number;
   executionTimeMs: number;
   engineVersion: number;
+  productTruthSnapshotId?: string;
+  productTruthFingerprint?: string;
+  evidenceManifestFingerprint?: string;
   diagnostics?: any;
 }
 

@@ -1,16 +1,19 @@
-import { eq, and, desc, ne, lt } from "drizzle-orm";
+import { eq, and, or, inArray, desc, ne, lt, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   pipelineChangeEvents,
   pipelineSnapshots,
   strategicPlans,
   strategyRoots,
+  strategyRootBundles,
   buildPlanSnapshots,
   miSnapshots,
   audienceSnapshots,
   positioningSnapshots,
   ciCompetitors,
   ciCompetitorPosts,
+  competitorWebsiteSnapshots,
+  competitorUnderstandingSnapshots,
   contentDna,
   competitorPostClassifications,
   performanceCycleReports,
@@ -208,7 +211,7 @@ export async function buildStrategicContext(
     }
   }
 
-  // 3. Strategy Plan
+  // 3. Strategy Plan (resolve designated active plan first, then executionStatus='ACTIVE' or status='ACTIVE')
   const [activePlan] = await db
     .select()
     .from(strategicPlans)
@@ -216,10 +219,14 @@ export async function buildStrategicContext(
       and(
         eq(strategicPlans.accountId, accountId),
         eq(strategicPlans.campaignId, campaignId),
-        eq(strategicPlans.status, "ACTIVE")
+        or(
+          eq(strategicPlans.isDesignatedActive, true),
+          eq(strategicPlans.executionStatus, "ACTIVE"),
+          eq(strategicPlans.status, "ACTIVE")
+        )
       )
     )
-    .orderBy(desc(strategicPlans.createdAt))
+    .orderBy(desc(strategicPlans.isDesignatedActive), desc(strategicPlans.version), desc(strategicPlans.createdAt))
     .limit(1);
 
   if (activePlan) {
@@ -238,23 +245,43 @@ export async function buildStrategicContext(
       confidence: "high",
       relevanceScore: 85,
       inclusionReason: "Active company business strategy rules",
-      detail: `Active Strategic Plan: summary="${activePlan.planSummary || "none"}", approvedRhythm="${activePlan.approvedRhythmJson || "none"}"`,
+      detail: `Active Strategic Plan (v${activePlan.version}): summary="${activePlan.planSummary || "none"}", approvedRhythm="${activePlan.approvedRhythmJson || "none"}"`,
       label: `Active Strategy Plan`
     }, 85, "included");
   }
 
-  // 4. Strategy Roots
-  const [activeRoot] = await db
-    .select()
-    .from(strategyRoots)
-    .where(
-      and(
-        eq(strategyRoots.accountId, accountId),
-        eq(strategyRoots.campaignId, campaignId),
-        eq(strategyRoots.status, "ACTIVE")
+  // 4. Strategy Roots (resolve through activePlan.rootBundleId when available, else ACTIVE/REVIEW_REQUIRED root)
+  let activeRoot: typeof strategyRoots.$inferSelect | undefined;
+  if (activePlan?.rootBundleId) {
+    const [bundle] = await db
+      .select()
+      .from(strategyRootBundles)
+      .where(eq(strategyRootBundles.id, activePlan.rootBundleId))
+      .limit(1);
+    if (bundle?.strategyRootId) {
+      const [rootByBundle] = await db
+        .select()
+        .from(strategyRoots)
+        .where(eq(strategyRoots.id, bundle.strategyRootId))
+        .limit(1);
+      activeRoot = rootByBundle;
+    }
+  }
+  if (!activeRoot) {
+    const [fallbackRoot] = await db
+      .select()
+      .from(strategyRoots)
+      .where(
+        and(
+          eq(strategyRoots.accountId, accountId),
+          eq(strategyRoots.campaignId, campaignId),
+          inArray(strategyRoots.status, ["ACTIVE", "REVIEW_REQUIRED"])
+        )
       )
-    )
-    .limit(1);
+      .orderBy(desc(strategyRoots.createdAt))
+      .limit(1);
+    activeRoot = fallbackRoot;
+  }
 
   if (activeRoot) {
     sourceVersions.strategyRootId = activeRoot.id;
@@ -507,7 +534,13 @@ export async function buildStrategicContext(
         postTimestamp: ciCompetitorPosts.timestamp
       })
       .from(competitorPostClassifications)
-      .innerJoin(ciCompetitorPosts, eq(competitorPostClassifications.postId, ciCompetitorPosts.postId))
+      .innerJoin(
+        ciCompetitorPosts,
+        or(
+          eq(competitorPostClassifications.postId, ciCompetitorPosts.id),
+          eq(competitorPostClassifications.postId, ciCompetitorPosts.postId)
+        )
+      )
       .where(
         and(
           eq(ciCompetitorPosts.accountId, accountId),
@@ -539,6 +572,92 @@ export async function buildStrategicContext(
         label: `Competitor post classification ${c.id}`
       }, 70 - idx * 2, isIncluded ? "included" : "excluded", isIncluded ? null : "Token budget: limited to top 3 recent posts");
     });
+
+    // 11b. Current Stored Posts & Website Snapshot Counterevidence Check
+    const recentStoredPosts = await db
+      .select({
+        id: ciCompetitorPosts.id,
+        caption: ciCompetitorPosts.caption,
+        timestamp: ciCompetitorPosts.timestamp,
+      })
+      .from(ciCompetitorPosts)
+      .where(eq(ciCompetitorPosts.competitorId, competitorId))
+      .orderBy(desc(ciCompetitorPosts.timestamp))
+      .limit(30);
+
+    const [latestWebUnderstanding] = await db
+      .select()
+      .from(competitorUnderstandingSnapshots)
+      .where(eq(competitorUnderstandingSnapshots.competitorId, competitorId))
+      .orderBy(desc(competitorUnderstandingSnapshots.createdAt))
+      .limit(1);
+
+    const [latestWebSnap] = await db
+      .select()
+      .from(competitorWebsiteSnapshots)
+      .where(eq(competitorWebsiteSnapshots.competitorId, competitorId))
+      .orderBy(desc(competitorWebsiteSnapshots.createdAt))
+      .limit(1);
+
+    const currentPostCorpus = recentStoredPosts
+      .map((p) => (p.caption || "").trim())
+      .filter(Boolean)
+      .join(" | ");
+    const currentWebCorpus = [
+      latestWebUnderstanding?.competitorUnderstanding || "",
+      latestWebSnap?.pagesCrawled || "",
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
+    if (recentStoredPosts.length > 0) {
+      const fresh = getFreshnessState(recentStoredPosts[0].timestamp || new Date());
+      logCandidate(
+        {
+          ref: "CURR-POSTS",
+          origin: "Competitor DNA",
+          timestamp: recentStoredPosts[0].timestamp?.toISOString() || new Date().toISOString(),
+          engine: "Competitor DNA",
+          table: "ci_competitor_posts",
+          recordId: competitorId,
+          factType: "observed",
+          age: fresh.age,
+          freshnessStatus: fresh.status,
+          confidence: "high",
+          relevanceScore: 91,
+          inclusionReason: "Current competitor social posts for counterevidence verification against false removal claims",
+          detail: `Current active competitor posts (${recentStoredPosts.length} posts): ${currentPostCorpus.slice(0, 1500)}`,
+          label: `Current Competitor Posts (${recentStoredPosts.length})`,
+        },
+        91,
+        "included"
+      );
+    }
+
+    if (currentWebCorpus.length > 0) {
+      const ts = latestWebUnderstanding?.createdAt || latestWebSnap?.createdAt || new Date();
+      const fresh = getFreshnessState(ts);
+      logCandidate(
+        {
+          ref: "CURR-WEB",
+          origin: "Competitor DNA",
+          timestamp: ts.toISOString(),
+          engine: "Competitor DNA",
+          table: "competitor_understanding_snapshots",
+          recordId: latestWebUnderstanding?.id || latestWebSnap?.id || competitorId,
+          factType: "observed",
+          age: fresh.age,
+          freshnessStatus: fresh.status,
+          confidence: "high",
+          relevanceScore: 91,
+          inclusionReason: "Current competitor website & understanding snapshot for counterevidence verification",
+          detail: `Current competitor website snapshot content: ${currentWebCorpus.slice(0, 1500)}`,
+          label: `Current Competitor Website Snapshot`,
+        },
+        91,
+        "included"
+      );
+    }
   }
 
   // 12 & 13. Historical Confirmed events & Reversion History
@@ -748,6 +867,44 @@ export async function buildStrategicContext(
       detail: `Business type: "${bizProfile.businessType}", ProductCategory: "${bizProfile.productCategory}", Core offer: "${bizProfile.coreOffer || "none"}", target audience: "${bizProfile.targetAudienceSegment || "none"}", unique mechanism: "${bizProfile.uniqueMechanism || "none"}"`,
       label: `Company Business Profile`
     }, 92, "included");
+  }
+
+  // 18b. Canonical Business Understanding & Offering Truth
+  try {
+    const buRes = await db.execute(sql`
+      SELECT id, business_understanding, created_at
+      FROM business_understanding_snapshots
+      WHERE campaign_id = ${campaignId}
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    if (buRes.rows.length > 0) {
+      const buRow = buRes.rows[0] as any;
+      const raw = buRow.business_understanding;
+      const parsedBu = typeof raw === "string" ? JSON.parse(raw) : raw;
+      const offering = parsedBu?.campaignOffering;
+      const facts = offering?.productTruthFacts || [];
+      const factSummary = facts.slice(0, 5).map((f: any) => typeof f === "string" ? f : f.statement || f.fact).filter(Boolean).join("; ");
+      const fresh = getFreshnessState(buRow.created_at || new Date());
+      logCandidate({
+        ref: "BIZ-OFFERING",
+        origin: "Product Truth",
+        timestamp: buRow.created_at ? new Date(buRow.created_at).toISOString() : new Date().toISOString(),
+        engine: "Business Understanding",
+        table: "business_understanding_snapshots",
+        recordId: buRow.id,
+        factType: "observed",
+        age: fresh.age,
+        freshnessStatus: fresh.status,
+        confidence: "high",
+        relevanceScore: 94,
+        inclusionReason: "Canonical product truth facts and verified offering specification",
+        detail: `Offering: "${offering?.name || "none"}", Type: "${offering?.offeringType || offering?.type || "none"}". Product Truth Facts: ${factSummary || "none"}`,
+        label: `Canonical Offering: ${offering?.name || "Product Truth"}`
+      }, 94, "included");
+    }
+  } catch (err: any) {
+    // Non-blocking
   }
 
   // 19. Active Goals/Objectives

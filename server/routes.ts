@@ -83,10 +83,12 @@ import { registerCreativeRoutes } from "./creative-routes";
 import { registerAgentChatRoutes } from "./agent/chat-routes";
 import { registerSetupRoutes } from "./setup/setup-routes";
 import { registerSettingsArchitectureRoutes } from "./setup/settings-routes";
+import { registerDemoRoutes } from "./demo/routes";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
+  registerDemoRoutes(app);
   registerStagingAdminRoutes(app);
   registerStrategyExperienceRoutes(app);
   registerReportsRoutes(app);

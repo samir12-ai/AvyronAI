@@ -138,7 +138,7 @@ export function buildGroundingContract(
   // --- CAPABILITY GROUNDING (CAPABILITY_NAMESPACE) ---
   if (caps.length > 0) {
     lines.push(
-      `RULE 1 — CAPABILITY GROUNDING: Every product-capability claim MUST resolve to one of these VALIDATED PRODUCT CAPABILITIES (cite their IDs in a structured "capabilityRefs": string[] field when your output schema allows it):\n${caps.map((c) => `  [${c.capabilityId}] ${c.statement}`).join("\n")}\nReference the differentiating mechanism concretely by name — do NOT paraphrase it into an abstract category — and do NOT invent, extend, or merge capabilities. The mechanism describes the SOLUTION; it must NEVER be used to define or select the customer's problem.`,
+      `RULE 1 — CAPABILITY GROUNDING: Every product-capability claim MUST resolve to one of these VALIDATED PRODUCT CAPABILITIES (cite their IDs in a structured "capabilityRefs": string[] field when your output schema allows it):\n${caps.map((c) => `  [${c.capabilityId}]${c.factType ? ` [${c.factType}]` : ""}${c.sourceFactId ? ` (factId=${c.sourceFactId})` : ""}${c.scope ? ` [scope=${c.scope}]` : ""}${c.qualifications ? ` [qualifications=${c.qualifications}]` : ""} ${c.statement}`).join("\n")}\nReference the differentiating mechanism concretely by name — do NOT paraphrase it into an abstract category — and do NOT invent, extend, or merge capabilities. The mechanism describes the SOLUTION; it must NEVER be used to define or select the customer's problem.`,
     );
   } else if (hasFeature) {
     lines.push(

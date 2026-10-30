@@ -55,56 +55,28 @@ export function registerDifferentiationRoutes(app: Express) {
       let miSnapshotId = posSnapshot.miSnapshotId;
       const audienceSnapshotId = posSnapshot.audienceSnapshotId;
 
-      let [miSnapshot] = await db.select().from(miSnapshots)
+      const [miSnapshot] = await db.select().from(miSnapshots)
         .where(and(eq(miSnapshots.id, miSnapshotId), eq(miSnapshots.campaignId, campaignId), eq(miSnapshots.accountId, accountId)))
         .limit(1);
 
-      if (miSnapshot) {
-        const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
-        const miReadiness = integrityResult.valid
-          ? getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14)
-          : null;
+      if (!miSnapshot) {
+        return res.status(400).json({
+          error: "MISSING_DEPENDENCY",
+          message: `MI snapshot ${miSnapshotId} not found or campaign mismatch`,
+        });
+      }
 
-        if (!integrityResult.valid || (miReadiness && miReadiness.state !== "READY")) {
-          console.log(`[DifferentiationEngine] MI snapshot ${miSnapshotId} failed integrity/readiness check, searching for latest valid MI snapshot`);
-          const [latestMI] = await db.select().from(miSnapshots)
-            .where(and(
-              eq(miSnapshots.campaignId, campaignId),
-              eq(miSnapshots.accountId, accountId),
-              inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-              eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
-            ))
-            .orderBy(desc(miSnapshots.createdAt))
-            .limit(1);
-          if (latestMI) {
-            console.log(`[DifferentiationEngine] Using latest valid MI snapshot ${latestMI.id} (v${latestMI.analysisVersion})`);
-            miSnapshot = latestMI;
-            miSnapshotId = latestMI.id;
-          } else {
-            return res.status(400).json({
-              error: "MI_INTEGRITY_FAILED",
-              message: `MI snapshot integrity/readiness check failed and no valid MI snapshot found — please re-run Market Intelligence first`,
-              failures: integrityResult.failures,
-            });
-          }
-        }
-      } else {
-        const [latestMI] = await db.select().from(miSnapshots)
-          .where(and(
-            eq(miSnapshots.campaignId, campaignId),
-            eq(miSnapshots.accountId, accountId),
-            inArray(miSnapshots.status, ["COMPLETE", "PARTIAL"]),
-            eq(miSnapshots.analysisVersion, MI_ENGINE_VERSION),
-          ))
-          .orderBy(desc(miSnapshots.createdAt))
-          .limit(1);
-        if (latestMI) {
-          console.log(`[DifferentiationEngine] MI snapshot ${miSnapshotId} not found, using latest valid MI snapshot ${latestMI.id}`);
-          miSnapshot = latestMI;
-          miSnapshotId = latestMI.id;
-        } else {
-          return res.status(400).json({ error: "MISSING_DEPENDENCY", message: "MI snapshot not found and no valid MI snapshot available" });
-        }
+      const integrityResult = verifySnapshotIntegrity(miSnapshot, MI_ENGINE_VERSION, campaignId);
+      const miReadiness = integrityResult.valid
+        ? getEngineReadinessState(miSnapshot, campaignId, MI_ENGINE_VERSION, 14)
+        : null;
+
+      if (!integrityResult.valid || (miReadiness && miReadiness.state !== "READY")) {
+        return res.status(400).json({
+          error: "MI_INTEGRITY_FAILED",
+          message: `MI snapshot ${miSnapshotId} integrity/readiness check failed — please re-run Market Intelligence first`,
+          failures: integrityResult.failures,
+        });
       }
 
       const miFreshnessMetadata = buildFreshnessMetadata(miSnapshot);

@@ -85,7 +85,8 @@ ${args.riskFactors.slice(0, 6).map(r => `- ${r}`).join("\n") || "(none)"}
 4. killTriggerThreshold MUST be a CONCRETE numeric trigger (CPA $, ROAS, days, click count) — NEVER "if performance bad".
 5. expansionPrecondition MUST name a SPECIFIC milestone (conversions count + statistical confidence + secondary metric).
 6. If action is "halt" or killFlag is true: spendPace MUST be "frozen", carveOut MUST be 0, expansionPrecondition MUST describe what would re-enable spend.
-7. If action is "scale" but reconciledValidationConfidence < 0.70 — refuse to recommend "aggressive"; cap at "measured".
+7. If action is "hold" and live performance is pre-launch (0 conversions, $0 spend) with a positive test budget range ($${args.testBudgetMin}–$${args.testBudgetMax}): "hold" means holding AGGRESSIVE PAID SCALING, NOT freezing initial validation! You MUST set spendPace to "cautious" and set learningBudgetCarveOutPct between 15 and 25 (e.g. 20% of paid allocation = $${Math.round((args.scaleBudgetMin || 3000) * 0.20)} initial validation test budget) so the campaign can acquire initial conversion data and break the zero-conversion deadlock.
+8. If action is "scale" but reconciledValidationConfidence < 0.70 — refuse to recommend "aggressive"; cap at "measured".
 
 Return ONLY valid JSON:
 {
@@ -191,6 +192,14 @@ export async function designBudgetStrategy(args: {
 
   // Hard guard: if action=halt or killFlag, force frozen pace
   if (args.action === "halt" || args.killFlag) { s.spendPace = "frozen"; s.learningBudgetCarveOutPct = 0; }
+  // Pre-launch hold guard: when holding aggressive scaling at 0 conversions / $0 spend with a confirmed budget,
+  // never deadlock at frozen/0% carveout — ensure cautious initial validation carveout (20%) so initial conversions can be acquired.
+  if (args.action === "hold" && !args.killFlag && args.performanceConversions === 0 && args.performanceSpend === 0 && args.testBudgetMax > 0) {
+    if (s.spendPace === "frozen" || s.learningBudgetCarveOutPct <= 0) {
+      s.spendPace = "cautious";
+      s.learningBudgetCarveOutPct = 20;
+    }
+  }
   if (args.action === "scale" && args.reconciledValidationConfidence < 0.70 && s.spendPace === "aggressive") { s.spendPace = "measured"; }
 
   console.log(`[BudgetStrategy] STEP_2 | v1 | pace=${s.spendPace} | carveout=${s.learningBudgetCarveOutPct}%`);

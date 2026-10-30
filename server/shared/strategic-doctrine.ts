@@ -230,6 +230,7 @@ export interface ProductDnaLike {
   endConsumerUseCase?: string | null;
   replacedCompetitor?: string | null;
   targetAudienceSegment?: string | null;
+  productTruthFacts?: any[] | null;
 }
 
 export function deriveAnchorFromProductDna(dna: ProductDnaLike | null | undefined): ProductAnchor | null {
@@ -427,7 +428,8 @@ export function computeAnchorHash(anchor: ProductAnchor | null): string {
 // grounded in the degraded path — it NEVER emits "[not set]".
 // ---------------------------------------------------------------------------
 
-export function buildDoctrineBlock(ctx: RunStrategicContext): string {
+export function buildDoctrineBlock(ctx?: RunStrategicContext | null): string {
+  if (!ctx || !ctx.doctrine) return "";
   const { doctrine, priorDecisions } = ctx;
   const lines: string[] = [];
 

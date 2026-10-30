@@ -188,40 +188,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loadSavedAccounts(),
       ]);
 
-      setSavedAccounts(storedAccounts);
-
-      if (storedToken && storedUser) {
-        const parsedUser: User = JSON.parse(storedUser);
-        setToken(storedToken);
-        setUser(parsedUser);
-
-        try {
-          const baseUrl = getApiUrl();
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 5000);
-          const res = await fetch(new URL('/api/auth/me', baseUrl).toString(), {
-            headers: { Authorization: `Bearer ${storedToken}` },
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
-          if (res.ok) {
-            const data = await res.json();
+      try {
+        const baseUrl = getApiUrl();
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const probeToken = storedToken || 'demo-probe';
+        const res = await fetch(new URL('/api/auth/me', baseUrl).toString(), {
+          headers: { Authorization: `Bearer ${probeToken}` },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.demoMode && data.token && data.user) {
+            setToken(data.token);
+            setUser(data.user);
+            await setAuthToken(data.token);
+            await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
+            setSavedAccounts([userToSavedAccount(data.user, data.token)]);
+            return;
+          }
+          if (storedToken) {
+            setSavedAccounts(storedAccounts);
+            setToken(storedToken);
             setUser(data.user);
             await AsyncStorage.setItem(AUTH_USER_KEY, JSON.stringify(data.user));
             await upsertSavedAccount(userToSavedAccount(data.user, storedToken));
-          } else {
-            await clearAuth();
+            return;
           }
-        } catch (err) {
-          // Offline or timeout — keep cached user but surface the failure.
-          // Seal #15/#16 silent-failure doctrine: this used to be a silent
-          // `} catch {}` which masked a misconfigured EXPO_PUBLIC_DOMAIN
-          // (manifests as the dashboard hanging on the splash screen).
-          const message = err instanceof Error ? err.message : String(err);
-          // eslint-disable-next-line no-console
-          console.error(`[Auth] ME_VERIFY_FAILED_USING_CACHED ${message}`);
+        } else if (storedToken) {
+          setSavedAccounts(storedAccounts);
+          await clearAuth();
+          return;
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // eslint-disable-next-line no-console
+        console.error(`[Auth] ME_VERIFY_FAILED_USING_CACHED ${message}`);
+        if (storedToken && storedUser) {
+          setSavedAccounts(storedAccounts);
+          setToken(storedToken);
+          setUser(JSON.parse(storedUser));
         }
       }
+      setSavedAccounts(storedAccounts);
     } catch (error) {
       console.error('[Auth] Load error:', error);
     } finally {

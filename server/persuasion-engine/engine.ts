@@ -165,51 +165,179 @@ export function buildPersuasionResponse(objType: StructuredObjection["objectionT
 }
 
 function aelTokenize(s: string): string[] {
-  return (s || "").toLowerCase().match(/[a-z0-9]{4,}/g) || [];
+  const stop = new Set([
+    "that", "this", "with", "from", "have", "will", "your", "their", "they", "them",
+    "what", "when", "where", "which", "while", "about", "after", "before", "because",
+    "into", "over", "under", "more", "most", "some", "such", "only", "also", "very",
+    "just", "than", "then", "there", "here", "were", "been", "being", "make", "made",
+    "does", "doing", "done", "used", "using", "user", "users", "buyer", "buyers",
+    "customer", "customers", "product", "service", "brand", "company", "market",
+  ]);
+  return ((s || "").toLowerCase().match(/[a-z0-9]{4,}/g) || []).filter(t => !stop.has(t));
 }
-const AEL_GROUNDING_MIN_OVERLAP = 0.05;
-function aelOverlapScore(a: string, b: string): number {
+const AEL_GROUNDING_HIGH_CONFIDENCE_OVERLAP = 0.35;
+const AEL_GROUNDING_MIN_SHARED_TOKENS = 2;
+
+function aelOverlapMetrics(a: string, b: string): { score: number; sharedTokens: string[] } {
   const ta = new Set(aelTokenize(a));
-  const tb = aelTokenize(b);
-  if (ta.size === 0 || tb.length === 0) return 0;
-  let hits = 0;
-  for (const t of tb) if (ta.has(t)) hits++;
-  return hits / Math.max(ta.size, tb.length);
+  const tb = Array.from(new Set(aelTokenize(b)));
+  if (ta.size === 0 || tb.length === 0) return { score: 0, sharedTokens: [] };
+  const shared: string[] = [];
+  for (const t of tb) {
+    if (ta.has(t)) shared.push(t);
+  }
+  const denom = Math.min(ta.size, tb.length);
+  return {
+    score: denom > 0 ? shared.length / denom : 0,
+    sharedTokens: shared,
+  };
 }
 
-function attachAELGrounding(
+export function attachAELGrounding(
   obj: StructuredObjection,
   ael: any,
 ): void {
-  if (!ael || !ael.root_causes || ael.root_causes.length === 0) return;
-  const objText = `${obj.objectionStatement} ${obj.objectionTrigger} ${obj.persuasionResponse}`;
+  // Always keep customer-facing resolution equal to the full validated persuasionResponse
+  if (obj.persuasionResponse) {
+    obj.resolution = obj.persuasionResponse;
+  }
+  if (!ael) return;
 
-  let bestRc: any = null;
-  let bestRcScore = 0;
-  for (const rc of ael.root_causes) {
+  const rootCauses = Array.isArray(ael.root_causes) ? ael.root_causes : [];
+  const chains = Array.isArray(ael.causal_chains) ? ael.causal_chains : [];
+  if (rootCauses.length === 0 && chains.length === 0) return;
+
+  const objStatementText = `${obj.objectionStatement || ""}`;
+  const objCombinedText = `${obj.objectionStatement || ""} ${obj.persuasionResponse || ""}`.trim();
+  const linkedPainId = (obj as any).linkedPainId || null;
+
+  const detectCausalDomains = (text: string): Set<string> => {
+    const lower = String(text || "").toLowerCase();
+    const domains = new Set<string>();
+    if (/\b(pric(?:e|ing)|fee|fees|upsell|add-on|cost|charge|billing|checkout|payment|tier|package\s+price)\b/.test(lower)) {
+      domains.add("PRICING_COMMERCIAL");
+    }
+    if (/\b(download|link|mp3|access|hosting|cloud|expire|broken\s+link|delivery\s+delay|turnaround)\b/.test(lower)) {
+      domains.add("DELIVERY_ACCESS");
+    }
+    if (/\b(lyric|vocal|melody|robotic|generic|templat|personal|emotional|sound|audio|pronounce|pronunciation|tune|quality|story|authentic)\b/.test(lower)) {
+      domains.add("CREATIVE_QUALITY");
+    }
+    if (/\b(revision|edit|change|modify|support|refund|customer\s+service|preview|trial)\b/.test(lower)) {
+      domains.add("SERVICE_POLICY");
+    }
+    return domains;
+  };
+
+  const areDomainsCompatible = (a: Set<string>, b: Set<string>): boolean => {
+    if (a.size === 0 || b.size === 0) return true;
+    for (const d of a) {
+      if (b.has(d)) return true;
+    }
+    return false;
+  };
+
+  const objDomains = detectCausalDomains(objCombinedText);
+
+  let matchedRc: any = null;
+  let matchedRcScore = 0;
+  let matchedRcTokens: string[] = [];
+  let matchMethod: "EXPLICIT_ID" | "SEMANTIC_HIGH_CONFIDENCE" | "UNRESOLVED" = "UNRESOLVED";
+
+  for (const rc of rootCauses) {
+    if (
+      (rc.id && rc.id === obj.objectionId) ||
+      (linkedPainId && (rc.painId === linkedPainId || rc.linkedPainId === linkedPainId))
+    ) {
+      matchedRc = rc;
+      matchedRcScore = 1.0;
+      matchMethod = "EXPLICIT_ID";
+      break;
+    }
     const rcText = `${rc.deepCause || ""} ${rc.surfaceSignal || ""} ${rc.causalReasoning || ""}`;
-    const s = aelOverlapScore(rcText, objText);
-    if (s > bestRcScore) { bestRcScore = s; bestRc = rc; }
-  }
-  if (bestRc && bestRcScore >= AEL_GROUNDING_MIN_OVERLAP) {
-    obj.rootCause = `${bestRc.deepCause || ""}: ${bestRc.causalReasoning || ""}`.trim().slice(0, 400);
-    obj.userThinking = `Surface signal observed: ${bestRc.surfaceSignal || bestRc.deepCause || ""}`.slice(0, 300);
-    obj.resolution = `Resolve by addressing ${bestRc.deepCause || "underlying cause"} via ${obj.requiredProofType} — ${obj.persuasionResponse}`.slice(0, 400);
+    const rcDomains = detectCausalDomains(rcText);
+    if (!areDomainsCompatible(objDomains, rcDomains)) {
+      continue;
+    }
+    const stmtMetrics = aelOverlapMetrics(rcText, objStatementText);
+    const combMetrics = aelOverlapMetrics(rcText, objCombinedText);
+    const bestScore = Math.max(stmtMetrics.score, combMetrics.score);
+    const bestTokens = combMetrics.sharedTokens.length >= stmtMetrics.sharedTokens.length
+      ? combMetrics.sharedTokens
+      : stmtMetrics.sharedTokens;
+    if (
+      ((stmtMetrics.sharedTokens.length >= 2 && stmtMetrics.score >= 0.25) ||
+        (combMetrics.sharedTokens.length >= 2 && combMetrics.score >= 0.20)) &&
+      bestScore > matchedRcScore
+    ) {
+      matchedRc = rc;
+      matchedRcScore = bestScore;
+      matchedRcTokens = bestTokens;
+      matchMethod = "SEMANTIC_HIGH_CONFIDENCE";
+    }
   }
 
-  const chains = ael.causal_chains || [];
-  if (chains.length > 0) {
-    let bestCh: any = null;
-    let bestChScore = 0;
-    for (const ch of chains) {
-      const chText = `${ch.cause || ""} ${ch.impact || ""} ${ch.behavior || ""} ${ch.pain || ""}`;
-      const s = aelOverlapScore(chText, objText);
-      if (s > bestChScore) { bestChScore = s; bestCh = ch; }
+  let matchedChain: any = null;
+  let matchedChainScore = 0;
+  for (const ch of chains) {
+    if (linkedPainId && (ch.painId === linkedPainId || ch.linkedPainId === linkedPainId)) {
+      matchedChain = ch;
+      matchedChainScore = 1.0;
+      break;
     }
-    if (bestCh && bestChScore >= AEL_GROUNDING_MIN_OVERLAP) {
-      obj.causalChainAlignment = `Causal chain — cause: ${bestCh.cause || ""}; impact: ${bestCh.impact || ""}; behavior: ${bestCh.behavior || ""}; pain: ${bestCh.pain || ""}`.slice(0, 500);
+    const chText = `${ch.cause || ""} ${ch.impact || ""} ${ch.behavior || ""} ${ch.pain || ""}`;
+    const chDomains = detectCausalDomains(chText);
+    if (!areDomainsCompatible(objDomains, chDomains)) {
+      continue;
+    }
+    const stmtMetrics = aelOverlapMetrics(chText, objStatementText);
+    const combMetrics = aelOverlapMetrics(chText, objCombinedText);
+    const bestScore = Math.max(stmtMetrics.score, combMetrics.score);
+    if (
+      ((stmtMetrics.sharedTokens.length >= 2 && stmtMetrics.score >= 0.25) ||
+        (combMetrics.sharedTokens.length >= 2 && combMetrics.score >= 0.20)) &&
+      bestScore > matchedChainScore
+    ) {
+      matchedChain = ch;
+      matchedChainScore = bestScore;
     }
   }
+
+  if (matchedRc) {
+    obj.rootCause = `${matchedRc.deepCause || ""}${matchedRc.causalReasoning ? `: ${matchedRc.causalReasoning}` : ""}`.trim();
+    obj.userThinking = matchedRc.surfaceSignal || matchedRc.deepCause || "";
+  }
+  if (matchedChain) {
+    obj.causalChainAlignment = `Causal chain — cause: ${matchedChain.cause || ""}; impact: ${matchedChain.impact || ""}; behavior: ${matchedChain.behavior || ""}; pain: ${matchedChain.pain || ""}`;
+  }
+
+  // Store grounding metadata separately from customer-facing persuasionResponse/resolution
+  (obj as any).aelGrounding = matchedRc || matchedChain
+    ? {
+        status: "LINKED",
+        matchMethod,
+        matchConfidence: Number(Math.max(matchedRcScore, matchedChainScore).toFixed(2)),
+        sharedTokens: matchedRcTokens,
+        rootCause: matchedRc ? {
+          deepCause: matchedRc.deepCause || null,
+          surfaceSignal: matchedRc.surfaceSignal || null,
+          causalReasoning: matchedRc.causalReasoning || null,
+        } : null,
+        causalChain: matchedChain ? {
+          cause: matchedChain.cause || null,
+          impact: matchedChain.impact || null,
+          behavior: matchedChain.behavior || null,
+          pain: matchedChain.pain || null,
+        } : null,
+      }
+    : {
+        status: "UNRESOLVED",
+        matchMethod: "UNRESOLVED",
+        matchConfidence: 0,
+        sharedTokens: [],
+        rootCause: null,
+        causalChain: null,
+      };
 }
 
 interface CandidateObjection {
@@ -220,6 +348,11 @@ interface CandidateObjection {
   source: StructuredObjection["source"];
   proofStatus: "PROOF_ESTABLISHED" | "PROOF_TO_BUILD";
   confidence: number;
+  linkedPainId?: string | null;
+  subjectScope?: string;
+  competitorNames?: string[];
+  competitorIds?: string[];
+  evidenceIds?: string[];
 }
 
 interface ReasonedObjectionItem {
@@ -229,6 +362,7 @@ interface ReasonedObjectionItem {
   response: string;
   requiredProof: string;
   proofStatus: "PROOF_ESTABLISHED" | "PROOF_TO_BUILD";
+  supportingFactId?: string;
 }
 
 interface ReasonedObjectionsPayload {
@@ -260,20 +394,66 @@ export async function buildReasonedStructuredObjections(
     || ((audience as any)?.approvedLanes || [])[0];
   const lanePains = primaryLane ? (primaryLane.corePainIds || primaryLane.associatedPains || (primaryLane.primaryPainId ? [primaryLane.primaryPainId] : [])) : null;
 
+  const laneObjectionAttributions: Array<{
+    objectionId: string;
+    statement: string;
+    linkedPainId?: string | null;
+    subjectScope?: string;
+    competitorNames?: string[];
+    competitorIds?: string[];
+    evidenceIds?: string[];
+  }> = Array.isArray(primaryLane?.objectionAttribution) ? primaryLane.objectionAttribution : [];
+
+  // Map audience.objectionMap entries for canonical ID lookup
+  const audienceObjEntries: Array<{ id: string; statement: string; linkedPainId?: string | null; evidenceIds?: string[] }> = [];
+  if (audience.objectionMap && typeof audience.objectionMap === "object") {
+    for (const [k, v] of Object.entries(audience.objectionMap)) {
+      const stmt = typeof v === "string"
+        ? v
+        : ((v as any)?.canonical || (v as any)?.statement || (v as any)?.objection || (v as any)?.text || k);
+      if (typeof stmt === "string" && stmt.trim()) {
+        audienceObjEntries.push({
+          id: (v as any)?.id || (v as any)?.objectionId || k,
+          statement: stmt.trim(),
+          linkedPainId: (v as any)?.linkedPainId || (v as any)?.painId || null,
+          evidenceIds: Array.isArray((v as any)?.evidenceIds) ? (v as any).evidenceIds : [],
+        });
+      }
+    }
+  }
+
   // 1. PRIMARY AUTHORITY: Lane-scoped approved objections from the active strategic lane
-  const laneScopedObjections: string[] = [];
+  const laneScopedObjections: Array<{ id?: string; statement: string; linkedPainId?: string | null; subjectScope?: string; competitorNames?: string[]; competitorIds?: string[]; evidenceIds?: string[] }> = [];
   const rawLaneObjs = primaryLane?.objections
     || primaryLane?.approvedLane?.objections
     || primaryLane?.associatedObjections
     || primaryLane?.approvedLane?.associatedObjections;
 
   if (Array.isArray(rawLaneObjs)) {
-    for (const obj of rawLaneObjs) {
-      if (typeof obj === "string" && obj.trim().length > 2) {
-        laneScopedObjections.push(obj.trim());
-      } else if (obj && typeof obj === "object" && (obj.canonical || obj.statement || obj.objection)) {
-        laneScopedObjections.push(String(obj.canonical || obj.statement || obj.objection).trim());
-      }
+    for (let idx = 0; idx < rawLaneObjs.length; idx++) {
+      const obj = rawLaneObjs[idx];
+      const stmt = typeof obj === "string"
+        ? obj.trim()
+        : String(obj?.canonical || obj?.statement || obj?.objection || "").trim();
+      if (stmt.length <= 2) continue;
+      const attrMatch = laneObjectionAttributions.find(a =>
+        (obj?.id && a.objectionId === obj.id) ||
+        a.statement.toLowerCase() === stmt.toLowerCase()
+      );
+      const audMatch = audienceObjEntries.find(a =>
+        a.statement.toLowerCase() === stmt.toLowerCase() ||
+        a.statement.toLowerCase().includes(stmt.toLowerCase().slice(0, 35)) ||
+        stmt.toLowerCase().includes(a.statement.toLowerCase().slice(0, 35))
+      );
+      laneScopedObjections.push({
+        id: obj?.id || obj?.objectionId || attrMatch?.objectionId || audMatch?.id || `obj_${idx + 1}`,
+        statement: stmt,
+        linkedPainId: obj?.linkedPainId || attrMatch?.linkedPainId || audMatch?.linkedPainId || null,
+        subjectScope: obj?.subjectScope || attrMatch?.subjectScope,
+        competitorNames: obj?.competitorNames || attrMatch?.competitorNames,
+        competitorIds: obj?.competitorIds || attrMatch?.competitorIds,
+        evidenceIds: obj?.evidenceIds || attrMatch?.evidenceIds || audMatch?.evidenceIds || [],
+      });
     }
   }
 
@@ -284,27 +464,36 @@ export async function buildReasonedStructuredObjections(
     );
     for (const p of laneObjections) {
       const pStr = typeof p.canonical === "string" ? p.canonical : safeString(p.canonical || p.painId || "", "");
-      if (pStr && !laneScopedObjections.includes(pStr)) {
-        laneScopedObjections.push(pStr);
+      if (pStr && !laneScopedObjections.some(o => o.statement.toLowerCase() === pStr.toLowerCase())) {
+        laneScopedObjections.push({
+          id: p.painId || `obj_${laneScopedObjections.length + 1}`,
+          statement: pStr,
+          linkedPainId: p.painId || null,
+        });
       }
     }
   }
 
   if (laneScopedObjections.length > 0) {
-    for (const objStr of laneScopedObjections) {
-      const normalized = objStr.toLowerCase().replace(/[\s-]+/g, "_").slice(0, 60);
+    for (const objEntry of laneScopedObjections) {
+      const normalized = objEntry.statement.toLowerCase().replace(/[\s-]+/g, "_").slice(0, 60);
       if (seen.has(normalized)) continue;
       seen.add(normalized);
 
-      const objType = classifyObjectionType(objStr);
+      const objType = classifyObjectionType(objEntry.statement);
       candidateObjections.push({
-        id: `lane_obj_${candidateObjections.length + 1}`,
-        statement: objStr.slice(0, 200),
+        id: objEntry.id || `obj_${candidateObjections.length + 1}`,
+        statement: objEntry.statement,
         objType,
         stage: "consideration",
         source: "lane_objection",
         proofStatus: "PROOF_TO_BUILD",
         confidence: 0.95,
+        linkedPainId: objEntry.linkedPainId || null,
+        subjectScope: objEntry.subjectScope,
+        competitorNames: objEntry.competitorNames,
+        competitorIds: objEntry.competitorIds,
+        evidenceIds: objEntry.evidenceIds,
       });
     }
   }
@@ -330,8 +519,8 @@ export async function buildReasonedStructuredObjections(
       const stage = classifyObjectionStage(key + " " + cleanStatement);
 
       candidateObjections.push({
-        id: `obj_map_${candidateObjections.length + 1}`,
-        statement: cleanStatement.slice(0, 200) || key,
+        id: (value as any)?.id || (value as any)?.objectionId || key,
+        statement: cleanStatement || key,
         objType,
         stage,
         source: "audience_objection",
@@ -357,7 +546,7 @@ export async function buildReasonedStructuredObjections(
 
       candidateObjections.push({
         id: `obj_nar_${candidateObjections.length + 1}`,
-        statement: item.objection.slice(0, 200),
+        statement: item.objection,
         objType,
         stage,
         source: "narrative_extraction",
@@ -379,8 +568,8 @@ export async function buildReasonedStructuredObjections(
 
       const objType = classifyObjectionType(painStr);
       candidateObjections.push({
-        id: `obj_pain_${candidateObjections.length + 1}`,
-        statement: `Implied objection from pain: ${painStr.slice(0, 180)}`,
+        id: (pain as any)?.painId || (pain as any)?.id || `obj_pain_${candidateObjections.length + 1}`,
+        statement: `Implied objection from pain: ${painStr}`,
         objType,
         stage: "awareness",
         source: "pain_inference",
@@ -401,9 +590,118 @@ export async function buildReasonedStructuredObjections(
   const mechanism = differentiation?.pillars?.[0] || (productDna as any)?.uniqueMechanism || offer?.mechanismDescription || strategic?.doctrine?.productAnchor?.uniqueMechanism || "Core Mechanism";
   const positioningAxis = positioning?.narrativeDirection || positioning?.positioningStatement || strategic?.doctrine?.productAnchor?.coreProblemSolved || "Strategic Differentiation";
 
-  const productTruthList = (productDna as any)?.productTruthFacts?.map((f: any) => `- [${f.factType || 'FACT'}] ${f.statement} (Fact ID: ${f.productTruthFactId})`).join("\n")
-    || (strategic?.doctrine?.productAnchor?.sourceFacts || []).map((f: any) => `- ${f.statement || f}`).join("\n")
-    || "- Validated capability architecture";
+  const canonicalFactEntries: Array<{ factId: string; statement: string; factType: string }> = (
+    Array.isArray((productDna as any)?.productTruthFacts) && (productDna as any).productTruthFacts.length > 0
+      ? (productDna as any).productTruthFacts
+      : (strategic?.doctrine?.productAnchor?.sourceFacts || [])
+  )
+    .map((f: any) => ({
+      factId: String(f?.productTruthFactId || f?.factId || f?.id || "").trim(),
+      statement: String(f?.statement || f?.fact || "").trim(),
+      factType: String(f?.factType || "FACT").trim(),
+    }))
+    .filter((f: { factId: string; statement: string }) => f.factId.length > 0 && f.statement.length > 0);
+
+  const validFactMap = new Map<string, string>(canonicalFactEntries.map(f => [f.factId, f.statement]));
+  const aliasToCanonicalFactId = new Map<string, string>();
+  canonicalFactEntries.forEach((f, idx) => {
+    aliasToCanonicalFactId.set(`FACT_${idx + 1}`, f.factId);
+    aliasToCanonicalFactId.set(`fact_${idx + 1}`, f.factId);
+  });
+
+  const productTruthList = canonicalFactEntries.length > 0
+    ? canonicalFactEntries.map((f) => `- [${f.factType}] ${f.statement} (Exact Fact ID: ${f.factId})`).join("\n")
+    : "- Validated capability architecture";
+
+  const laneCompetitorAttribution: Array<{ painId: string; canonical?: string; subjectScope: string; competitorNames: string[]; competitorIds: string[] }> =
+    Array.isArray(primaryLane?.competitorSubjectAttribution) ? primaryLane.competitorSubjectAttribution : [];
+
+  const resolveCandidateAttribution = (cand: CandidateObjection) => {
+    if (cand.subjectScope && (cand.subjectScope === "COMPETITOR_SPECIFIC" || cand.competitorNames?.length)) {
+      return {
+        subjectScope: cand.subjectScope,
+        competitorNames: cand.competitorNames || [],
+        competitorIds: cand.competitorIds || [],
+      };
+    }
+    const directObjAttr = laneObjectionAttributions.find(a =>
+      a.objectionId === cand.id || a.statement.toLowerCase() === cand.statement.toLowerCase()
+    );
+    if (directObjAttr && directObjAttr.subjectScope) {
+      return {
+        subjectScope: directObjAttr.subjectScope,
+        competitorNames: directObjAttr.competitorNames || [],
+        competitorIds: directObjAttr.competitorIds || [],
+      };
+    }
+    if (cand.linkedPainId) {
+      const byPainId = laneCompetitorAttribution.find(a => a.painId === cand.linkedPainId);
+      if (byPainId) return byPainId;
+    }
+    const stmtLower = (cand.statement || "").toLowerCase();
+    for (const attr of laneCompetitorAttribution) {
+      if (attr.canonical && stmtLower.includes(attr.canonical.toLowerCase().slice(0, 35))) {
+        return attr;
+      }
+      const { score, sharedTokens } = aelOverlapMetrics(attr.canonical || "", stmtLower);
+      if (sharedTokens.length >= 2 && score >= 0.35) {
+        return attr;
+      }
+    }
+    return null;
+  };
+
+  for (const cand of candidateObjections) {
+    const matchedAttr = resolveCandidateAttribution(cand);
+    if (matchedAttr) {
+      cand.subjectScope = matchedAttr.subjectScope;
+      cand.competitorNames = matchedAttr.competitorNames || [];
+      cand.competitorIds = matchedAttr.competitorIds || [];
+    } else {
+      cand.subjectScope = cand.subjectScope || "UNATTRIBUTED_MARKET";
+      cand.competitorNames = cand.competitorNames || [];
+      cand.competitorIds = cand.competitorIds || [];
+    }
+  }
+
+  const attributionBlock = laneCompetitorAttribution.length > 0
+    ? `\nCOMPETITOR SUBJECT ATTRIBUTION FOR THIS LANE:\n` +
+      laneCompetitorAttribution.map(a =>
+        `- Pain [${a.painId}] ("${a.canonical || ""}"): Scope=${a.subjectScope}${a.competitorNames?.length ? ` | Named Competitor(s): ${a.competitorNames.join(", ")} (${(a.competitorIds || []).join(", ")})` : " | Unattributed Market Voice"}`
+      ).join("\n")
+    : "";
+
+  const aelRootCauses: any[] = Array.isArray(analyticalEnrichment?.root_causes) ? analyticalEnrichment.root_causes : [];
+  const aelChains: any[] = Array.isArray(analyticalEnrichment?.causal_chains) ? analyticalEnrichment.causal_chains : [];
+  const aelBarriers: any[] = Array.isArray(analyticalEnrichment?.buying_barriers) ? analyticalEnrichment.buying_barriers : [];
+  const aelCausalBlock =
+    aelRootCauses.length > 0 || aelChains.length > 0 || aelBarriers.length > 0
+      ? `\n=== CAUSAL DEPTH & ROOT CAUSE CONTEXT (AEL) ===\n` +
+        (aelRootCauses.length > 0
+          ? `Identified Root Causes:\n` +
+            aelRootCauses
+              .slice(0, 5)
+              .map((rc: any, i: number) => `- [RC${i + 1}] Surface: "${rc.surfaceSignal || ""}" | Root Cause: "${rc.deepCause || ""}"`)
+              .join("\n") +
+            `\n`
+          : "") +
+        (aelChains.length > 0
+          ? `Causal Chains:\n` +
+            aelChains
+              .slice(0, 4)
+              .map((ch: any, i: number) => `- [CC${i + 1}] Cause: "${ch.cause || ""}" -> Impact: "${ch.impact || ""}" -> Behavior: "${ch.behavior || ""}"`)
+              .join("\n") +
+            `\n`
+          : "") +
+        (aelBarriers.length > 0
+          ? `Buying Barriers:\n` +
+            aelBarriers
+              .slice(0, 4)
+              .map((bb: any, i: number) => `- [BB${i + 1}] Barrier: "${bb.barrier || ""}" | Buyer Thinking: "${bb.userThinking || ""}"`)
+              .join("\n") +
+            `\n`
+          : "")
+      : "";
 
   const promptInput = {
     laneTitle,
@@ -435,26 +733,35 @@ Positioning Axis: ${positioningAxis}
 
 CANONICAL PRODUCT TRUTH CAPABILITIES:
 ${productTruthList}
+${attributionBlock}${aelCausalBlock}
 
 === OBJECTIONS TO RESOLVE ===
-${candidateObjections.map((o, idx) => `[Objection ${idx + 1}]
+${candidateObjections.map((o: any, idx: number) => `[Objection ${idx + 1}]
 - Objection ID: ${o.id}
 - Statement: "${o.statement}"
 - Objection Type: ${o.objType}
 - Proof Status: ${o.proofStatus}
+- Evidence Attribution: ${o.subjectScope === "COMPETITOR_SPECIFIC" && o.competitorNames?.length ? `COMPETITOR_SPECIFIC (${o.competitorNames.join(", ")})` : "UNATTRIBUTED_MARKET"}
 `).join("\n")}
 
 === RULES ===
-1. INDEPENDENT STRATEGIC REASONING:
+1. INDEPENDENT STRATEGIC REASONING & PRODUCT TRUTH GROUNDING:
    - Reason a direct, compelling persuasion response for EACH objection tailored to the active lane context, target role, and unique mechanism.
+   - Ground every response strictly in the CANONICAL PRODUCT TRUTH CAPABILITIES provided above.
+   - A verified product capability can partially mitigate an objection without inventing unverified guarantees. Do NOT invent unverified operational software, live fulfillment dashboards, tracking portals, automated notification engines, phonetic pronunciation inputs, human-driven studio staffing over automation, permanent/lifetime hosting guarantees, revision rights, delivery SLAs, refunds, or support guarantees not explicitly present in Product Truth.
+   - COMPETITOR ATTRIBUTION INTEGRITY: When an objection originates from a named competitor's reviews (Evidence Attribution = COMPETITOR_SPECIFIC), address the buyer's category skepticism by contrasting competitor pitfalls against our ACTUAL verified capabilities from Product Truth, NEVER by attributing those competitor failures to our business or inventing unverified guarantees.
+   - Do NOT use unsupported absolutes such as "never generic", "ensures authenticity", or "permanent access".
    - NEVER use deterministic category templates or hardcoded prefixes (e.g. "Address credibility concern with third-party validation...", "Simplify with step-by-step mechanism explanation...", "Demonstrate proven process and real outcomes...", "Reframe value proposition with ROI evidence...", "Provide specific proof addressing...").
-   - Every response must be distinct, substantive (at least 20 words), and address the specific friction described.
+   - Every response must be distinct, complete, and substantive (at least 20 words), addressing the specific friction described.
 
 2. BUILD PROOF INTEGRITY RULE:
    - For objections where Proof Status is "PROOF_TO_BUILD", the response MUST NOT claim or imply existing customer proof (do NOT use "proven outcomes", "our customer results", "existing case studies", "demonstrated success", "proven process and real outcomes").
-   - Instead, explain the specific architectural guarantee, transparent validation workflow, or step-by-step demonstration that will be built/provided to resolve the objection.
+   - Address the friction using verified policies and visible product attributes from Product Truth. Clearly mark planned demonstrations or future disclosures as PROOF_TO_BUILD without fabricating internal operational workflows.
 
-3. REQUIRED JSON OUTPUT:
+3. LANE-SPECIFIC MESSAGE SEQUENCE & REQUIRED JSON OUTPUT:
+   - In addition to "objections", generate "messageSequence": a 4 to 6 step persuasion sequence specifically tailored to THIS lane ("${laneTitle}"), its primary buyer friction, its target role ("${targetRole}"), and the verified product workflow.
+   - Do NOT use generic boilerplate steps identical across lanes. Each step must specify its strategic "purpose", "beliefShift", buyer-facing "coreMessage", "proofRequirement", "objectionAddressed", and "cta".
+   - In "supportingFactId" for each objection, copy the EXACT UUID from "(Exact Fact ID: ...)" above when a verified Product Truth fact directly supports the response, or use null if the response is a strategic framing/hypothesis (never guess or alter characters in a UUID).
 Return ONLY a valid JSON object matching this schema (no markdown fences, no preamble):
 {
   "objections": [
@@ -462,9 +769,23 @@ Return ONLY a valid JSON object matching this schema (no markdown fences, no pre
       "objectionId": "exact objection ID",
       "objectionStatement": "exact objection statement",
       "objectionType": "trust" | "cost" | "complexity" | "feasibility" | "timing",
-      "response": "substantive persuasion response tailored to this objection",
+      "response": "substantive persuasion response tailored to this objection and grounded in verified Product Truth",
       "requiredProof": "specific proof artifact or validation method",
-      "proofStatus": "PROOF_ESTABLISHED" | "PROOF_TO_BUILD"
+      "proofStatus": "PROOF_ESTABLISHED" | "PROOF_TO_BUILD",
+      "supportingFactId": "Exact Fact ID UUID from Product Truth above, or null"
+    }
+  ],
+  "messageSequence": [
+    {
+      "step": 1,
+      "stepKey": "snake_case_step_key",
+      "stepLabel": "Concise Lane-Specific Step Title",
+      "purpose": "Why this step is needed for this specific lane",
+      "beliefShift": "From [specific buyer hesitation in this lane] -> To [new belief grounded in verified capability]",
+      "coreMessage": "Distinct buyer-facing persuasion message for this step",
+      "proofRequirement": "Tangible proof or product workflow demonstration used at this step",
+      "objectionAddressed": "Specific objection ID or friction resolved at this step",
+      "cta": "Stage-appropriate micro-commitment or call to action"
     }
   ]
 }
@@ -493,6 +814,26 @@ Return ONLY a valid JSON object matching this schema (no markdown fences, no pre
       }
 
       const rejections: any[] = [];
+      const forbiddenHallucinations = [
+        "live dashboard",
+        "tracking dashboard",
+        "fulfillment dashboard",
+        "automated tracking portal",
+        "gps live tracking",
+        "real-time order portal",
+        "specify name pronunciation",
+        "phonetic pronunciation",
+        "human-driven process",
+        "human composer",
+        "permanent link",
+        "permanent access",
+        "lifetime access",
+        "guaranteed lasting access",
+        "never generic",
+        "ensures authenticity",
+      ];
+      const ptLower = (input.productTruthList || "").toLowerCase();
+
       for (const obj of candidate.objections) {
         if (!obj.response || typeof obj.response !== "string" || obj.response.trim().length < 20) {
           rejections.push({
@@ -503,6 +844,16 @@ Return ONLY a valid JSON object matching this schema (no markdown fences, no pre
         }
 
         const lowerResp = obj.response.toLowerCase();
+
+        // Check for invented operational capabilities or unsupported absolutes:
+        for (const fh of forbiddenHallucinations) {
+          if (lowerResp.includes(fh) && !ptLower.includes(fh)) {
+            rejections.push({
+              rule: "No Invented Capabilities",
+              reason: `Objection '${obj.objectionId || obj.objectionStatement}' invents an unverified capability or unsupported absolute ('${fh}') not present in Product Truth.`
+            });
+          }
+        }
 
         // Check for hardcoded template patterns:
         if (
@@ -533,6 +884,42 @@ Return ONLY a valid JSON object matching this schema (no markdown fences, no pre
             });
           }
         }
+
+        // Validate supportingFactId against pinned canonical Product Truth inventory (no hallucinated/corrupted UUIDs)
+        const rawFactId = obj.supportingFactId ? String(obj.supportingFactId).trim() : "";
+        if (rawFactId && rawFactId !== "null" && rawFactId !== "APPROVED_MECHANISM" && validFactMap.size > 0) {
+          const resolvedCanonicalId = validFactMap.has(rawFactId)
+            ? rawFactId
+            : (aliasToCanonicalFactId.get(rawFactId) || null);
+          if (!resolvedCanonicalId) {
+            rejections.push({
+              rule: "Canonical Fact ID Reference",
+              reason: `Objection '${obj.objectionId || obj.objectionStatement}' cites supportingFactId '${rawFactId}' which does not exist in the pinned Product Truth inventory. Copy the exact Fact ID UUID from the prompt or set supportingFactId to null.`
+            });
+          } else {
+            obj.supportingFactId = resolvedCanonicalId;
+          }
+        }
+      }
+
+      const candidateSeq = Array.isArray((candidate as any).messageSequence) ? (candidate as any).messageSequence : [];
+      if (candidateSeq.length < 3) {
+        rejections.push({
+          rule: "Lane-Specific Message Sequence",
+          reason: "Output must include a 'messageSequence' array of at least 3 lane-specific steps with stepLabel, purpose, beliefShift, coreMessage, proofRequirement, and cta."
+        });
+      } else {
+        for (const st of candidateSeq) {
+          const msgText = `${st.coreMessage || ""} ${st.purpose || ""} ${st.beliefShift || ""}`.toLowerCase();
+          for (const fh of forbiddenHallucinations) {
+            if (msgText.includes(fh) && !ptLower.includes(fh)) {
+              rejections.push({
+                rule: "No Invented Capabilities in Sequence",
+                reason: `messageSequence step '${st.stepLabel || st.stepKey}' invents unsupported capability ('${fh}') not present in Product Truth.`
+              });
+            }
+          }
+        }
       }
 
       if (rejections.length > 0) {
@@ -554,9 +941,11 @@ Your previous objection responses were rejected by the Semantic Judge.
 ${defect}
 
 --- MANDATORY RULES ---
-1. Genuinely reason each response for its specific objection, lane, and target role. Do NOT use category template phrases (e.g. "Address credibility concern...", "Demonstrate proven process...", "Simplify with step-by-step...").
-2. BUILD PROOF INTEGRITY: When proofStatus is PROOF_TO_BUILD, do NOT claim existing proof ("proven outcomes", "our customer results", "case studies"). Focus on the architectural mechanism and verifiable demonstration to be provided.
-3. Return a valid JSON object with {"objections": [...]}.
+1. STRICT PRODUCT TRUTH GROUNDING: Do NOT invent operational portals, live tracking software, fulfillment dashboards, phonetic pronunciation inputs, human-driven studio staffing over automation, permanent/lifetime hosting guarantees, or unsupported absolutes ("never generic", "ensures authenticity", "permanent access"). Use ONLY verified capabilities from CANONICAL PRODUCT TRUTH provided in the input.
+2. Genuinely reason each response for its specific objection, lane, and target role. Do NOT use category template phrases (e.g. "Address credibility concern...", "Demonstrate proven process...", "Simplify with step-by-step...").
+3. BUILD PROOF INTEGRITY: When proofStatus is PROOF_TO_BUILD, do NOT claim existing proof ("proven outcomes", "our customer results", "case studies"). Focus on the verified product workflow and verifiable demonstration to be provided.
+4. In "supportingFactId", copy the EXACT Fact ID UUID from the input Product Truth list, or set "supportingFactId" to null if no single fact directly establishes the claim.
+5. Return a valid JSON object with BOTH {"objections": [...], "messageSequence": [...]} (at least 4 steps in messageSequence).
 `;
 
       const resp = await aiChat({
@@ -574,7 +963,15 @@ ${defect}
 
       const content = resp.choices[0]?.message?.content?.trim() || "{}";
       const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-      return safeJsonParse<ReasonedObjectionsPayload>(cleaned) || { objections: [] };
+      const parsed = safeJsonParse<any>(cleaned) || { objections: [] };
+      if (
+        (!Array.isArray(parsed.messageSequence) || parsed.messageSequence.length < 3) &&
+        Array.isArray((failedCandidate as any)?.messageSequence) &&
+        (failedCandidate as any).messageSequence.length >= 3
+      ) {
+        parsed.messageSequence = (failedCandidate as any).messageSequence;
+      }
+      return parsed;
     }
   });
 
@@ -583,21 +980,59 @@ ${defect}
   }
 
   const structuredObjections: StructuredObjection[] = [];
-  for (const item of reasonedPayload.objections) {
-    const candidate = candidateObjections.find(c => c.id === item.objectionId || c.statement === item.objectionStatement) || candidateObjections[0];
+  for (let idx = 0; idx < reasonedPayload.objections.length; idx++) {
+    const item = reasonedPayload.objections[idx];
+    const candidate = candidateObjections.find(c =>
+      c.id === item.objectionId ||
+      c.statement.toLowerCase() === (item.objectionStatement || "").toLowerCase()
+    ) || candidateObjections[idx] || candidateObjections[0];
     const objType = item.objectionType || candidate?.objType || "trust";
+    const fullResponse = (item.response || "").trim();
+    const rawSupFactId = item.supportingFactId ? String(item.supportingFactId).trim() : null;
+    const verifiedSupportingFactId =
+      rawSupFactId && validFactMap.has(rawSupFactId)
+        ? rawSupFactId
+        : (rawSupFactId && aliasToCanonicalFactId.has(rawSupFactId) ? aliasToCanonicalFactId.get(rawSupFactId)! : null);
+    const proofStatus =
+      verifiedSupportingFactId && (item.proofStatus === "PROOF_ESTABLISHED" || candidate?.proofStatus === "PROOF_ESTABLISHED")
+        ? "PROOF_ESTABLISHED"
+        : "PROOF_TO_BUILD";
     structuredObjections.push({
-      objectionId: item.objectionId || candidate?.id,
-      objectionStatement: item.objectionStatement || candidate?.statement || "",
+      objectionId: candidate?.id || item.objectionId || `obj_${idx + 1}`,
+      objectionStatement: candidate?.statement || item.objectionStatement || "",
       objectionTrigger: candidate?.source || "lane_objection",
       objectionStage: candidate?.stage || "consideration",
       objectionType: objType,
       requiredProofType: item.requiredProof || OBJECTION_PROOF_TYPE_MAP[objType],
-      persuasionResponse: item.response,
+      persuasionResponse: fullResponse,
+      resolution: fullResponse,
       source: candidate?.source || "audience_objection",
-      proofStatus: item.proofStatus || candidate?.proofStatus || "PROOF_TO_BUILD",
+      proofStatus,
+      proposalStatus: verifiedSupportingFactId && proofStatus === "PROOF_ESTABLISHED" ? "VERIFIED_FACT" : "PROPOSED_HYPOTHESIS",
+      supportingFactId: verifiedSupportingFactId,
       confidence: candidate?.confidence || 0.85,
-    });
+      linkedPainId: candidate?.linkedPainId || null,
+      subjectScope: candidate?.subjectScope || "UNATTRIBUTED_MARKET",
+      competitorNames: candidate?.competitorNames || [],
+      competitorIds: candidate?.competitorIds || [],
+      evidenceIds: candidate?.evidenceIds || [],
+    } as any);
+  }
+
+  if (Array.isArray((reasonedPayload as any).messageSequence) && (reasonedPayload as any).messageSequence.length >= 3) {
+    (structuredObjections as any).laneMessageSequence = (reasonedPayload as any).messageSequence.map((st: any, sIdx: number) => ({
+      step: Number(st.step) || (sIdx + 1),
+      stepKey: String(st.stepKey || `step_${sIdx + 1}`).trim(),
+      stepLabel: String(st.stepLabel || `Step ${sIdx + 1}`).trim(),
+      purpose: String(st.purpose || "").trim(),
+      beliefShift: String(st.beliefShift || "").trim(),
+      coreMessage: String(st.coreMessage || st.messageFocus || "").trim(),
+      messageFocus: String(st.coreMessage || st.messageFocus || "").trim(),
+      rationale: String(st.purpose || st.rationale || "").trim(),
+      proofRequirement: String(st.proofRequirement || "").trim(),
+      objectionAddressed: String(st.objectionAddressed || "").trim(),
+      cta: String(st.cta || "").trim(),
+    }));
   }
 
   return structuredObjections;
@@ -2042,6 +2477,7 @@ function buildPersuasionRoutes(
       const cleanStatement = typeof so.objectionStatement === "string" && so.objectionStatement.trim()
         ? so.objectionStatement.trim()
         : (typeof (so as any).objection === "object" ? (so as any).objection?.canonical : String((so as any).objection || ""));
+      const authResponse = so.persuasionResponse || (so as any).response || so.resolution || "";
       objections.push({
         tag: {
           category: so.objectionType,
@@ -2054,10 +2490,18 @@ function buildPersuasionRoutes(
           confidence: so.confidence,
         },
         objectionId: so.objectionId,
-        response: so.persuasionResponse || so.resolution || (so as any).response || "",
-        resolution: so.resolution || so.persuasionResponse || "",
+        persuasionResponse: authResponse,
+        response: authResponse,
+        resolution: authResponse,
         requiredProof: so.requiredProofType || "",
         proofStatus: so.proofStatus || "PROOF_TO_BUILD",
+        proposalStatus: (so as any).proposalStatus || (so.proofStatus === "PROOF_ESTABLISHED" ? "VERIFIED_FACT" : "PROPOSED_HYPOTHESIS"),
+        supportingFactId: (so as any).supportingFactId || null,
+        subjectScope: (so as any).subjectScope || "UNATTRIBUTED_MARKET",
+        competitorNames: (so as any).competitorNames || [],
+        competitorIds: (so as any).competitorIds || [],
+        evidenceIds: (so as any).evidenceIds || [],
+        aelGrounding: (so as any).aelGrounding || null,
       });
     }
   } else {
@@ -2179,7 +2623,7 @@ function buildPersuasionRoutes(
   const offerLockedDecisions: string[] = offer.lockedDecisions || [];
   const offerNonGenericAnchors: string[] = offer.nonGenericAnchors || [];
 
-  let lockedRouteNameSuffix = "";
+  let lockedAxisSummary: string | undefined = undefined;
   const lockConstraintNotes: string[] = [];
 
   if (offerLockedDecisions.length > 0) {
@@ -2189,7 +2633,7 @@ function buildPersuasionRoutes(
 
     if (contrastAxisDecision) {
       const axisCore = contrastAxisDecision.replace(/^contrast_axis:\s*/i, "").trim();
-      if (axisCore) lockedRouteNameSuffix += ` [locked axis: ${axisCore.slice(0, 40)}]`;
+      if (axisCore) lockedAxisSummary = `locked axis: ${axisCore.slice(0, 40)}`;
     }
 
     for (const decision of offerLockedDecisions) {
@@ -2219,13 +2663,106 @@ function buildPersuasionRoutes(
       ])].slice(0, 4)
     : drivers.slice(0, 4);
 
+  const primaryPainText = (() => {
+    const p0 = (audience.audiencePains || [])[0];
+    return typeof p0 === "string" ? p0 : (p0?.pain || p0?.canonical || p0?.description || "core buyer friction");
+  })();
+  const mechNameText = core?.mechanismName || offer.mechanismDescription || differentiation.pillars?.[0]?.name || "the verified mechanism";
+  const mechLogicText = core?.mechanismLogic || offer.mechanismDescription || differentiation.pillars?.[0]?.description || "structured product workflow";
+  const topProofText = (() => {
+    const pa0 = (differentiation.proofArchitecture || [])[0];
+    if (!pa0) return "transparent product demonstration";
+    return typeof pa0 === "string" ? pa0 : (pa0.proofElement || pa0.claim || pa0.description || "verified product demonstration");
+  })();
+  const topObjectionEntry = (structuredObjections || [])[0];
+  const topObjectionFocus = topObjectionEntry
+    ? `Address "${topObjectionEntry.objectionStatement}" by grounding in ${topObjectionEntry.requiredProofType || "verified product capabilities"}`
+    : "Address primary buyer hesitation using verified product facts";
+  const offerOutcomeText = offer.coreOutcome || offer.offerName || "the core offer outcome";
+
+  const buildStructuredMessageSequence = (steps: string[]) =>
+    steps.map((rawKey, idx) => {
+      const key = String(rawKey || "").trim();
+      const label = key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      let messageFocus = "";
+      let rationale = "";
+      switch (key) {
+        case "acknowledge_pain":
+        case "demonstrate_understanding":
+          messageFocus = `Validate buyer frustration around ${primaryPainText}`;
+          rationale = `Establishes immediate relevance by naming the specific friction (${primaryPainText}) before introducing our mechanism.`;
+          break;
+        case "disrupt_assumption":
+        case "establish_contrast":
+          messageFocus = `Contrast standard alternatives against ${mechNameText}`;
+          rationale = `Separates our approach from category pitfalls so the buyer understands why conventional options create friction.`;
+          break;
+        case "educate_on_problem":
+        case "introduce_mechanism":
+        case "explain_mechanism":
+          messageFocus = `Walk through how ${mechNameText} works (${mechLogicText})`;
+          rationale = `Shows the concrete causal workflow of ${mechNameText} so the buyer sees how the outcome is produced.`;
+          break;
+        case "present_proof":
+        case "reinforce_with_proof":
+          messageFocus = `Demonstrate capability with ${topProofText}`;
+          rationale = `Substantiates the mechanism claim with tangible demonstration (${topProofText}) prior to asking for commitment.`;
+          break;
+        case "establish_authority":
+        case "build_authority":
+          messageFocus = `Anchor credibility in transparent product capabilities and clear workflow standards`;
+          rationale = `Reinforces buyer confidence by keeping every promise within verified product boundaries.`;
+          break;
+        case "address_objections":
+          messageFocus = topObjectionFocus;
+          rationale = topObjectionEntry?.persuasionResponse
+            ? topObjectionEntry.persuasionResponse
+            : `Directly resolves the lane's primary hesitation before conversion.`;
+          break;
+        case "remove_risk":
+          messageFocus = `Highlight low-friction evaluation and transparent terms before purchase`;
+          rationale = `Lowers perceived commitment risk by clarifying exactly what the buyer evaluates and receives.`;
+          break;
+        case "build_anticipation":
+          messageFocus = `Preview the tailored outcome (${offerOutcomeText})`;
+          rationale = `Connects the completed customization and evaluation steps to the final delivered value.`;
+          break;
+        case "invite_commitment":
+        case "soft_next_step":
+          messageFocus = `Guide the buyer to complete the next step toward ${offerOutcomeText}`;
+          rationale = `Transitions the convinced buyer into action with clear, transparent expectations.`;
+          break;
+        default:
+          messageFocus = `${label}: align buyer progression with ${mechNameText}`;
+          rationale = `Advances the buyer from ${readiness} awareness toward ${offerOutcomeText} using verified product truth.`;
+          break;
+      }
+      return {
+        step: idx + 1,
+        stepKey: key,
+        stepLabel: label,
+        messageFocus,
+        rationale,
+      };
+    });
+
+  const reasonedLaneSequence = Array.isArray((structuredObjections as any)?.laneMessageSequence) && (structuredObjections as any).laneMessageSequence.length >= 3
+    ? (structuredObjections as any).laneMessageSequence
+    : (Array.isArray((objections as any)?.laneMessageSequence) && (objections as any).laneMessageSequence.length >= 3
+        ? (objections as any).laneMessageSequence
+        : null);
+
+  const structuredMessageSequence = reasonedLaneSequence || buildStructuredMessageSequence(messageOrder);
+
   const primary: PersuasionRoute = {
-    routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture${mechanismRef}${lockedRouteNameSuffix}`,
+    routeName: `${primaryMode.replace(/_/g, " ")} persuasion architecture${mechanismRef}`,
     persuasionMode: primaryMode,
+    lockedAxisSummary,
     primaryInfluenceDrivers: lockedInfluenceDrivers,
     objectionPriorities: objections,
     trustSequence,
     messageOrderLogic: messageOrder,
+    messageSequence: structuredMessageSequence,
     persuasionStrengthScore: strengthScore,
     frictionNotes: [...(awareness.frictionNotes || []).slice(0, 3), ...routeWarnings, ...lockConstraintNotes],
     rejectionReason: null,
@@ -2235,7 +2772,7 @@ function buildPersuasionRoutes(
     structuredObjections: structuredObjections || [],
     readinessAlignment,
     scarcityValidation,
-  };
+  } as any;
 
   const altModes: Record<string, string> = {
     authority_led: "proof_led",
@@ -2775,79 +3312,6 @@ export async function analyzePersuasion(
     structuralWarnings.push(...outputBoundaryCheck.warnings);
   }
 
-  const celSourceTexts = [
-    routes.primary.routeName || "",
-    routes.primary.persuasionMode || "",
-    ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
-    ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""}`),
-    ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
-    ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
-    ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
-    ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
-    ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
-    ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.causalChainAlignment || ""}`),
-  ];
-  const celDepth = enforceEngineDepthCompliance(
-    "persuasion",
-    celSourceTexts,
-    activeAel || null,
-  );
-
-  let depthGateResult: DepthGateResult | null = null;
-
-  if (activeAel && isDepthBlocking(celDepth, celSourceTexts)) {
-    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
-    for (const logEntry of celDepth.enforcementLog) {
-      console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
-    }
-    console.log(`[PersuasionEngine-V3] DEPTH_GATE: DEPTH_FAILED — non-generative engine, cannot retry | depthScore=${celDepth.causalDepthScore}`);
-    routes.primary.persuasionStrengthScore = 0;
-    routes.alternative.persuasionStrengthScore = 0;
-
-    const failedAcceptability = assessStrategyAcceptability(0, 0, allLayers.length, false, [...structuralWarnings, "DEPTH_FAILED"]);
-
-    return applyPartialAelDowngrade("PersuasionEngine-V3", {
-      status: "DEPTH_FAILED",
-      statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
-      primaryRoute: routes.primary,
-      alternativeRoute: routes.alternative,
-      rejectedRoute: routes.rejected,
-      layerResults: allLayers,
-      structuralWarnings: [...structuralWarnings, "DEPTH_FAILED"],
-      boundaryCheck,
-      dataReliability: reliability,
-      confidenceNormalized: true,
-      executionTimeMs: Date.now() - startTime,
-      engineVersion: ENGINE_VERSION,
-      autoCorrection,
-      strategyAcceptability: failedAcceptability,
-      celDepthCompliance: celDepth,
-      depthGateResult,
-    }, aelAck);
-  }
-
-  if (celDepth.violations.length > 0) {
-    for (const logEntry of celDepth.enforcementLog) {
-      console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
-    }
-    if (!celDepth.passed) {
-      routes.primary.persuasionStrengthScore = applyDepthPenalty(routes.primary.persuasionStrengthScore, celDepth);
-      routes.alternative.persuasionStrengthScore = applyDepthPenalty(routes.alternative.persuasionStrengthScore, celDepth);
-    }
-  } else {
-    console.log(`[PersuasionEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
-  }
-
-  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`], celSourceTexts);
-
-  const finalLayersPassed = allLayers.filter(l => l.passed).length;
-  const finalConfidence = routes.primary.persuasionStrengthScore;
-  const acceptability = assessStrategyAcceptability(
-    finalConfidence, finalLayersPassed, allLayers.length,
-    boundaryCheck.passed,
-    structuralWarnings,
-  );
-
   // ── MARKETING-LOGIC CORE: Trust Transfer Design (commercial reasoning) ──
   // Designs the specific commercial mechanism BEFORE any Cialdini label is picked.
   // Cialdini selection (below) becomes a downstream consequence of this design.
@@ -2991,6 +3455,14 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
   const psAnchorBlockText = `${psDoctrineBlock}${psDnaAnchorBlock}${psAnchorGroundingRule}`;
   const psGroundingContract = buildGroundingContract(psAnchor, (activeAel || (mi as any).analyticalEnrichment || null) as any, { capabilities: deriveValidatedCapabilities(psAnchor, productDna) });
 
+  const canonicalProductFacts = (productDna as any)?.productTruthFacts || [];
+  const approvedMech = {
+    name: differentiation?.pillars?.[0] || offer?.mechanismDescription || strategic?.doctrine?.productAnchor?.uniqueMechanism || "Core Mechanism",
+    description: offer?.mechanismDescription || (productDna as any)?.uniqueMechanism || "Core operational mechanism",
+    type: "CORE_MECHANISM",
+    operationalDetails: (productDna as any)?.uniqueMechanism || "",
+  };
+
   try {
     const { designTrustTransfer } = await import("./trust-transfer");
     trustTransferDesignResult = await designTrustTransfer({
@@ -3008,6 +3480,8 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
       doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
       anchorSource: psAnchorSource,
       groundingContractBlock: psGroundingContract,
+      productTruthFacts: canonicalProductFacts,
+      approvedMechanism: approvedMech,
     });
     if (trustTransferDesignResult) {
       routes.primary.trustTransferDesign = trustTransferDesignResult;
@@ -3064,7 +3538,13 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
       awarenessStage: awareness.targetReadinessStage || "unknown",
       marketDiagnosis: (mi as any).marketDiagnosis || null,
       enemyDefinition: (offer as any)?.enemyDefinition || null,
-      productTruthFacts: deriveValidatedCapabilities(psAnchor, productDna),
+      productTruthFacts: [
+        ...deriveValidatedCapabilities(psAnchor, productDna),
+        ...(canonicalProductFacts || []).map((f: any, idx: number) => ({
+          id: f.productTruthFactId || f.factId || `fact_${idx + 1}`,
+          text: f.statement || String(f),
+        })),
+      ],
       doctrineBlock: psAnchorBlockText.length > 0 ? psAnchorBlockText : null,
       accountId: accountId || "system",
     });
@@ -3077,19 +3557,95 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
     structuralWarnings.push(`BELIEF_SHIFT_INCOMPLETE: Persuasion failed to produce valid canonical belief transformation (${bsErr.message})`);
   }
 
-  let driftStatus: string = STATUS.COMPLETE;
-  let driftStatusMessage: string | null = null;
-  if (lockedDecisions.length > 0 && positioningDriftMinSimilarity < 0.20) {
-    if (positioningDriftMinSimilarity < 0.10) {
-      driftStatus = STATUS.POSITIONING_DRIFT;
-      driftStatusMessage = `BLOCKED: Severe positioning drift detected (similarity=${positioningDriftMinSimilarity.toFixed(2)} < 0.10) against locked decision "${positioningDriftWorstDecision}" — persuasion output is semantically disconnected from positioning lock`;
-      console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_ENFORCEMENT | severity=SEVERE | minSim=${positioningDriftMinSimilarity.toFixed(2)} | status=POSITIONING_DRIFT (BLOCK)`);
-    } else {
-      driftStatus = STATUS.PARTIAL;
-      driftStatusMessage = `PARTIAL: Positioning drift detected (similarity=${positioningDriftMinSimilarity.toFixed(2)} < 0.20 threshold) against locked decision "${positioningDriftWorstDecision}" — persuasion output drifted from positioning lock`;
-      console.log(`[PersuasionEngine-V3] POSITIONING_DRIFT_ENFORCEMENT | severity=MILD | minSim=${positioningDriftMinSimilarity.toFixed(2)} | status=PARTIAL`);
+  const celSourceTexts = [
+    routes.primary.routeName || "",
+    routes.primary.persuasionMode || "",
+    ...routes.primary.primaryInfluenceDrivers.map((d: any) => typeof d === "string" ? d : `${d.driver || ""} ${d.rationale || ""}`),
+    ...routes.primary.objectionPriorities.map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.response || ""} ${o.resolution || ""}`),
+    ...routes.primary.messageOrderLogic.map((m: any) => typeof m === "string" ? m : `${m.step || ""} ${m.rationale || ""}`),
+    ...((routes.primary as any).messageSequence || []).map((m: any) => typeof m === "string" ? m : `${m.stepLabel || ""} ${m.purpose || ""} ${m.beliefShift || ""} ${m.coreMessage || ""} ${m.proofRequirement || ""}`),
+    ...(routes.primary.trustSequence || []).map((t: any) => typeof t === "string" ? t : `${t.step || ""} ${t.rationale || ""} ${t.purpose || ""}`),
+    ...(routes.primary.trustBarriers || []).map((b: any) => `${b.barrierType || ""} ${b.source || ""} ${b.persuasionImplication || ""}`),
+    ...(routes.primary.awarenessStageProperties || []).map((a: any) => `${a.propertyType || ""} ${a.description || ""} ${a.handlingLayer || ""}`),
+    ...(routes.primary.objectionProofLinks || []).map((o: any) => typeof o === "string" ? o : `${o.objection || ""} ${o.proofType || ""} ${o.rationale || ""} ${o.rootCause || ""}`),
+    ...(routes.primary.structuredObjections || []).map((o: any) => typeof o === "string" ? o : `${o.objectionStatement || o.objection || ""} ${o.rootCause || ""} ${o.userThinking || ""} ${o.resolution || ""} ${o.persuasionResponse || ""} ${o.causalChainAlignment || ""}`),
+    ...(routes.primary.trustTransferDesign ? [
+      routes.primary.trustTransferDesign.buyerRiskState || "",
+      routes.primary.trustTransferDesign.trustDeficit || "",
+      routes.primary.trustTransferDesign.transferMechanism?.name || "",
+      routes.primary.trustTransferDesign.transferMechanism?.description || "",
+      routes.primary.trustTransferDesign.transferMechanism?.whyCredible || "",
+    ] : []),
+    ...(routes.primary.cialdiniReasoning ? [
+      routes.primary.cialdiniReasoning.principleRationale || "",
+      routes.primary.cialdiniReasoning.buyerPsychologyFit || "",
+    ] : []),
+    ...(routes.primary.coreBeliefTransformation ? [
+      routes.primary.coreBeliefTransformation.currentBelief || "",
+      routes.primary.coreBeliefTransformation.desiredBelief || "",
+      routes.primary.coreBeliefTransformation.contradictionLogic || "",
+    ] : []),
+  ];
+  const celDepth = enforceEngineDepthCompliance(
+    "persuasion",
+    celSourceTexts,
+    activeAel || null,
+  );
+
+  let depthGateResult: DepthGateResult | null = null;
+
+  if (activeAel && isDepthBlocking(celDepth, celSourceTexts)) {
+    depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: BLOCKED (depthScore=${celDepth.causalDepthScore}, violations=${celDepth.violations.length}) — non-generative engine, no retry`], celSourceTexts);
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
     }
+    console.log(`[PersuasionEngine-V3] DEPTH_GATE: DEPTH_FAILED — non-generative engine, cannot retry | depthScore=${celDepth.causalDepthScore}`);
+    routes.primary.persuasionStrengthScore = 0;
+    routes.alternative.persuasionStrengthScore = 0;
+
+    const failedAcceptability = assessStrategyAcceptability(0, 0, allLayers.length, false, [...structuralWarnings, "DEPTH_FAILED"]);
+
+    return applyPartialAelDowngrade("PersuasionEngine-V3", {
+      status: "DEPTH_FAILED",
+      statusMessage: `Depth gate failed: depthScore=${celDepth.causalDepthScore} — non-generative engine, cannot regenerate`,
+      primaryRoute: routes.primary,
+      alternativeRoute: routes.alternative,
+      rejectedRoute: routes.rejected,
+      layerResults: allLayers,
+      structuralWarnings: [...structuralWarnings, "DEPTH_FAILED"],
+      boundaryCheck,
+      dataReliability: reliability,
+      confidenceNormalized: true,
+      executionTimeMs: Date.now() - startTime,
+      engineVersion: ENGINE_VERSION,
+      autoCorrection,
+      strategyAcceptability: failedAcceptability,
+      celDepthCompliance: celDepth,
+      depthGateResult,
+    }, aelAck);
   }
+
+  if (celDepth.violations.length > 0) {
+    for (const logEntry of celDepth.enforcementLog) {
+      console.log(`[PersuasionEngine-V3] CEL_DEPTH: ${logEntry}`);
+    }
+    if (!celDepth.passed) {
+      routes.primary.persuasionStrengthScore = applyDepthPenalty(routes.primary.persuasionStrengthScore, celDepth);
+      routes.alternative.persuasionStrengthScore = applyDepthPenalty(routes.alternative.persuasionStrengthScore, celDepth);
+    }
+  } else {
+    console.log(`[PersuasionEngine-V3] CEL_DEPTH: CLEAN | depthScore=${celDepth.causalDepthScore} | rootCauseRefs=${celDepth.rootCauseReferences}`);
+  }
+
+  depthGateResult = buildDepthGateResult(celDepth, 1, 1, [`Attempt 1: PASSED (depthScore=${celDepth.causalDepthScore})`], celSourceTexts);
+
+  const finalLayersPassed = allLayers.filter(l => l.passed).length;
+  const finalConfidence = routes.primary.persuasionStrengthScore;
+  const acceptability = assessStrategyAcceptability(
+    finalConfidence, finalLayersPassed, allLayers.length,
+    boundaryCheck.passed,
+    structuralWarnings,
+  );
 
   const resolvedLaneId = targetLane?.laneId || targetLane?.id || (audience as any)?.laneId || (strategic as any)?.laneId;
   const resolvedFunnelSnapshotId = (funnel as any)?.snapshotId || (funnel as any)?.id || (funnel as any)?.funnelSnapshotId;
@@ -3103,13 +3659,123 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
     if (resolvedFunnelSnapshotId) routes.primary.funnelSnapshotId = resolvedFunnelSnapshotId;
   }
 
+  // Build Canonical Persuasion Input
+  const authoritativeProductFacts = (canonicalProductFacts || []).map((f: any, idx: number) => ({
+    factId: f.productTruthFactId || f.factId || `fact_${idx + 1}`,
+    statement: f.statement || String(f),
+    factType: f.factType || "CAPABILITY",
+    status: f.status || "ESTABLISHED",
+    rationale: f.rationale,
+    evidenceRefIds: f.evidenceRefIds,
+    campaignId: f.campaignId,
+    accountId: f.accountId,
+  }));
+
+  const laneTitle = targetLane?.title || targetLane?.name || (audience as any)?.laneContext?.title || "Target Strategic Lane";
+  const laneDesc = targetLane?.description || (audience as any)?.laneContext?.description || "";
+  const targetRole = targetLane?.targetRole || targetLane?.segmentName || (productDna as any)?.targetDecisionMaker || "Target Buyer";
+  const coreOffer = offer?.coreOutcome || (productDna as any)?.coreOffer || strategic?.doctrine?.productAnchor?.name || "Offering";
+  const positioningAxis = positioning?.narrativeDirection || positioning?.positioningStatement || strategic?.doctrine?.productAnchor?.coreProblemSolved || "Strategic Differentiation";
+
+  const canonicalInput = {
+    productTruth: authoritativeProductFacts.length > 0 ? authoritativeProductFacts : [
+      {
+        factId: "fact_fallback_doctrine",
+        statement: psAnchor?.differentiatingFeature || psAnchor?.coreProblemSolved || coreOffer || "Core capability",
+        factType: "CAPABILITY",
+        status: "ESTABLISHED",
+      }
+    ],
+    strategicAuthority: {
+      strategyRootId: strategic?.strategyRootId || "pinned_root",
+      primaryAxis: positioningAxis,
+      contrastAxisText: (offer as any)?.enemyDefinition || positioning?.enemyDefinition || "Standard Alternatives",
+      approvedMechanism: {
+        name: approvedMech.name,
+        description: approvedMech.description,
+        steps: [],
+        promise: offer?.coreOutcome || null,
+      },
+      approvedClaims: differentiation?.claimStructures?.map((c: any) => typeof c === "string" ? c : c.claim) || [],
+      approvedPromise: offer?.coreOutcome || null,
+      narrativeDirection: positioning?.narrativeDirection,
+      enemyDefinition: (offer as any)?.enemyDefinition || positioning?.enemyDefinition,
+    },
+    laneContext: {
+      laneId: resolvedLaneId || "lane_1",
+      title: laneTitle,
+      description: laneDesc,
+      targetRole,
+      segmentId: targetSegment?.id,
+      segmentName: targetSegment?.name,
+      primaryPainId: resolvedPrimaryCorePainId,
+      corePainIds: targetLane?.corePainIds || [],
+      objections: objectionStatements.length > 0 ? objectionStatements : ["Product trust and delivery friction"],
+      funnelStage: (funnel as any)?.stages?.[0]?.stageName,
+      funnelType: (funnel as any)?.funnelType,
+      awarenessStage: awareness.targetReadinessStage || "unknown",
+    },
+    proposalsAndUnknowns: {
+      unverifiedCapabilities: [],
+      proposedMarketingAssets: [],
+      missingProofGaps: [],
+    },
+    accountId: accountId || "system",
+    campaignId: (strategic as any)?.campaignId || "unknown",
+  };
+
+  const { judgePersuasionCandidate } = await import("./semantic-judge");
+  const { repairPersuasionCandidate } = await import("./repair");
+
+  let judgeVerdict = await judgePersuasionCandidate({
+    candidate: routes.primary,
+    canonicalInput,
+  });
+
+  let repairResult: any = null;
+  if (judgeVerdict.verdict === "REJECTED") {
+    console.log(`[PersuasionEngine-V3] SEMANTIC_JUDGE_REJECTED | reasons=${judgeVerdict.reason} | initiating targeted repair`);
+    repairResult = await repairPersuasionCandidate({
+      candidate: routes.primary,
+      judgeVerdict,
+      canonicalInput,
+      maxRepairs: 3,
+    });
+    routes.primary = repairResult.repairedCandidate.primary || repairResult.repairedCandidate.primaryRoute || repairResult.repairedCandidate;
+    judgeVerdict = repairResult.finalVerdict;
+  }
+
+  let laneStatus: string = STATUS.COMPLETE;
+  let laneStatusMessage: string | null = null;
+
+  if (judgeVerdict.verdict === "ACCEPTED") {
+    laneStatus = STATUS.COMPLETE;
+    laneStatusMessage = judgeVerdict.reason;
+  } else {
+    if (judgeVerdict.strategicAlignmentVerdict === "MISALIGNED") {
+      laneStatus = STATUS.POSITIONING_DRIFT;
+      laneStatusMessage = `POSITIONING_DRIFT: ${judgeVerdict.reason}`;
+    } else if (judgeVerdict.factualSupportVerdict === "UNSUPPORTED") {
+      laneStatus = "FACTUAL_UNSUPPORTED";
+      laneStatusMessage = `FACTUAL_UNSUPPORTED: ${judgeVerdict.reason}`;
+    } else {
+      laneStatus = STATUS.PARTIAL;
+      laneStatusMessage = `PARTIAL: ${judgeVerdict.reason}`;
+    }
+  }
+
+  routes.primary.semanticJudgeVerdict = judgeVerdict;
+  if (repairResult?.repairLogs) {
+    routes.primary.repairLogs = repairResult.repairLogs;
+  }
+
   const __persuasionResult = {
     laneId: resolvedLaneId,
     primaryCorePainId: resolvedPrimaryCorePainId,
     segmentIds: resolvedSegmentIds,
     funnelSnapshotId: resolvedFunnelSnapshotId,
-    status: driftStatus,
-    statusMessage: driftStatusMessage,
+    status: laneStatus,
+    statusMessage: laneStatusMessage,
     primaryRoute: routes.primary,
     alternativeRoute: routes.alternative,
     rejectedRoute: routes.rejected,
@@ -3124,6 +3790,8 @@ Differentiating feature: ${psAnchor.differentiatingFeature}
     strategyAcceptability: acceptability,
     celDepthCompliance: celDepth,
     depthGateResult,
+    semanticJudgeVerdict: judgeVerdict,
+    repairLogs: repairResult?.repairLogs || [],
   };
   return applyPartialAelDowngrade("PersuasionEngine-V3", __persuasionResult, aelAck);
 }

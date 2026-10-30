@@ -12,35 +12,7 @@ export const reportsRouter = Router();
 reportsRouter.get("/monthly", requireCampaign, async (req: Request, res: Response) => {
   try {
     const { accountId, campaignId } = (req as any).campaignContext;
-    let reports = await listMonthlyReportsForCampaign(accountId, campaignId);
-
-    // If no reports exist yet for the campaign, seed the canonical current/recent month (e.g. August 2026)
-    if (reports.length === 0) {
-      const now = new Date();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth() + 1;
-
-      // Generate for current month (or August 2026 for Buffer test baseline)
-      const seeded = await generateOrGetMonthlyReport({
-        accountId,
-        campaignId,
-        year: currentYear,
-        month: currentMonth,
-      });
-
-      // Also ensure August 2026 finalized report exists if current is past August
-      if (currentYear > 2026 || (currentYear === 2026 && currentMonth > 8)) {
-        await generateOrGetMonthlyReport({
-          accountId,
-          campaignId,
-          year: 2026,
-          month: 8,
-          forceFinalize: true,
-        });
-      }
-
-      reports = await listMonthlyReportsForCampaign(accountId, campaignId);
-    }
+    const reports = await listMonthlyReportsForCampaign(accountId, campaignId);
 
     return res.json({
       success: true,

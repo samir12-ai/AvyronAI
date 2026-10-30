@@ -27,10 +27,95 @@ export interface MarketOverviewViewModel {
     label: string;
   };
   totalCompetitorsAnalyzed: number;
+  totalCompetitorsActive?: number;
+  totalCompetitorsRegistered?: number;
+  totalCompetitorsWithUnderstanding?: number;
+  coveragePercentage?: number;
+  evidenceCoverage?: {
+    count: number;
+    total: number;
+    percentage: number;
+    basis: string;
+  };
+  analyticalConfidence?: {
+    score: number;
+    level: string;
+    label: string;
+    rationale: string;
+  };
+  processingCompletion?: {
+    count: number;
+    total: number;
+    percentage: number;
+    label: string;
+  };
+  targetMarket?: string;
+  pricingSummary?: string;
+  cohortMetrics?: {
+    targetMarket: string;
+    targetMarketSource: string;
+    localCount: number;
+    internationalCount: number;
+    totalPrimaryCohort: number;
+    localPercentage: number;
+    totalMonitoredLibrary: number;
+    majorityStatus: string;
+  };
   keyPatterns: MarketPatternViewModel[];
   marketDiagnosis: string;
   opportunities: string[];
   threats: string[];
+
+  // Section B: Competitor Positioning & Brand Claims
+  positioningSummaries?: Array<{
+    competitorId: string;
+    competitorName: string;
+    positioningStatement: string;
+    primaryPromise: string;
+    isBrandClaim: boolean;
+    claimSource?: string;
+  }>;
+
+  // Section C: Products, Pricing & Commercial Terms
+  commercialTerms?: Array<{
+    competitorId: string;
+    competitorName: string;
+    termType: 'SHIPPING' | 'RETURNS' | 'PRICING_MODEL' | 'DELIVERY';
+    label: string;
+    detail: string;
+    evidenceContext: string;
+  }>;
+
+  // Section D: Attributed Customer Voice
+  customerVoiceEvidence?: Array<{
+    id: string;
+    competitorName?: string;
+    platform: string;
+    sourceUrl?: string;
+    verbatimExcerpt: string;
+    strategicTheme: string;
+    publishedDate?: string;
+  }>;
+
+  // Section F: Grounded Strategic Findings
+  groundedFindings?: {
+    opportunities: Array<{
+      title: string;
+      observation: string;
+      scopeTag?: 'OBSERVED_IN_TARGET_MARKET' | 'GLOBAL_PATTERN' | 'PROPOSED_OPPORTUNITY';
+      scopeLabel?: string;
+      prerequisite: string;
+      groundedEvidence: string;
+    }>;
+    risks: Array<{
+      title: string;
+      riskFactor: string;
+      scopeTag?: 'OBSERVED_IN_TARGET_MARKET' | 'GLOBAL_PATTERN' | 'PROPOSED_OPPORTUNITY';
+      scopeLabel?: string;
+      mitigation: string;
+      competitorsExhibiting: string[];
+    }>;
+  };
 }
 
 export interface CompetitorCapabilityViewModel {
@@ -129,7 +214,7 @@ export interface CompetitorComparisonViewModel {
 
 export interface CompetitorEvidenceItemViewModel {
   id: string;
-  sourceType: 'website' | 'social_post' | 'profile';
+  sourceType: 'website' | 'social_post' | 'profile' | 'customer_review';
   sourceUrl?: string;
   excerpt: string;
   context: string;
@@ -144,6 +229,10 @@ export interface CompetitorSummaryItemViewModel {
   oneLineSummary: string;
   primaryPositioning: string;
   tier: string;
+  strategicRole?: string;
+  isPrimaryCohort?: boolean;
+  geographicStatus?: 'LOCAL_MARKET' | 'GLOBAL_RELEVANT' | 'DIRECT_LEBANON' | 'REGIONAL_DELIVERS_TO_LEBANON' | 'REFERENCE_BRAND' | 'UNKNOWN';
+  geographicLabel?: string;
   hasWebsiteData: boolean;
   hasSocialData: boolean;
   recentChangesCount: number;
@@ -163,12 +252,15 @@ export interface CompetitorDossierViewModel {
     primaryAudience: string;
     dataFreshnessLabel: string;
     sourcesReviewedCount: number;
+    geographicStatus?: 'LOCAL_MARKET' | 'GLOBAL_RELEVANT' | 'DIRECT_LEBANON' | 'REGIONAL_DELIVERS_TO_LEBANON' | 'REFERENCE_BRAND' | 'UNKNOWN';
+    geographicLabel?: string;
+    geographicDetails?: string;
   };
   whatTheyDo: {
     coreProductSummary: string;
     keyJobs: string[];
     commercialRole: string;
-    status: 'COMPLETE' | 'INSUFFICIENT_DATA';
+    status: 'COMPLETE' | 'PARTIAL_EVIDENCE' | 'INSUFFICIENT_DATA';
   };
   whatTheyOffer: {
     capabilities: CompetitorCapabilityViewModel[];
@@ -202,6 +294,8 @@ export interface CompetitorDossierViewModel {
     offers: CompetitorOfferViewModel[];
     pricingFraming: string;
     primaryCtaBehavior: string;
+    geographicAvailability?: string;
+    knownDeliveredCost?: string;
   };
   proofStrategy: {
     proofItems: CompetitorProofViewModel[];

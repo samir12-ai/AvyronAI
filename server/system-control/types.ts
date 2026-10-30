@@ -268,6 +268,7 @@ export type CommercialDisease =
   | "execution_readiness_gap"        // strategy ahead of operational readiness
   | "category_position_collapse"     // positioning hasn't earned its game
   | "system_data_insufficiency"      // can't reason — upstream signals too thin
+  | "technical_pipeline_interruption" // pipeline halted due to technical or judge-contract error, not data insufficiency
   | "unknown_disease";               // pattern doesn't match a known disease
 
 export interface CausalDiagnosisStep {

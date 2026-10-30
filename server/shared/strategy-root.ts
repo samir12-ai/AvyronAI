@@ -1,12 +1,26 @@
 import crypto from "crypto";
 import { db } from "../db";
-import { strategyRoots, offerSnapshots, funnelSnapshots, integritySnapshots } from "@shared/schema";
-import { eq, and, desc, ne, sql } from "drizzle-orm";
+import {
+  strategyRoots,
+  offerSnapshots,
+  funnelSnapshots,
+  integritySnapshots,
+  audienceSnapshots,
+  positioningSnapshots,
+  differentiationSnapshots,
+  mechanismSnapshots,
+  miSnapshots,
+  awarenessSnapshots,
+} from "@shared/schema";
+import { eq, and, desc, ne, sql, or } from "drizzle-orm";
 import { validateAudiencePainRegistry } from "./audience-pain-registry";
+import { areMiSnapshotsCompatible, validateBundleLineageCompatibility } from "./dependency-contract";
 
 export interface StrategyRootInput {
   campaignId: string;
   accountId: string;
+  jobId?: string;
+  runId?: string;
   miSnapshotId: string;
   audienceSnapshotId: string;
   positioningSnapshotId: string;
@@ -27,6 +41,7 @@ export interface StrategyRootInput {
   approvedPositioningContext: any;
   brandSpine?: any;
   approvedLanes?: any[];
+  approvedProposals?: any[];
 }
 
 /**
@@ -59,7 +74,35 @@ export function assertCompleteRoot(subject: any, phase: "build" | "consume" = "b
   }
 
   if (!subject.primaryAxis) missing.push("primary_axis");
-  if (!subject.mechanismSnapshotId) missing.push("approved_mechanism");
+  if (!subject.mechanismSnapshotId) {
+    missing.push("approved_mechanism");
+  } else if (subject.approvedMechanism !== undefined) {
+    const rawMech = subject.approvedMechanism;
+    const mech = typeof rawMech === "string" ? safeJsonParse(rawMech, rawMech) : rawMech;
+    if (!mech || mech === "n/a") {
+      missing.push("approved_mechanism");
+    } else if (typeof mech === "string" && (mech.trim() === "" || mech === "NO_DISTINCT_MECHANISM_ESTABLISHED")) {
+      missing.push("approved_mechanism");
+    } else if (typeof mech === "object") {
+      const nonAuthMechStatuses = [
+        "NO_DISTINCT_MECHANISM_ESTABLISHED",
+        "FAILED",
+        "INCOMPLETE",
+        "AXIS_REJECTED",
+        "SEMANTIC_ROLE_BLOCKED",
+        "DEPTH_FAILED",
+      ];
+      const effectiveMech = mech.primaryMechanism || mech;
+      if (
+        nonAuthMechStatuses.includes(mech.status) ||
+        nonAuthMechStatuses.includes(effectiveMech.status) ||
+        effectiveMech.mechanismName === "n/a" ||
+        (effectiveMech.mechanismName !== undefined && effectiveMech.mechanismName.trim() === "")
+      ) {
+        missing.push("approved_mechanism");
+      }
+    }
+  }
   if (!subject.audienceSnapshotId) missing.push("audience_data");
   if (!subject.contrastAxisText) missing.push("contrast_axis");
 
@@ -123,16 +166,138 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
     throw new StrategyRootIncompleteError(missing, "build");
   }
 
+  // ---------------------------------------------------------------
+  // PROVENANCE GRAPH LINKAGE ENFORCEMENT
+  // StrategyRoot verifies the immutable provenance graph of child snapshots:
+  // 1. Snapshot existence in database.
+  // 2. Tenant and campaign isolation (accountId, campaignId match).
+  // 3. Parent-child DAG linkages across positioning, differentiation, mechanism, and audience.
+  // Physical job IDs are recorded for the current execution run, but cross-run
+  // resumed snapshots with valid provenance are fully authoritative.
+  // ---------------------------------------------------------------
+  const [audRow] = input.audienceSnapshotId
+    ? await db.select({
+        id: audienceSnapshots.id,
+        accountId: audienceSnapshots.accountId,
+        campaignId: audienceSnapshots.campaignId,
+        jobId: audienceSnapshots.jobId,
+      }).from(audienceSnapshots).where(eq(audienceSnapshots.id, input.audienceSnapshotId)).limit(1)
+    : [null];
+
+  const [posRow] = input.positioningSnapshotId
+    ? await db.select({
+        id: positioningSnapshots.id,
+        accountId: positioningSnapshots.accountId,
+        campaignId: positioningSnapshots.campaignId,
+        jobId: positioningSnapshots.jobId,
+        miSnapshotId: positioningSnapshots.miSnapshotId,
+        audienceSnapshotId: positioningSnapshots.audienceSnapshotId,
+      }).from(positioningSnapshots).where(eq(positioningSnapshots.id, input.positioningSnapshotId)).limit(1)
+    : [null];
+
+  const [diffRow] = input.differentiationSnapshotId
+    ? await db.select({
+        id: differentiationSnapshots.id,
+        accountId: differentiationSnapshots.accountId,
+        campaignId: differentiationSnapshots.campaignId,
+        jobId: differentiationSnapshots.jobId,
+        miSnapshotId: differentiationSnapshots.miSnapshotId,
+        audienceSnapshotId: differentiationSnapshots.audienceSnapshotId,
+        positioningSnapshotId: differentiationSnapshots.positioningSnapshotId,
+      }).from(differentiationSnapshots).where(eq(differentiationSnapshots.id, input.differentiationSnapshotId)).limit(1)
+    : [null];
+
+  const [mechRow] = input.mechanismSnapshotId
+    ? await db.select({
+        id: mechanismSnapshots.id,
+        accountId: mechanismSnapshots.accountId,
+        campaignId: mechanismSnapshots.campaignId,
+        jobId: mechanismSnapshots.jobId,
+        positioningSnapshotId: mechanismSnapshots.positioningSnapshotId,
+        differentiationSnapshotId: mechanismSnapshots.differentiationSnapshotId,
+      }).from(mechanismSnapshots).where(eq(mechanismSnapshots.id, input.mechanismSnapshotId)).limit(1)
+    : [null];
+
+  const provenanceIssues: string[] = [];
+
+  // 1. Existence check
+  if (input.audienceSnapshotId && !audRow) {
+    provenanceIssues.push(`snapshot_not_found: audience snapshot ${input.audienceSnapshotId}`);
+  }
+  if (input.positioningSnapshotId && !posRow) {
+    provenanceIssues.push(`snapshot_not_found: positioning snapshot ${input.positioningSnapshotId}`);
+  }
+  if (input.differentiationSnapshotId && !diffRow) {
+    provenanceIssues.push(`snapshot_not_found: differentiation snapshot ${input.differentiationSnapshotId}`);
+  }
+  if (input.mechanismSnapshotId && !mechRow) {
+    provenanceIssues.push(`snapshot_not_found: mechanism snapshot ${input.mechanismSnapshotId}`);
+  }
+
+  // 2. Tenant and Campaign isolation
+  const snapshotsToCheck = [
+    { name: "audience", row: audRow },
+    { name: "positioning", row: posRow },
+    { name: "differentiation", row: diffRow },
+    { name: "mechanism", row: mechRow },
+  ];
+
+  for (const { name, row } of snapshotsToCheck) {
+    if (row) {
+      if (row.accountId && row.accountId !== input.accountId) {
+        provenanceIssues.push(`tenant_isolation_violation: ${name} snapshot belongs to account ${row.accountId}, expected ${input.accountId}`);
+      }
+      if (row.campaignId && row.campaignId !== input.campaignId) {
+        provenanceIssues.push(`campaign_isolation_violation: ${name} snapshot belongs to campaign ${row.campaignId}, expected ${input.campaignId}`);
+      }
+    }
+  }
+
+  // 3. DAG Parent-Child Linkages (including MI snapshot compatibility)
+  if (posRow && input.miSnapshotId) {
+    const posMiCompat = await areMiSnapshotsCompatible((posRow as any).miSnapshotId, input.miSnapshotId);
+    if (!posMiCompat.compatible) {
+      provenanceIssues.push(`provenance_linkage_mismatch: positioning snapshot ${posRow.id} references incompatible MI snapshot ${(posRow as any).miSnapshotId}, expected ${input.miSnapshotId} (${posMiCompat.reason})`);
+    }
+  }
+  if (diffRow && input.miSnapshotId) {
+    const diffMiCompat = await areMiSnapshotsCompatible((diffRow as any).miSnapshotId, input.miSnapshotId);
+    if (!diffMiCompat.compatible) {
+      provenanceIssues.push(`provenance_linkage_mismatch: differentiation snapshot ${diffRow.id} references incompatible MI snapshot ${(diffRow as any).miSnapshotId}, expected ${input.miSnapshotId} (${diffMiCompat.reason})`);
+    }
+  }
+  if (posRow && input.audienceSnapshotId && posRow.audienceSnapshotId && posRow.audienceSnapshotId !== input.audienceSnapshotId) {
+    provenanceIssues.push(`provenance_linkage_mismatch: positioning snapshot references audience ${posRow.audienceSnapshotId}, expected ${input.audienceSnapshotId}`);
+  }
+  if (diffRow) {
+    if (input.positioningSnapshotId && diffRow.positioningSnapshotId && diffRow.positioningSnapshotId !== "N/A" && diffRow.positioningSnapshotId !== input.positioningSnapshotId) {
+      provenanceIssues.push(`provenance_linkage_mismatch: differentiation snapshot references positioning ${diffRow.positioningSnapshotId}, expected ${input.positioningSnapshotId}`);
+    }
+    if (input.audienceSnapshotId && diffRow.audienceSnapshotId && diffRow.audienceSnapshotId !== input.audienceSnapshotId) {
+      provenanceIssues.push(`provenance_linkage_mismatch: differentiation snapshot references audience ${diffRow.audienceSnapshotId}, expected ${input.audienceSnapshotId}`);
+    }
+  }
+  if (mechRow) {
+    if (input.positioningSnapshotId && mechRow.positioningSnapshotId && mechRow.positioningSnapshotId !== input.positioningSnapshotId) {
+      provenanceIssues.push(`provenance_linkage_mismatch: mechanism snapshot references positioning ${mechRow.positioningSnapshotId}, expected ${input.positioningSnapshotId}`);
+    }
+    if (input.differentiationSnapshotId && mechRow.differentiationSnapshotId && mechRow.differentiationSnapshotId !== input.differentiationSnapshotId) {
+      provenanceIssues.push(`provenance_linkage_mismatch: mechanism snapshot references differentiation ${mechRow.differentiationSnapshotId}, expected ${input.differentiationSnapshotId}`);
+    }
+  }
+
+  if (provenanceIssues.length > 0) {
+    console.error(`[StrategyRoot] PROVENANCE_GRAPH_VIOLATION | ${provenanceIssues.join("; ")}`);
+    throw new StrategyRootIncompleteError(provenanceIssues, "build");
+  }
+
   const rootHash = computeRootHash(input);
-  const runId = generateRunId();
+  const runId = input.jobId || input.runId || generateRunId();
 
   // ---------------------------------------------------------------
   // ATOMIC SUPERSEDE + INSERT
-  // The previous implementation ran SELECT → UPDATE → INSERT in three
-  // separate statements. Concurrent calls (parallel orchestrator runs
-  // for the same campaign, mechanism-engine + orchestrator racing, or
-  // dual-analysis re-runs) could leave 0 or 2+ ACTIVE rows. We now
-  // serialize through a transaction with row-level locks (FOR UPDATE)
+  // Every run generates a fresh StrategyRoot record.
+  // We serialize through a transaction with row-level locks (FOR UPDATE)
   // and a uniqueness invariant verified before commit.
   // ---------------------------------------------------------------
   return await db.transaction(async (tx: any) => {
@@ -144,21 +309,6 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
          AND account_id  = ${input.accountId}
        FOR UPDATE
     `);
-
-    // Idempotent reuse: same hash already ACTIVE → return it, do nothing else.
-    const [existing] = await tx.select().from(strategyRoots)
-      .where(and(
-        eq(strategyRoots.campaignId, input.campaignId),
-        eq(strategyRoots.accountId, input.accountId),
-        eq(strategyRoots.rootHash, rootHash),
-        eq(strategyRoots.status, "ACTIVE"),
-      ))
-      .limit(1);
-
-    if (existing) {
-      console.log(`[StrategyRoot] REUSE | existing root ${existing.id} | hash=${rootHash} | campaign=${input.campaignId}`);
-      return { id: existing.id, runId: existing.runId, rootHash, isNew: false };
-    }
 
     // Supersede any existing ACTIVE roots for this (campaign, account).
     await tx.update(strategyRoots)
@@ -215,17 +365,230 @@ export async function buildStrategyRoot(input: StrategyRootInput): Promise<{
   });
 }
 
-export async function getActiveRoot(campaignId: string, accountId: string): Promise<any | null> {
+/**
+ * Reconstructs a Strategy Root row from the database into a fully typed and
+ * deserialized StrategyRoot object where JSON fields (especially approvedLanes,
+ * approvedAudiencePains, approvedDesires, etc.) are guaranteed to be proper Arrays/Objects.
+ */
+export function reconstructStrategyRoot(rawRow: any): any {
+  if (!rawRow) return null;
+
+  const parseArray = (val: any): any[] => {
+    if (Array.isArray(val)) return val;
+    if (typeof val === "string") {
+      try {
+        const parsed = JSON.parse(val);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  const parseObj = (val: any): any => {
+    if (val === null || val === undefined) return null;
+    if (typeof val === "object") return val;
+    if (typeof val === "string") {
+      try {
+        return JSON.parse(val);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  return {
+    ...rawRow,
+    approvedLanes: parseArray(rawRow.approvedLanes),
+    approvedAudiencePains: parseArray(rawRow.approvedAudiencePains),
+    approvedDesires: parseArray(rawRow.approvedDesires),
+    approvedObjections: parseArray(rawRow.approvedObjections),
+    approvedProofTypes: parseArray(rawRow.approvedProofTypes),
+    approvedClaims: parseArray(rawRow.approvedClaims),
+    approvedMechanism: parseObj(rawRow.approvedMechanism),
+    approvedPositioningContext: parseObj(rawRow.approvedPositioningContext),
+    brandSpine: parseObj(rawRow.brandSpine),
+  };
+}
+
+export type StrategyRootStatus = "ACTIVE" | "REVIEW_REQUIRED" | "SUPERSEDED";
+
+/**
+ * Authoritative resolver for an execution-eligible Strategy Root.
+ * Returns ONLY an active root (status === "ACTIVE").
+ * Never falls back to superseded roots or latest timestamp.
+ */
+export async function getExecutionEligibleRoot(
+  campaignId: string,
+  accountId?: string
+): Promise<any | null> {
+  const conditions = [
+    eq(strategyRoots.campaignId, campaignId),
+    eq(strategyRoots.status, "ACTIVE"),
+  ];
+  if (accountId) {
+    conditions.push(eq(strategyRoots.accountId, accountId));
+  }
+
   const [active] = await db.select().from(strategyRoots)
-    .where(and(
-      eq(strategyRoots.campaignId, campaignId),
-      eq(strategyRoots.accountId, accountId),
-      eq(strategyRoots.status, "ACTIVE"),
-    ))
+    .where(and(...conditions))
     .orderBy(desc(strategyRoots.createdAt))
     .limit(1);
 
-  return active || null;
+  if (!active) return null;
+  return reconstructStrategyRoot(active);
+}
+
+/**
+ * Historical inspection resolver.
+ * May return SUPERSEDED or REVIEW_REQUIRED roots, flagged with executionEligible: false.
+ */
+export async function getRootForHistoricalView(
+  campaignId: string,
+  accountId?: string,
+  rootId?: string
+): Promise<{ root: any | null; executionEligible: boolean; status: string | null }> {
+  let row: any = null;
+  if (rootId) {
+    const conditions = [
+      eq(strategyRoots.id, rootId),
+      eq(strategyRoots.campaignId, campaignId),
+    ];
+    if (accountId) conditions.push(eq(strategyRoots.accountId, accountId));
+    [row] = await db.select().from(strategyRoots).where(and(...conditions)).limit(1);
+  } else {
+    const conditions = [eq(strategyRoots.campaignId, campaignId)];
+    if (accountId) conditions.push(eq(strategyRoots.accountId, accountId));
+    [row] = await db.select().from(strategyRoots).where(and(...conditions)).orderBy(desc(strategyRoots.createdAt)).limit(1);
+  }
+
+  if (!row) {
+    return { root: null, executionEligible: false, status: null };
+  }
+
+  const executionEligible = row.status === "ACTIVE";
+  return {
+    root: reconstructStrategyRoot(row),
+    executionEligible,
+    status: row.status,
+  };
+}
+
+/**
+ * Verifies whether a given strategy root is currently execution-eligible.
+ * Fails closed if the root does not exist, status is not ACTIVE, or fields are incomplete.
+ */
+export async function assertRootExecutionEligible(
+  rootId: string,
+  campaignId: string,
+  accountId?: string
+): Promise<{ eligible: boolean; root: any | null; reasons: string[] }> {
+  const conditions = [
+    eq(strategyRoots.id, rootId),
+    eq(strategyRoots.campaignId, campaignId),
+  ];
+  if (accountId) {
+    conditions.push(eq(strategyRoots.accountId, accountId));
+  }
+
+  const [row] = await db.select().from(strategyRoots).where(and(...conditions)).limit(1);
+  if (!row) {
+    return {
+      eligible: false,
+      root: null,
+      reasons: [`Strategy root '${rootId}' not found for campaign '${campaignId}'`],
+    };
+  }
+
+  const reasons: string[] = [];
+  if (row.status !== "ACTIVE") {
+    reasons.push(`Strategy root '${rootId}' has status '${row.status}' (execution requires 'ACTIVE')`);
+  }
+
+  const missingFields = assertCompleteRoot(row, "consume");
+  const lineageCheck = await validateBundleLineageCompatibility({
+    miSnapshotId: row.miSnapshotId,
+    audienceSnapshotId: row.audienceSnapshotId,
+    differentiationSnapshotId: row.differentiationSnapshotId,
+    positioningSnapshotId: row.positioningSnapshotId,
+    mechanismSnapshotId: row.mechanismSnapshotId,
+  });
+  if (!lineageCheck.compatible) {
+    for (const m of lineageCheck.mismatches) {
+      reasons.push(`Lineage mismatch in ${m.engine} (${m.snapshotId}): ${m.reason}`);
+    }
+  }
+  if (missingFields.length > 0) {
+    reasons.push(...missingFields.map((f) => `Incomplete root field: ${f}`));
+  }
+
+  if (reasons.length > 0) {
+    return { eligible: false, root: reconstructStrategyRoot(row), reasons };
+  }
+
+  return { eligible: true, root: reconstructStrategyRoot(row), reasons: [] };
+}
+
+export async function getActiveRoot(
+  campaignId: string,
+  accountId?: string,
+  options?: {
+    strategyRootId?: string;
+    allowPinnedOrLatest?: boolean;
+  }
+): Promise<any | null> {
+  if (options?.strategyRootId) {
+    const conditions = [
+      eq(strategyRoots.id, options.strategyRootId),
+      eq(strategyRoots.campaignId, campaignId),
+    ];
+    if (accountId) {
+      conditions.push(eq(strategyRoots.accountId, accountId));
+    }
+    const [pinned] = await db.select().from(strategyRoots)
+      .where(and(...conditions))
+      .limit(1);
+    if (pinned) {
+      return reconstructStrategyRoot(pinned);
+    }
+  }
+
+  const conditions = [
+    eq(strategyRoots.campaignId, campaignId),
+    eq(strategyRoots.status, "ACTIVE"),
+  ];
+  if (accountId) {
+    conditions.push(eq(strategyRoots.accountId, accountId));
+  }
+
+  const [active] = await db.select().from(strategyRoots)
+    .where(and(...conditions))
+    .orderBy(desc(strategyRoots.createdAt))
+    .limit(1);
+
+  if (active) {
+    return reconstructStrategyRoot(active);
+  }
+
+  if (options?.allowPinnedOrLatest) {
+    const fallbackConditions = [
+      eq(strategyRoots.campaignId, campaignId),
+    ];
+    if (accountId) {
+      fallbackConditions.push(eq(strategyRoots.accountId, accountId));
+    }
+    const [latest] = await db.select().from(strategyRoots)
+      .where(and(...fallbackConditions))
+      .orderBy(desc(strategyRoots.createdAt))
+      .limit(1);
+    if (latest) {
+      return reconstructStrategyRoot(latest);
+    }
+  }
+
+  return null;
 }
 
 export interface RootValidationResult {
@@ -287,7 +650,7 @@ export async function invalidateDownstreamOnRegeneration(
   campaignId: string,
   accountId: string,
   regeneratedEngine: "positioning" | "differentiation" | "audience" | "mechanism" | "mi"
-): Promise<{ supersededRoots: number; invalidatedOffers: number; invalidatedFunnels: number; invalidatedIntegrity: number }> {
+): Promise<{ reviewRequiredRoots: number; supersededRoots: number; invalidatedOffers: number; invalidatedFunnels: number; invalidatedIntegrity: number; invalidatedAwareness: number }> {
   const [activeRoot] = await db.select().from(strategyRoots)
     .where(and(
       eq(strategyRoots.campaignId, campaignId),
@@ -297,30 +660,35 @@ export async function invalidateDownstreamOnRegeneration(
     .limit(1);
 
   if (!activeRoot) {
-    return { supersededRoots: 0, invalidatedOffers: 0, invalidatedFunnels: 0, invalidatedIntegrity: 0 };
+    return { reviewRequiredRoots: 0, supersededRoots: 0, invalidatedOffers: 0, invalidatedFunnels: 0, invalidatedIntegrity: 0, invalidatedAwareness: 0 };
   }
 
-  const supersededRootId = activeRoot.id;
+  const affectedRootId = activeRoot.id;
 
+  // Upstream regeneration marks root as REVIEW_REQUIRED (not SUPERSEDED).
+  // Root assumptions must be reviewed/re-evaluated. Atomic SUPERSEDED happens when a new root is built via buildStrategyRoot.
   await db.update(strategyRoots)
-    .set({ status: "SUPERSEDED" })
+    .set({ status: "REVIEW_REQUIRED" })
     .where(and(
       eq(strategyRoots.campaignId, campaignId),
       eq(strategyRoots.accountId, accountId),
-      eq(strategyRoots.status, "ACTIVE"),
+      eq(strategyRoots.id, affectedRootId),
     ));
 
   let invalidatedOffers = 0;
   let invalidatedFunnels = 0;
   let invalidatedIntegrity = 0;
+  let invalidatedAwareness = 0;
+
+  const reasonMsg = `Review required: upstream ${regeneratedEngine} engine regenerated (root ${affectedRootId} marked REVIEW_REQUIRED)`;
 
   try {
     const offerResult = await db.update(offerSnapshots)
-      .set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` })
+      .set({ statusMessage: reasonMsg })
       .where(and(
         eq(offerSnapshots.campaignId, campaignId),
         eq(offerSnapshots.accountId, accountId),
-        eq(offerSnapshots.strategyRootId, supersededRootId),
+        eq(offerSnapshots.strategyRootId, affectedRootId),
       ));
     invalidatedOffers = (offerResult as any)?.rowCount || 0;
   } catch (e) {
@@ -328,12 +696,16 @@ export async function invalidateDownstreamOnRegeneration(
   }
 
   try {
+    // Match funnels by strategyRootId OR campaign + account + activeRoot.runId (covers funnels with null strategyRootId)
     const funnelResult = await db.update(funnelSnapshots)
-      .set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` })
+      .set({ statusMessage: reasonMsg })
       .where(and(
         eq(funnelSnapshots.campaignId, campaignId),
         eq(funnelSnapshots.accountId, accountId),
-        eq(funnelSnapshots.strategyRootId, supersededRootId),
+        or(
+          eq(funnelSnapshots.strategyRootId, affectedRootId),
+          activeRoot.runId ? eq(funnelSnapshots.jobId, activeRoot.runId) : sql`false`
+        ),
       ));
     invalidatedFunnels = (funnelResult as any)?.rowCount || 0;
   } catch (e) {
@@ -342,20 +714,35 @@ export async function invalidateDownstreamOnRegeneration(
 
   try {
     const integrityResult = await db.update(integritySnapshots)
-      .set({ statusMessage: `Invalidated: upstream ${regeneratedEngine} engine regenerated (root ${supersededRootId} superseded)` })
+      .set({ statusMessage: reasonMsg })
       .where(and(
         eq(integritySnapshots.campaignId, campaignId),
         eq(integritySnapshots.accountId, accountId),
-        eq(integritySnapshots.strategyRootId, supersededRootId),
+        eq(integritySnapshots.strategyRootId, affectedRootId),
       ));
     invalidatedIntegrity = (integrityResult as any)?.rowCount || 0;
   } catch (e) {
     console.log(`[StrategyRoot] Could not mark integrity snapshots (non-critical): ${(e as Error).message}`);
   }
 
-  console.log(`[StrategyRoot] INVALIDATED | root=${supersededRootId} | trigger=${regeneratedEngine} | campaign=${campaignId} | offers=${invalidatedOffers} | funnels=${invalidatedFunnels} | integrity=${invalidatedIntegrity}`);
+  try {
+    if (activeRoot.runId) {
+      const awarenessResult = await db.update(awarenessSnapshots)
+        .set({ statusMessage: reasonMsg })
+        .where(and(
+          eq(awarenessSnapshots.campaignId, campaignId),
+          eq(awarenessSnapshots.accountId, accountId),
+          eq(awarenessSnapshots.jobId, activeRoot.runId),
+        ));
+      invalidatedAwareness = (awarenessResult as any)?.rowCount || 0;
+    }
+  } catch (e) {
+    console.log(`[StrategyRoot] Could not mark awareness snapshots (non-critical): ${(e as Error).message}`);
+  }
 
-  return { supersededRoots: 1, invalidatedOffers, invalidatedFunnels, invalidatedIntegrity };
+  console.log(`[StrategyRoot] MARKED_REVIEW_REQUIRED | root=${affectedRootId} | trigger=${regeneratedEngine} | campaign=${campaignId} | offers=${invalidatedOffers} | funnels=${invalidatedFunnels} | integrity=${invalidatedIntegrity} | awareness=${invalidatedAwareness}`);
+
+  return { reviewRequiredRoots: 1, supersededRoots: 0, invalidatedOffers, invalidatedFunnels, invalidatedIntegrity, invalidatedAwareness };
 }
 
 export function validatePreGeneration(activeRoot: any): {

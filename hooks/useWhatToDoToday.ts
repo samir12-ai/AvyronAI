@@ -101,6 +101,17 @@ export function useWhatToDoToday(campaignId?: string | null) {
 
   useEffect(() => {
     fetchPlan();
+    const handleDemoChange = () => {
+      fetchPlan(true, false);
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('avyron-demo-state-changed', handleDemoChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('avyron-demo-state-changed', handleDemoChange);
+      }
+    };
   }, [fetchPlan]);
 
   const updateTaskStatus = async (taskId: string, newStatus: ExecutionTaskItem['status']) => {

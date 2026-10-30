@@ -1,6 +1,12 @@
 import { aiChat } from "../ai-client";
 import { acknowledgeAelInput, applyPartialAelDowngrade } from "../analytical-enrichment-layer/consumer-guard";
 import { checkGroundingContract } from "../shared/grounding-contract";
+import { evaluateClaimSemanticEntailment } from "../shared/claim-entailment";
+import {
+  type AuthoritativeCompetitorEvidenceContext,
+  evaluateAwarenessComparativeClaims,
+  repairContradictedMythBreaker,
+} from "./competitor-evidence-guard";
 import type { MythBreakerReasoning } from "./types";
 
 interface RootCauseRef {
@@ -30,6 +36,21 @@ function extractRootCausesFromAEL(ael: any): RootCauseRef[] {
   return candidates.slice(0, 8);
 }
 
+function formatTextItem(item: any): string {
+  if (!item) return "";
+  if (typeof item === "string") return item.trim();
+  if (typeof item === "object") {
+    const val = item.statement || item.canonical || item.belief || item.pain || item.objection || item.text || item.description || (Array.isArray(item.evidence) && item.evidence[0]) || "";
+    if (typeof val === "string" && val.trim()) return val.trim();
+    try {
+      return JSON.stringify(item);
+    } catch {
+      return "";
+    }
+  }
+  return String(item).trim();
+}
+
 function buildPrompt(args: {
   rootCauses: RootCauseRef[];
   audienceObjections: string[];
@@ -41,18 +62,25 @@ function buildPrompt(args: {
   awarenessStage: string;
   sophisticationTier: number | null;
   rejectedClaimPatterns: string[];
+  productTruthFacts?: string[];
+  competitorEvidenceContext?: AuthoritativeCompetitorEvidenceContext | null;
 }): string {
   const rcBlock = args.rootCauses.length
     ? args.rootCauses.map(rc => `${rc.id}: ${rc.description}`).join("\n")
     : "(no root causes — use audience pains instead)";
-  const objBlock = args.audienceObjections.slice(0, 8).map((o, i) => `[OBJ${i + 1}] ${o}`).join("\n") || "(none)";
-  const beliefBlock = args.audienceBeliefs.slice(0, 6).map((b, i) => `[BLF${i + 1}] ${b}`).join("\n") || "(none)";
-  const painBlock = args.audiencePains.slice(0, 8).map((p, i) => `[PAIN${i + 1}] ${p}`).join("\n") || "(none)";
+  const objBlock = args.audienceObjections.map(formatTextItem).filter(Boolean).slice(0, 8).map((o, i) => `[OBJ${i + 1}] ${o}`).join("\n") || "(none)";
+  const beliefBlock = args.audienceBeliefs.map(formatTextItem).filter(Boolean).slice(0, 6).map((b, i) => `[BLF${i + 1}] ${b}`).join("\n") || "(none)";
+  const painBlock = args.audiencePains.map(formatTextItem).filter(Boolean).slice(0, 8).map((p, i) => `[PAIN${i + 1}] ${p}`).join("\n") || "(none)";
   const rejectedBlock = args.rejectedClaimPatterns.length ? args.rejectedClaimPatterns.slice(0, 6).map(r => `- ${r}`).join("\n") : "(none observed)";
+  const factsBlock = args.productTruthFacts && args.productTruthFacts.length > 0
+    ? `\n═══ VERIFIED PRODUCT TRUTH FACTS (CANONICAL BOUNDARIES) ═══\n${args.productTruthFacts.map((f, i) => `[FACT${i + 1}] ${f}`).join("\n")}\n`
+    : "";
+  const compBlock = args.competitorEvidenceContext?.promptBlock
+    ? `\n${args.competitorEvidenceContext.promptBlock}\n`
+    : "";
 
   return `You are a Direct-Response Myth-Breaker writer.
-Your job: pick ONE belief the audience holds, contradict it, and tie the contradiction to a specific root cause from the Analytical Enrichment Layer.
-
+Your job: pick ONE belief the audience holds, contradict it, and tie the contradiction to a specific root cause from the Analytical Enrichment Layer.${factsBlock}${compBlock}
 ═══ ROOT CAUSES (cite by id, e.g. RC1) ═══
 ${rcBlock}
 
@@ -84,7 +112,15 @@ ${rejectedBlock}
 5. contradictionLogic must explain in plain language: "The audience believes X because of Y. The actual root cause is Z, so the right answer is W."
 6. No marketing jargon. No "transform", "unlock", "leverage", "scale", "optimize", "next-level".
 7. Return ONLY valid JSON.
-8. CAPABILITY & PRODUCT TRUTH BOUNDARY: Do NOT claim the product provides capabilities (such as automated refund processing, billing tools, dispute management, or customer support) outside the Product Anchor / Product Truth. Frame the contradiction around the real product capabilities (e.g. modular autonomous digital agents, workflow automation, and verified continuous intelligence).
+8. CAPABILITY & PRODUCT TRUTH BOUNDARY (ANTI-PAIN-INVERSION & HONEST COMPETITIVE SCOPE):
+   - You MUST NOT invert audience pain points or desires into asserted product capabilities. Audience pains and desires are market perceptions; they are NOT product feature claims.
+   - Do NOT assert unverified product attributes, materials, or guarantees (e.g. do NOT claim 'breathable', 'natural fibers', 'non-see-through', 'no layering required', 'fast shipping guaranteed', 'money-back guarantee', 'revision guarantees', 'multi-version preview selection', 'iterative editing controls', 'lifetime cloud hosting', 'permanent downloadable MP3 access', or guaranteed emotional outcomes like 'never generic' / 'ensuring emotional authenticity' unless explicitly stated in Verified Product Facts above).
+   - Do NOT claim exclusive category capability such as "Only platforms like [Brand] can..." or "Only [Brand]..." when competitors share the core category capability.
+   - Do NOT turn attributed customer complaints about specific competitors into universal statements that all competitors or "every alternative in the market" fail, and do NOT convert customer complaints about generic-sounding outputs or AEL hypotheses into factual claims about competitors' internal production workflows ("mass-produced automated prompt workflows", "template-bound music generation services produce..."). Always attribute customer complaints as customer-reported output perceptions on named competitors.
+   - PAYMENT-TRIGGER FIDELITY: Never rewrite a conditional trial/gifting payment model (e.g., creating a trial song for free and paying when gifting) into a satisfaction-contingent payment policy ("pay only when satisfied", "only pay if satisfied") or unqualified "risk-free" guarantee unless explicitly stated in Verified Product Facts above.
+   - Do NOT turn an existing business model (such as upfront package pricing) into an invented strategic sacrifice, and do NOT portray ordinary subscription models or upsells as deceptive traps without scoped evidence.
+   - Distinguish recommendations about future messaging from factual descriptions of the business.
+   - Frame the contradiction around verified strategic positioning and validated mechanism logic, never by fabricating physical or operational capabilities.
 
 Return JSON:
 {
@@ -122,15 +158,11 @@ export async function generateMythBreaker(args: {
   sophisticationTier: number | null;
   rejectedClaimPatterns: string[];
   accountId: string;
-  // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
-  // computed ONCE by the parent awareness engine and threaded down. The
-  // sub-engine never re-derives — it injects and logs evidence.
   doctrineBlock?: string | null;
   anchorSource?: "doctrine" | "dna" | "none";
-  // GROUNDING CONTRACT (RULES 1-3): pre-rendered block built ONCE by the parent
-  // (which owns the ProductAnchor) and threaded down. Additive; the existing
-  // gates remain the sole enforcement authority.
   groundingContractBlock?: string | null;
+  productTruthFacts?: string[];
+  competitorEvidenceContext?: AuthoritativeCompetitorEvidenceContext | null;
 }): Promise<MythBreakerReasoning | null> {
   const startTs = Date.now();
   const aelAck = acknowledgeAelInput("AwarenessMythBreaker", args.analyticalEnrichment, args.accountId);
@@ -186,6 +218,64 @@ export async function generateMythBreaker(args: {
     generatedAt: new Date().toISOString(),
   };
   applyPartialAelDowngrade("AwarenessMythBreaker", result, aelAck);
+
+  if (args.productTruthFacts && args.productTruthFacts.length > 0) {
+    const combinedMb = [result.mythBreakerStatement, result.beliefToContradict, result.contradictionLogic].join(" ");
+    const mbEntailment = evaluateClaimSemanticEntailment(combinedMb, args.productTruthFacts);
+    if (!mbEntailment.entailed) {
+      try {
+        console.log(`[AwarenessMythBreaker] ENTAILMENT_REPAIR | Fixing unentailed claims in MythBreaker: ${mbEntailment.violations.join("; ")}`);
+        const repairResp = await aiChat({
+          model: "gpt-4.1-mini",
+          temperature: 0.1,
+          accountId: args.accountId,
+          endpoint: "awareness-engine-myth-breaker-repair",
+          response_format: { type: "json_object" },
+          max_tokens: 500,
+          messages: [
+            {
+              role: "system",
+              content: `You are a Direct-Response Myth-Breaker Fact-Check Editor. Rewrite the JSON fields so they strictly match Verified Product Facts without any satisfaction-contingent payment claims ("pay only when satisfied"), unqualified "risk-free" claims, or unverified competitor internal workflow claims ("mass-produced automated prompt workflows", "template-bound services"). Attribute customer complaints as customer-reported output perceptions on named competitors, and preserve exact conditional payment triggers (such as creating a trial song for free and paying when gifting). Return ONLY JSON: {"mythBreakerStatement": "...", "beliefToContradict": "...", "contradictionLogic": "..."}`,
+            },
+            {
+              role: "user",
+              content: JSON.stringify({
+                current: {
+                  mythBreakerStatement: result.mythBreakerStatement,
+                  beliefToContradict: result.beliefToContradict,
+                  contradictionLogic: result.contradictionLogic,
+                },
+                violationsToFix: mbEntailment.violations,
+                verifiedProductFacts: args.productTruthFacts,
+              }),
+            },
+          ],
+        });
+        const repairedMb = safeJsonParse(repairResp.choices?.[0]?.message?.content || "");
+        if (repairedMb?.mythBreakerStatement) {
+          result.mythBreakerStatement = String(repairedMb.mythBreakerStatement).trim();
+          if (repairedMb.beliefToContradict) result.beliefToContradict = String(repairedMb.beliefToContradict).trim();
+          if (repairedMb.contradictionLogic) result.contradictionLogic = String(repairedMb.contradictionLogic).trim();
+        }
+      } catch (repErr: any) {
+        console.warn(`[AwarenessMythBreaker] ENTAILMENT_REPAIR_FAILED: ${repErr.message}`);
+      }
+    }
+  }
+
+  if (args.competitorEvidenceContext) {
+    const compEval = evaluateAwarenessComparativeClaims(result as any, args.competitorEvidenceContext);
+    if (!compEval.passed) {
+      console.log(`[AwarenessMythBreaker] COMPETITOR_EVIDENCE_REPAIR | version=${args.competitorEvidenceContext.evidenceVersionHash} | violations=${compEval.violations.map(v => v.code).join(",")}`);
+      const repairedMb = repairContradictedMythBreaker(result as any, args.competitorEvidenceContext, compEval);
+      result.mythBreakerStatement = repairedMb.mythBreakerStatement;
+      result.beliefToContradict = repairedMb.beliefToContradict;
+      result.contradictionLogic = repairedMb.contradictionLogic;
+      if (Array.isArray(repairedMb.reasoningSteps)) {
+        result.reasoningSteps = repairedMb.reasoningSteps;
+      }
+    }
+  }
 
   const mbGroundingRefs: string[] = Array.isArray(parsed.groundingRefs) ? parsed.groundingRefs.map(String) : [];
   checkGroundingContract({

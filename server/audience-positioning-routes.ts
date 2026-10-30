@@ -20,7 +20,9 @@ export function registerAudiencePositioningRoutes(app: Express) {
         throw e;
       }
 
-      const data = await assembleAudiencePositioningData(campaignId, accountId);
+      const planId = typeof req.query.planId === "string" ? req.query.planId : null;
+      const runId = typeof req.query.runId === "string" ? req.query.runId : null;
+      const data = await assembleAudiencePositioningData(campaignId, accountId, { planId, runId });
       return res.json({ success: true, data });
     } catch (err: any) {
       console.error("[AudiencePositioningRoutes] Error:", err.message);
@@ -44,7 +46,9 @@ export function registerAudiencePositioningRoutes(app: Express) {
         throw e;
       }
 
-      const data = await assembleAudiencePositioningData(campaignId, accountId);
+      const planId = typeof req.query.planId === "string" ? req.query.planId : null;
+      const runId = typeof req.query.runId === "string" ? req.query.runId : null;
+      const data = await assembleAudiencePositioningData(campaignId, accountId, { planId, runId });
       return res.json({ success: true, data });
     } catch (err: any) {
       console.error("[AudiencePositioningRoutes] Error:", err.message);

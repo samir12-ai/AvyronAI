@@ -1,4 +1,29 @@
-import { describe, test, expect } from "vitest";
+import { describe, test, expect, vi } from "vitest";
+
+vi.mock("../shared/llm-reliability/reliability-runner", () => ({
+  generateWithRepair: vi.fn(async () => ({
+    result: {
+      objections: [
+        {
+          objectionId: "obj_1",
+          objectionStatement: "Cost is too high",
+          objectionType: "cost",
+          response: "Value delivered exceeds investment through automated systems",
+          requiredProof: "ROI model",
+          proofStatus: "PROOF_ESTABLISHED",
+          supportingFactId: "FACT_1",
+        },
+      ],
+    },
+  })),
+  LLMReliabilityError: class extends Error {
+    constructor(msg: string) {
+      super(msg);
+      this.name = "LLMReliabilityError";
+    }
+  },
+}));
+
 import { buildPositioningLock } from "../offer-engine/engine";
 import type { OfferPositioningInput, OfferDifferentiationInput } from "../offer-engine/types";
 import { analyzePersuasion } from "../persuasion-engine/engine";
@@ -202,8 +227,10 @@ function buildTestPersuasionInputs(overrides: {
     trustBarriers: ["no proof", "unknown brand"],
     emotionalDrivers: ["desire for financial freedom", "fear of stagnation"],
     desireMap: { "ARR growth": 0.9, "time savings": 0.8 },
-    audienceSegments: [],
-  };
+    audienceSegments: [{ id: "seg_1", name: "SaaS Founders" } as any],
+    approvedLanes: [{ id: "lane_1", laneId: "lane_1", title: "Target Lane", segmentIds: ["seg_1"] } as any],
+    laneId: "lane_1",
+  } as any;
 
   const positioning: PersuasionPositioningInput = {
     narrativeDirection: "forward",
@@ -348,8 +375,8 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
     const result = await analyzePersuasion(mi, audience, positioning, differentiation, driftOffer, funnel, integrity, awareness, BASE_LINEAGE);
     const driftWarning = result.structuralWarnings.find(w => w.includes("POSITIONING LOCK DRIFT"));
     if (driftWarning) {
-      expect(driftWarning).toMatch(/score=\d+\.\d+/);
-      expect(driftWarning).toMatch(/threshold=0\.20/);
+      expect(driftWarning).toMatch(/(?:score=\d+\.\d+|covers only \d+%)/);
+      expect(driftWarning).toMatch(/threshold=(?:0\.20|20%)/);
     }
   });
 
@@ -445,7 +472,7 @@ describe("analyzePersuasion – positioning lock drift detection", () => {
 });
 
 describe("buildPersuasionRoutes – locked decisions enforce route content at generation time", () => {
-  test("routeName includes locked axis suffix when lockedDecisions contains contrast_axis", async () => {
+  test("primaryRoute records lockedAxisSummary without polluting routeName when lockedDecisions contains contrast_axis", async () => {
     const { mi, audience, positioning, differentiation, funnel, integrity, awareness } = buildTestPersuasionInputs();
     const lockedOffer: PersuasionOfferInput = {
       offerName: "Revenue Automation Program",
@@ -460,7 +487,8 @@ describe("buildPersuasionRoutes – locked decisions enforce route content at ge
       nonGenericAnchors: [],
     };
     const result = await analyzePersuasion(mi, audience, positioning, differentiation, lockedOffer, funnel, integrity, awareness, BASE_LINEAGE);
-    expect(result.primaryRoute.routeName).toMatch(/\[locked axis:/);
+    expect(result.primaryRoute.lockedAxisSummary).toMatch(/locked axis:/);
+    expect(result.primaryRoute.routeName).not.toMatch(/\[locked axis:/);
   });
 
   test("frictionNotes on primaryRoute includes LOCK CONSTRAINT when lockedDecisions provided", async () => {

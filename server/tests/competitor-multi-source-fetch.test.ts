@@ -26,7 +26,6 @@ describe("Competitor Multi-Source Fetch Execution & Invariants", () => {
       campaignId: testCamp,
       name: "Test Modest Brand",
       platform: "instagram",
-      profileLink: "https://instagram.com/testmodest",
       websiteUrl: "https://testmodest.com",
       businessType: "Competitor",
       primaryObjective: "Engagement",

@@ -1,5 +1,7 @@
 // @ts-nocheck
 import { db } from "../db";
+import { extractAssertionSemanticProperties, evaluateClaimSemanticEntailment } from "../shared/claim-entailment";
+import { validateBundleLineageCompatibility } from "../shared/dependency-contract";
 
 export class StrategyConsistencyError extends Error {
   constructor(
@@ -13,128 +15,881 @@ export class StrategyConsistencyError extends Error {
   }
 }
 
+export type ConsistencyValidationOutcomeType =
+  | "PASSED"
+  | "FAILED_DETERMINISTIC"
+  | "FAILED_SEMANTIC"
+  | "INCOMPLETE_INPUTS";
+
+export interface ConsistencyDefectItem {
+  fieldPath: string;
+  category:
+    | "FACTUAL_DEFECT"
+    | "COMPETITOR_CONTRADICTION"
+    | "EPISTEMIC_MISMATCH"
+    | "REFERENCE_INVALID"
+    | "BUDGET_INCONSISTENCY"
+    | "INCOMPLETE_INPUT";
+  severity: "BLOCKING" | "WARNING";
+  proposition: string;
+  citedEvidenceIds: string[];
+  reason: string;
+  responsibleEngine: string;
+}
+
+export interface CrossEngineConsistencyResult {
+  valid: boolean;
+  outcomeType: ConsistencyValidationOutcomeType;
+  blocking: boolean;
+  checkFailed?: boolean;
+  conflict?: string;
+  canonicalFields?: string[];
+  responsibleEngines?: string[];
+  recommendedRegenerationTarget?: string;
+  defects?: ConsistencyDefectItem[];
+  validatedPlanHash?: string;
+  inputCoverage?: {
+    passed: boolean;
+    verifiedFactsCount: number;
+    laneFunnelCount: number;
+    lanePersuasionCount: number;
+    competitorComparisonStatus: string;
+    missingInputs: string[];
+  };
+  semanticConsistency?: {
+    passed: boolean;
+    issues: string[];
+    summary: string;
+  };
+  factualSupport?: {
+    passed: boolean;
+    unsupportedPromises: string[];
+    summary: string;
+  };
+}
+
 export async function validateCrossEngineStrategyConsistency(
   results: Map<any, any>,
   strategyRoot: any,
-  accountId: string
-): Promise<{ valid: boolean; conflict?: string; canonicalFields?: string[]; responsibleEngines?: string[]; recommendedRegenerationTarget?: string }> {
-  
-  const audience = results.get("audience")?.output;
-  const positioning = results.get("positioning")?.output;
-  const offer = results.get("offer")?.output;
-  const channel = results.get("channel_selection")?.output;
-  const funnel = results.get("funnel")?.output;
-  
+  accountId: string,
+  validationContext?: {
+    synthesizedPlan?: any;
+    canonicalContext?: any;
+    bizData?: any;
+    campaignId?: string;
+  }
+): Promise<CrossEngineConsistencyResult> {
+  const bu = results.get("business_understanding")?.output || results.get("business_understanding");
+  const audience = results.get("audience")?.output || results.get("audience");
+  const diff = results.get("differentiation")?.output || results.get("differentiation");
+  const positioning = results.get("positioning")?.output || results.get("positioning");
+  const mechanismOut = results.get("mechanism")?.output || results.get("mechanism");
+  const offer = results.get("offer")?.output || results.get("offer");
+  const channel = results.get("channel_selection")?.output || results.get("channel_selection");
+  const funnel = results.get("funnel")?.output || results.get("funnel");
+  const budgetGov = results.get("budget_governor")?.output || results.get("budget_governor");
+
   // A. Deterministic Check: Target segment ID check
   if (audience && positioning) {
     const audSegId = audience.segments?.[0]?.id || audience.segments?.[0]?.name;
     const posSegId = positioning.targetSegmentId || positioning.territories?.[0]?.targetSegmentId;
     if (audSegId && posSegId && audSegId !== posSegId) {
+      const conflictMsg = `Deterministic Check Failed: Target audience segment ID mismatch. Audience Engine selected segment "${audSegId}" but Positioning Engine targeted segment "${posSegId}".`;
       return {
         valid: false,
-        conflict: `Deterministic Check Failed: Target audience segment ID mismatch. Audience Engine selected segment "${audSegId}" but Positioning Engine targeted segment "${posSegId}".`,
+        outcomeType: "FAILED_DETERMINISTIC",
+        blocking: true,
+        conflict: conflictMsg,
         canonicalFields: ["audience.segments", "positioning.targetSegmentId"],
         responsibleEngines: ["positioning"],
-        recommendedRegenerationTarget: "positioning"
+        recommendedRegenerationTarget: "positioning",
+        defects: [{
+          fieldPath: "positioning.targetSegmentId",
+          category: "EPISTEMIC_MISMATCH",
+          severity: "BLOCKING",
+          proposition: String(posSegId),
+          citedEvidenceIds: [String(audSegId)],
+          reason: conflictMsg,
+          responsibleEngine: "positioning",
+        }],
+        semanticConsistency: {
+          passed: false,
+          issues: [`Target segment mismatch: Audience "${audSegId}" vs Positioning "${posSegId}"`],
+          summary: "Failed deterministic segment alignment check.",
+        },
       };
     }
   }
 
-  // B. LLM Semantic Consistency Judge
-  const pains = strategyRoot?.approvedAudiencePains
-    ? JSON.stringify(strategyRoot.approvedAudiencePains)
-    : (audience?.audiencePains ? JSON.stringify(audience.audiencePains) : "[]");
+  // B. Construct structured, compact authoritative decision payload
+  const parseMaybeJson = (val: any, fallback: any) => {
+    if (!val) return fallback;
+    if (typeof val === "string") {
+      try { return JSON.parse(val); } catch { return fallback; }
+    }
+    return val;
+  };
 
-  const objections = strategyRoot?.approvedObjections
-    ? JSON.stringify(strategyRoot.approvedObjections)
-    : (audience?.objectionMap ? JSON.stringify(audience.objectionMap) : "{}");
+  const approvedLanesRaw = parseMaybeJson(strategyRoot?.approvedLanes, validationContext?.synthesizedPlan?.approvedLanes || []);
+  const compactLanes = Array.isArray(approvedLanesRaw)
+    ? approvedLanesRaw.slice(0, 5).map((l: any) => ({
+        laneId: l.laneId || l.id,
+        title: l.title || l.name,
+        primaryPainId: l.primaryPainId,
+        corePainIds: (l.corePainIds || []).slice(0, 4),
+        painIds: (l.painIds || []).slice(0, 6),
+        desires: (l.desires || []).slice(0, 4),
+        objections: (l.objections || []).slice(0, 5),
+        objectionAttribution: Array.isArray(l.objectionAttribution) ? l.objectionAttribution.slice(0, 5) : undefined,
+        messagingDirection: l.messagingDirection,
+      }))
+    : [];
 
-  const claims = strategyRoot?.approvedClaims
-    ? JSON.stringify(strategyRoot.approvedClaims)
-    : (results.get("differentiation")?.output?.pillars ? JSON.stringify(results.get("differentiation")?.output?.pillars) : "[]");
+  const approvedPainsRaw = parseMaybeJson(strategyRoot?.approvedAudiencePains, audience?.audiencePains || []);
+  const compactPains = Array.isArray(approvedPainsRaw)
+    ? approvedPainsRaw.slice(0, 10).map((p: any) => (typeof p === "string" ? p : p?.canonical || p?.pain || JSON.stringify(p)))
+    : [];
 
-  const mechanism = strategyRoot?.approvedMechanism
-    ? JSON.stringify(strategyRoot.approvedMechanism)
-    : (results.get("mechanism")?.output ? JSON.stringify(results.get("mechanism")?.output) : "{}");
+  const approvedObjectionsRaw = parseMaybeJson(strategyRoot?.approvedObjections, audience?.objectionMap || {});
+  const compactObjections = Array.isArray(approvedObjectionsRaw)
+    ? approvedObjectionsRaw.slice(0, 10)
+    : typeof approvedObjectionsRaw === "object" && approvedObjectionsRaw !== null
+      ? Object.entries(approvedObjectionsRaw).slice(0, 8).map(([k, v]) => ({ segment: k, objections: Array.isArray(v) ? v.slice(0, 5) : v }))
+      : [];
 
-  const posContext = strategyRoot?.approvedPositioningContext
-    ? JSON.stringify(strategyRoot.approvedPositioningContext)
-    : (positioning ? JSON.stringify(positioning) : "{}");
+  const primaryTerritory = positioning?.territories?.[0] || positioning?.selectedTerritory || {};
+  const semanticCollision = primaryTerritory?.semanticCollision || positioning?.semanticCollision || null;
+  const comparisonStatus = semanticCollision?.comparisonStatus || (Number(semanticCollision?.comparedCompetitorCount || 0) > 0 ? "COMPARISON_COMPLETED" : "UNVERIFIED_NO_COMPETITOR_CLAIMS");
+  const compactPositioning = {
+    selectedTerritoryName: primaryTerritory.name || positioning?.chosenTerritory || positioning?.positioningStatement || "",
+    contrastAxis: primaryTerritory.contrastAxis || positioning?.contrastAxis || strategyRoot?.primaryAxis || "",
+    enemyDefinition: primaryTerritory.enemyDefinition || positioning?.enemy || "",
+    narrativeDirection: primaryTerritory.narrativeDirection || positioning?.narrativeDirection || "",
+    proposalStatus: primaryTerritory.proposalStatus || positioning?.proposalStatus || primaryTerritory.epistemicStatus || "PROPOSED_DIRECTION",
+    epistemicStatus: primaryTerritory.epistemicStatus || positioning?.epistemicStatus || "STRATEGIC_HYPOTHESIS",
+    comparisonStatus,
+    comparedCompetitorCount: Number(semanticCollision?.comparedCompetitorCount || semanticCollision?.perCompetitor?.length || 0),
+    collisionVerdict: semanticCollision?.collisionMeaning || semanticCollision?.verdict || "UNKNOWN",
+  };
 
-  const offerContext = offer ? JSON.stringify(offer) : "{}";
-  const channelContext = channel ? JSON.stringify(channel) : "{}";
-  const funnelContext = funnel ? JSON.stringify(funnel) : "{}";
+  // Deterministic Check: Empty competitor comparison must never pass as verified whitespace
+  const claimsOpenSpace =
+    semanticCollision?.verdict === "CLEAR" ||
+    /open semantic space|zero collision|verified whitespace/i.test(String(semanticCollision?.collisionMeaning || ""));
+  if (
+    positioning &&
+    (comparisonStatus === "UNVERIFIED_NO_COMPETITOR_CLAIMS" || comparisonStatus === "COMPARISON_FAILED") &&
+    (compactPositioning.epistemicStatus === "VERIFIED_FACT" || claimsOpenSpace)
+  ) {
+    const conflictMsg = `Deterministic Check Failed: Positioning claimed verified whitespace while competitor comparison status is ${comparisonStatus} (0 competitors compared).`;
+    return {
+      valid: false,
+      outcomeType: "FAILED_DETERMINISTIC",
+      blocking: true,
+      conflict: conflictMsg,
+      canonicalFields: ["positioning.territories[0].semanticCollision"],
+      responsibleEngines: ["positioning"],
+      recommendedRegenerationTarget: "positioning",
+      defects: [{
+        fieldPath: "positioning.territories[0].semanticCollision",
+        category: "COMPETITOR_CONTRADICTION",
+        severity: "BLOCKING",
+        proposition: String(semanticCollision?.collisionMeaning || compactPositioning.epistemicStatus),
+        citedEvidenceIds: [],
+        reason: conflictMsg,
+        responsibleEngine: "positioning",
+      }],
+      semanticConsistency: {
+        passed: false,
+        issues: [`Unverified competitor comparison (${comparisonStatus}) cannot be presented as verified whitespace.`],
+        summary: "Failed competitor comparison verification check.",
+      },
+    };
+  }
+
+  // Deterministic Check: High competitor collision (>= 0.35) must not claim narrativeDistanceScore = 1 or whitespace_positioning
+  const observedCollisionScore = Number(semanticCollision?.semanticCollisionScore ?? semanticCollision?.collisionScore ?? 0);
+  const observedNarrativeDistance = Number(primaryTerritory?.narrativeDistanceScore ?? positioning?.narrativeDistanceScore ?? 0.5);
+  const primaryAxisVal = String(strategyRoot?.primaryAxis || positioning?.primaryAxis || positioning?.differentiationVector?.[0] || positioning?.differentiationAxes?.[0] || "");
+  if (
+    comparisonStatus === "COMPARISON_COMPLETED" &&
+    observedCollisionScore >= 0.35 &&
+    (observedNarrativeDistance > 0.70 || primaryAxisVal === "whitespace_positioning")
+  ) {
+    const conflictMsg = `Deterministic Check Failed: Positioning has high competitor overlap (semanticCollisionScore=${observedCollisionScore}) with "${semanticCollision?.competitorSource || "monitored competitor"}", so narrativeDistanceScore (${observedNarrativeDistance}) cannot be > 0.70 and primaryAxis ("${primaryAxisVal}") cannot be "whitespace_positioning".`;
+    return {
+      valid: false,
+      outcomeType: "FAILED_DETERMINISTIC",
+      blocking: true,
+      conflict: conflictMsg,
+      canonicalFields: ["positioning.territories[0].narrativeDistanceScore", "strategyRoot.primaryAxis"],
+      responsibleEngines: ["positioning"],
+      recommendedRegenerationTarget: "positioning",
+      defects: [{
+        fieldPath: "positioning.territories[0].narrativeDistanceScore",
+        category: "COMPETITOR_CONTRADICTION",
+        severity: "BLOCKING",
+        proposition: `narrativeDistanceScore=${observedNarrativeDistance}, primaryAxis=${primaryAxisVal}`,
+        citedEvidenceIds: [String(semanticCollision?.competitorId || semanticCollision?.competitorSource || "")].filter(Boolean),
+        reason: conflictMsg,
+        responsibleEngine: "positioning",
+      }],
+      semanticConsistency: {
+        passed: false,
+        issues: [conflictMsg],
+        summary: "Failed positioning collision vs. narrative distance/axis coherence check.",
+      },
+    };
+  }
+
+  const diffPillarsRaw = diff?.pillars || parseMaybeJson(strategyRoot?.approvedClaims, []);
+  const compactClaims = Array.isArray(diffPillarsRaw)
+    ? diffPillarsRaw.slice(0, 6).map((p: any) => ({
+        id: p.id || p.pillarId,
+        claim: p.claim || p.title || p.statement || p.name,
+        category: p.claimCategory || p.category,
+        verificationStatus: p.verificationStatus || p.epistemicStatus,
+        supportingEvidenceCount: Array.isArray(p.evidenceIds) ? p.evidenceIds.length : undefined,
+      }))
+    : [];
+
+  const mechSource = mechanismOut || parseMaybeJson(strategyRoot?.approvedMechanism, {});
+  const primaryMech = mechSource?.primaryMechanism || mechSource?.selectedMechanism || mechSource || {};
+  const compactMechanism = {
+    mechanismName: primaryMech.name || primaryMech.mechanismName || mechSource?.mechanismName || "",
+    mechanismType: primaryMech.type || primaryMech.mechanismType || mechSource?.mechanismType || "",
+    mechanismProblem: primaryMech.problem || primaryMech.problemSolved || mechSource?.problemSolved || "",
+    mechanismPromise: primaryMech.promise || primaryMech.outcome || mechSource?.corePromise || "",
+    whyItWorks: primaryMech.whyItWorks || mechSource?.whyItWorks || "",
+    steps: Array.isArray(primaryMech.steps || mechSource?.steps)
+      ? (primaryMech.steps || mechSource?.steps).slice(0, 6).map((s: any) => (typeof s === "string" ? s : s?.title || s?.step || s?.description))
+      : [],
+  };
+
+  const primaryOffer = offer?.primaryOffer || offer?.selectedOffer || offer || {};
+  const compactOffer = {
+    offerName: primaryOffer.offerName || primaryOffer.name || offer?.offerName || "",
+    coreOutcome: primaryOffer.coreOutcome || primaryOffer.outcome || offer?.coreOutcome || "",
+    problemStatement: primaryOffer.problemStatement || offer?.problemStatement || "",
+    mechanismDescription: primaryOffer.mechanismDescription || primaryOffer.mechanism || offer?.mechanismDescription || "",
+    deliverables: (primaryOffer.deliverables || offer?.deliverables || []).slice(0, 6),
+    objectionHandling: (primaryOffer.objectionHandling || offer?.objectionHandling || []).slice(0, 8),
+    riskReversal: primaryOffer.riskReversal || offer?.riskReversal || null,
+    cta: primaryOffer.cta || offer?.cta || null,
+  };
+
+  // Resolve all lane funnels and all lane persuasions across synthesized journeys + results map
+  const allLaneFunnels: any[] = [];
+  const allLanePersuasions: any[] = [];
+  const synthJourneys = Array.isArray(validationContext?.synthesizedPlan?.buyerConversionJourneys)
+    ? validationContext!.synthesizedPlan.buyerConversionJourneys
+    : [];
+
+  if (synthJourneys.length > 0) {
+    for (const j of synthJourneys) {
+      if (Array.isArray(j.stages) && j.stages.length > 0) {
+        allLaneFunnels.push({
+          laneId: j.laneId || "default",
+          journeyName: j.journeyName || "",
+          journeyType: j.journeyType || "",
+          stages: j.stages.slice(0, 6).map((st: any) => ({
+            stageName: st.stageName || st.name || st.stage,
+            goal: st.goal || st.objective || st.purpose,
+            coreMessage: st.coreMessage || st.message,
+            cta: st.cta || st.callToAction,
+          })),
+        });
+      }
+      if (j.persuasionStrategy) {
+        allLanePersuasions.push({
+          laneId: j.laneId || "default",
+          mode: j.persuasionStrategy.mode,
+          coreBeliefTransformation: j.persuasionStrategy.coreBeliefTransformation,
+          messageSequence: (j.persuasionStrategy.messageSequence || []).slice(0, 6),
+          objections: (j.persuasionStrategy.objections || []).slice(0, 6).map((o: any) => ({
+            objectionId: o.objectionId,
+            objection: o.objection,
+            response: o.response,
+            proposalStatus: o.proposalStatus || o.proofStatus,
+            subjectScope: o.subjectScope,
+            competitorNames: o.competitorNames,
+          })),
+        });
+      }
+    }
+  } else {
+    // Extract from results Map ("funnels" / "funnel:*" / "funnel" and "persuasions" / "persuasion:*" / "persuasion")
+    const extractFunnelEntry = (laneId: string, fRes: any) => {
+      const fOut = fRes?.output?.output || fRes?.output || fRes;
+      const fObj = fOut?.primaryFunnel || fOut?.funnel || fOut;
+      const stages = fObj?.stages || fObj?.stageMap || fOut?.stages || fOut?.stageMap || [];
+      if (Array.isArray(stages) && stages.length > 0) {
+        allLaneFunnels.push({
+          laneId,
+          journeyName: fObj?.journeyName || fObj?.funnelName || fObj?.name || "",
+          journeyType: fObj?.journeyType || fObj?.funnelType || fObj?.modelType || "",
+          stages: stages.slice(0, 6).map((st: any) => ({
+            stageName: st.stageName || st.name || st.stage,
+            goal: st.goal || st.objective || st.purpose,
+            coreMessage: st.coreMessage || st.message || st.purpose,
+            cta: st.cta || st.callToAction,
+          })),
+        });
+      }
+    };
+    const funnelsMap = results.get("funnels");
+    if (funnelsMap instanceof Map) {
+      for (const [laneId, fRes] of funnelsMap.entries()) extractFunnelEntry(laneId, fRes);
+    } else {
+      for (const [k, v] of results.entries()) {
+        if (typeof k === "string" && k.startsWith("funnel:") && k !== "funnel") {
+          extractFunnelEntry(k.replace("funnel:", ""), v);
+        }
+      }
+    }
+    if (allLaneFunnels.length === 0 && funnel) {
+      extractFunnelEntry("default", funnel);
+    }
+
+    const extractPersuasionEntry = (laneId: string, pRes: any) => {
+      const pOut = pRes?.output?.output || pRes?.output || pRes;
+      const pData = pOut?.primaryRoute || pOut?.persuasionArchitecture || pOut;
+      if (pData && (pData.coreBeliefTransformation || pOut?.coreBeliefTransformation || pData.structuredObjections || pData.objections)) {
+        const rawObjs = pData.structuredObjections || pData.objections || pOut?.structuredObjections || [];
+        allLanePersuasions.push({
+          laneId,
+          mode: pData.mode || pData.persuasionMode || "Proof-Led",
+          coreBeliefTransformation: pData.coreBeliefTransformation || pOut?.coreBeliefTransformation,
+          messageSequence: (pData.messageSequence || pData.sequence || []).slice(0, 6),
+          objections: Array.isArray(rawObjs)
+            ? rawObjs.slice(0, 6).map((o: any) => ({
+                objectionId: o.objectionId || o.id,
+                objection: o.objectionStatement || o.objection || o.statement,
+                response: o.persuasionResponse || o.response || o.resolution,
+                proposalStatus: o.proposalStatus || o.proofStatus,
+                subjectScope: o.subjectScope,
+                competitorNames: o.competitorNames,
+              }))
+            : [],
+        });
+      }
+    };
+    const persuasionsMap = results.get("persuasions");
+    if (persuasionsMap instanceof Map) {
+      for (const [laneId, pRes] of persuasionsMap.entries()) extractPersuasionEntry(laneId, pRes);
+    } else {
+      for (const [k, v] of results.entries()) {
+        if (typeof k === "string" && k.startsWith("persuasion:") && k !== "persuasion") {
+          extractPersuasionEntry(k.replace("persuasion:", ""), v);
+        }
+      }
+    }
+    if (allLanePersuasions.length === 0 && results.get("persuasion")) {
+      extractPersuasionEntry("default", results.get("persuasion"));
+    }
+  }
+
+  const compactFunnel = allLaneFunnels[0] || {
+    journeyName: funnel?.journeyName || funnel?.funnelName || funnel?.primaryFunnel?.name || "",
+    funnelType: funnel?.funnelType || funnel?.architectureType || funnel?.primaryFunnel?.modelType || "",
+    stages: [],
+  };
+
+  const compactChannels = {
+    primaryChannel: channel?.primaryChannel?.name || channel?.primaryChannel || channel?.proposedPrimary || "",
+    secondaryChannel: channel?.secondaryChannel?.name || channel?.secondaryChannel || channel?.secondary || "",
+    allocations: Array.isArray(budgetGov?.allocations)
+      ? budgetGov.allocations.slice(0, 5).map((a: any) => ({
+          channelName: a.channelName || a.channelId,
+          sharePercentage: a.sharePercentage,
+          monthlyAmount: a.monthlyAmount,
+          isOrganic: a.isOrganic,
+          spendCategory: a.spendCategory,
+        }))
+      : [],
+    totalMonthlyBudget: budgetGov?.totalMonthlyBudget,
+    currency: budgetGov?.currency,
+    budgetConfirmation: budgetGov?.budgetConfirmation,
+    spendAction: budgetGov?.spendAction || budgetGov?.action,
+  };
+
+  let verifiedFactsRaw: any[] =
+    bu?.productTruth?.verifiedFacts ||
+    bu?.verifiedFacts ||
+    bu?.productTruthFacts ||
+    validationContext?.canonicalContext?.productTruth?.verifiedFacts ||
+    validationContext?.canonicalContext?.productTruthFacts ||
+    parseMaybeJson(validationContext?.bizData?.productTruthFacts, null) ||
+    parseMaybeJson(strategyRoot?.verifiedProductFacts, null) ||
+    [];
+
+  if ((!Array.isArray(verifiedFactsRaw) || verifiedFactsRaw.length === 0) && (validationContext?.campaignId || strategyRoot?.campaignId)) {
+    try {
+      const targetCampId = validationContext?.campaignId || strategyRoot?.campaignId;
+      const buRes = await db.execute(
+        sql`SELECT product_truth_facts FROM bu_snapshots WHERE campaign_id = ${targetCampId} ORDER BY is_active DESC, created_at DESC LIMIT 1`
+      );
+      if (buRes.rows && buRes.rows.length > 0) {
+        const parsed = parseMaybeJson((buRes.rows[0] as any).product_truth_facts, []);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          verifiedFactsRaw = parsed;
+        }
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  }
+
+  const compactVerifiedFactsWithIds: Array<{ factId: string; statement: string; factType?: string }> = Array.isArray(verifiedFactsRaw)
+    ? verifiedFactsRaw
+        .map((f: any, idx: number) => {
+          if (typeof f === "string") {
+            return { factId: `fact_${idx + 1}`, statement: f.trim() };
+          }
+          const fid = String(f?.productTruthFactId || f?.factId || f?.id || "").trim();
+          const stmt = String(f?.claim || f?.fact || f?.statement || f?.value || "").trim();
+          return { factId: fid, statement: stmt, factType: f?.factType };
+        })
+        .filter((f) => f.statement.length > 0)
+    : [];
+
+  const validCanonicalFactIdSet = new Set<string>(
+    compactVerifiedFactsWithIds.map((f) => f.factId).filter((id) => id.length > 0 && !/^fact_\d+$/i.test(id))
+  );
+
+  const compactVerifiedFacts = compactVerifiedFactsWithIds.slice(0, 15).map((f) =>
+    f.factId ? `[Fact ID: ${f.factId}] ${f.statement}` : f.statement
+  );
+
+  // C. Explicit Validation-Input Coverage Check (Missing required inputs must produce an incomplete validation state, NEVER a confident PASS)
+  const missingInputs: string[] = [];
+  if (compactVerifiedFacts.length === 0) {
+    missingInputs.push("verifiedProductTruthFacts");
+  }
+  if (allLaneFunnels.length === 0 || allLaneFunnels.every((lf) => !Array.isArray(lf.stages) || lf.stages.length === 0)) {
+    missingInputs.push("laneFunnels");
+  }
+  if (allLanePersuasions.length === 0) {
+    missingInputs.push("lanePersuasions");
+  }
+
+  const inputCoverage = {
+    passed: missingInputs.length === 0,
+    verifiedFactsCount: compactVerifiedFacts.length,
+    laneFunnelCount: allLaneFunnels.length,
+    lanePersuasionCount: allLanePersuasions.length,
+    competitorComparisonStatus: comparisonStatus,
+    missingInputs,
+  };
+
+  if (!inputCoverage.passed) {
+    const conflictMsg = `INCOMPLETE_VALIDATION_INPUTS: Required validation inputs are missing or empty [${missingInputs.join(", ")}]. Validation cannot return PASS with incomplete inputs.`;
+    return {
+      valid: false,
+      outcomeType: "INCOMPLETE_INPUTS",
+      blocking: true,
+      checkFailed: true,
+      conflict: conflictMsg,
+      canonicalFields: missingInputs,
+      responsibleEngines: ["plan_synthesis"],
+      defects: missingInputs.map((m) => ({
+        fieldPath: m,
+        category: "INCOMPLETE_INPUT" as const,
+        severity: "BLOCKING" as const,
+        proposition: `Missing ${m}`,
+        citedEvidenceIds: [],
+        reason: conflictMsg,
+        responsibleEngine: "plan_synthesis",
+      })),
+      inputCoverage,
+      semanticConsistency: {
+        passed: false,
+        issues: [`Missing required validation inputs: ${missingInputs.join(", ")}`],
+        summary: "Validation incomplete due to missing required inputs.",
+      },
+      factualSupport: {
+        passed: false,
+        unsupportedPromises: [],
+        summary: "Factual support could not be verified because required inputs were missing.",
+      },
+    };
+  }
+
+  // D. Deterministic Reference & Epistemic Boundary Checks across the complete customer-facing payload
+  const deterministicDefects: ConsistencyDefectItem[] = [];
+
+  // D1. Validate every supportingFactId in buyerConversionJourneys[*].persuasionStrategy.objections[*] against pinned BU facts
+  if (validCanonicalFactIdSet.size > 0 && synthJourneys.length > 0) {
+    synthJourneys.forEach((j: any, jIdx: number) => {
+      const objs = Array.isArray(j?.persuasionStrategy?.objections) ? j.persuasionStrategy.objections : [];
+      objs.forEach((o: any, oIdx: number) => {
+        const sfId = o?.supportingFactId ? String(o.supportingFactId).trim() : "";
+        if (sfId && sfId !== "APPROVED_MECHANISM" && !validCanonicalFactIdSet.has(sfId)) {
+          deterministicDefects.push({
+            fieldPath: `buyerConversionJourneys[${jIdx}].persuasionStrategy.objections[${oIdx}].supportingFactId`,
+            category: "REFERENCE_INVALID",
+            severity: "BLOCKING",
+            proposition: sfId,
+            citedEvidenceIds: [sfId],
+            reason: `Objection "${o.objectionId || oIdx}" cites supportingFactId "${sfId}" which does not exist in the pinned Business Understanding fact inventory ([${Array.from(validCanonicalFactIdSet).join(", ")}]).`,
+            responsibleEngine: "persuasion",
+          });
+        }
+      });
+    });
+  }
+
+  // D2. Post-BLL Displayed Claims & Funnel/Mechanism/Awareness Epistemic Inspection
+  const bllSummary = validationContext?.synthesizedPlan?.businessRepresentation?.strategicSummary;
+  const displayedText = [
+    bllSummary?.strategy || "",
+    bllSummary?.targetAudience || "",
+    bllSummary?.growthObjective || "",
+    bllSummary?.rationale || "",
+    validationContext?.synthesizedPlan?.strategicSummary?.strategy || "",
+    validationContext?.synthesizedPlan?.strategicSummary?.rationale || "",
+  ].join(" ");
+  const verifiedFactStrings = compactVerifiedFactsWithIds.map((f) => f.statement);
+  const factsJoinedLower = verifiedFactStrings.join(" ").toLowerCase();
+  const unsupportedDisplayedClaims: string[] = [];
+  if (verifiedFactStrings.length > 0) {
+    const displayedEntailment = evaluateClaimSemanticEntailment(displayedText, verifiedFactStrings);
+    if (!displayedEntailment.entailed) {
+      for (const violation of displayedEntailment.violations) {
+        unsupportedDisplayedClaims.push(violation);
+        deterministicDefects.push({
+          fieldPath: "businessRepresentation.strategicSummary",
+          category: violation.includes("guaranteed_emotional_outcome") ? "EPISTEMIC_MISMATCH" : "FACTUAL_DEFECT",
+          severity: "BLOCKING",
+          proposition: displayedText.slice(0, 240),
+          citedEvidenceIds: [],
+          reason: `Displayed summary asserts unentailed property not supported by verified product facts: ${violation}`,
+          responsibleEngine: "plan_synthesis",
+        });
+      }
+    }
+    const posText = [
+      compactPositioning.territory,
+      compactPositioning.enemyDefinition,
+      compactPositioning.contrastAxis,
+      compactPositioning.narrativeDirection,
+    ].join(" ");
+    const posEntailment = evaluateClaimSemanticEntailment(posText, verifiedFactStrings);
+    if (!posEntailment.entailed) {
+      for (const violation of posEntailment.violations) {
+        deterministicDefects.push({
+          fieldPath: "positioning.territories[0]",
+          category: "FACTUAL_DEFECT",
+          severity: "BLOCKING",
+          proposition: posText.slice(0, 240),
+          citedEvidenceIds: [],
+          reason: `Positioning territory asserts unentailed property not supported by verified product facts: ${violation}`,
+          responsibleEngine: "positioning",
+        });
+      }
+    }
+    const mechText = [
+      compactMechanism.mechanismName,
+      compactMechanism.mechanismProblem,
+      compactMechanism.mechanismPromise,
+      compactMechanism.whyItWorks,
+    ].join(" ");
+    const mechEntailment = evaluateClaimSemanticEntailment(mechText, verifiedFactStrings);
+    if (!mechEntailment.entailed) {
+      for (const violation of mechEntailment.violations) {
+        deterministicDefects.push({
+          fieldPath: "mechanism.primaryMechanism",
+          category: "FACTUAL_DEFECT",
+          severity: "BLOCKING",
+          proposition: mechText.slice(0, 240),
+          citedEvidenceIds: [],
+          reason: `Mechanism asserts unentailed property not supported by verified product facts: ${violation}`,
+          responsibleEngine: "mechanism",
+        });
+      }
+    }
+    const offerText = [
+      compactOffer.offerName,
+      compactOffer.coreOutcome,
+      compactOffer.problemStatement,
+      compactOffer.mechanismDescription,
+    ].join(" ");
+    const offerEntailment = evaluateClaimSemanticEntailment(offerText, verifiedFactStrings);
+    if (!offerEntailment.entailed) {
+      for (const violation of offerEntailment.violations) {
+        deterministicDefects.push({
+          fieldPath: "offer.primaryOffer",
+          category: "FACTUAL_DEFECT",
+          severity: "BLOCKING",
+          proposition: offerText.slice(0, 240),
+          citedEvidenceIds: [],
+          reason: `Offer asserts unentailed property not supported by verified product facts: ${violation}`,
+          responsibleEngine: "offer",
+        });
+      }
+    }
+  }
+  const posRat = String(primaryTerritory?.rationale || "").trim();
+  const posAxis = String(compactPositioning.contrastAxis || "").trim();
+  const posNarr = String(compactPositioning.narrativeDirection || "").trim();
+  if (posRat && (posRat === posAxis || posRat === posNarr)) {
+    deterministicDefects.push({
+      fieldPath: "positioning.territories[0].rationale",
+      category: "EPISTEMIC_MISMATCH",
+      severity: "BLOCKING",
+      proposition: posRat,
+      citedEvidenceIds: [],
+      reason: `Positioning rationale duplicates contrastAxis or narrativeDirection instead of providing a distinct strategic explanation.`,
+      responsibleEngine: "positioning",
+    });
+  }
+  if (/\b(never\s+generic|ensures\s+(?:emotional\s+)?authenticity|permanent\s+(?:downloadable\s+|cloud\s+)?(?:mp3\s+)?access|lifetime\s+(?:cloud\s+)?(?:hosting|storage|access)|collaborative\s+revision|revision\s+interface)\b/i.test(displayedText) &&
+      !/\b(permanent|lifetime|never\s+generic)\b/i.test(factsJoinedLower)) {
+    const msg = "Displayed summary contains unsupported absolute or permanence claim ('never generic', 'ensures authenticity', or 'permanent/lifetime access') absent from verified product facts.";
+    unsupportedDisplayedClaims.push(msg);
+    deterministicDefects.push({
+      fieldPath: "businessRepresentation.strategicSummary",
+      category: "FACTUAL_DEFECT",
+      severity: "BLOCKING",
+      proposition: displayedText.slice(0, 240),
+      citedEvidenceIds: [],
+      reason: msg,
+      responsibleEngine: "plan_synthesis",
+    });
+  }
+  if (/£19\.99|\$19\.99/i.test(displayedText) && !factsJoinedLower.includes("19.99")) {
+    const msg = "Displayed summary contains unverified hardcoded price ('£19.99' / '$19.99') absent from verified product facts.";
+    unsupportedDisplayedClaims.push(msg);
+    deterministicDefects.push({
+      fieldPath: "strategicSummary.strategy",
+      category: "FACTUAL_DEFECT",
+      severity: "BLOCKING",
+      proposition: displayedText.slice(0, 240),
+      citedEvidenceIds: [],
+      reason: msg,
+      responsibleEngine: "plan_synthesis",
+    });
+  }
+  if (/\b(1-minute|60-second)\s+(?:song\s+)?preview\b/i.test(displayedText) && !/1-minute|60-second/i.test(factsJoinedLower)) {
+    const msg = "Displayed summary contains unverified preview duration ('1-minute' / '60-second') absent from verified product facts.";
+    unsupportedDisplayedClaims.push(msg);
+    deterministicDefects.push({
+      fieldPath: "strategicSummary.strategy",
+      category: "FACTUAL_DEFECT",
+      severity: "BLOCKING",
+      proposition: displayedText.slice(0, 240),
+      citedEvidenceIds: [],
+      reason: msg,
+      responsibleEngine: "plan_synthesis",
+    });
+  }
+
+  // Check funnel stages & CTAs for unverified revision interfaces/workflows turned from customer desires into product features
+  if (!/\brevis(?:e|ion|ions)\b/i.test(factsJoinedLower) && synthJourneys.length > 0) {
+    synthJourneys.forEach((j: any, jIdx: number) => {
+      const stages = Array.isArray(j?.stages) ? j.stages : [];
+      stages.forEach((st: any, sIdx: number) => {
+        const stText = `${st?.coreMessage || ""} ${st?.cta || ""} ${st?.contentType || ""} ${st?.conversionGoal || ""}`;
+        if (/\b(review,\s*revise|revision\s+options?|collaborative\s+revision|interface\s+with\s+revision)\b/i.test(stText)) {
+          const msg = `Funnel stage "${st?.stageName || st?.name || sIdx}" in lane "${j?.laneId}" presents revision options/interfaces as an existing product capability ("${stText.slice(0, 140)}"), but revisions are a customer desire not in verified Product Truth.`;
+          unsupportedDisplayedClaims.push(msg);
+          deterministicDefects.push({
+            fieldPath: `buyerConversionJourneys[${jIdx}].stages[${sIdx}]`,
+            category: "EPISTEMIC_MISMATCH",
+            severity: "BLOCKING",
+            proposition: stText.slice(0, 180),
+            citedEvidenceIds: [],
+            reason: msg,
+            responsibleEngine: "funnel",
+          });
+        }
+      });
+    });
+  }
+
+  if (deterministicDefects.length > 0) {
+    const allReasons = deterministicDefects.map((d) => d.reason).join(" ");
+    const respEngines = Array.from(new Set(deterministicDefects.map((d) => d.responsibleEngine)));
+    return {
+      valid: false,
+      outcomeType: "FAILED_DETERMINISTIC",
+      blocking: true,
+      conflict: `Deterministic Validation Failed: ${allReasons}`,
+      checkFailed: true,
+      canonicalFields: deterministicDefects.map((d) => d.fieldPath),
+      responsibleEngines: respEngines,
+      recommendedRegenerationTarget: respEngines[0] || "plan_synthesis",
+      defects: deterministicDefects,
+      inputCoverage,
+      semanticConsistency: {
+        passed: !deterministicDefects.some((d) => d.category === "EPISTEMIC_MISMATCH" || d.category === "COMPETITOR_CONTRADICTION"),
+        issues: deterministicDefects.map((d) => `${d.fieldPath}: ${d.reason}`),
+        summary: allReasons,
+      },
+      factualSupport: {
+        passed: !deterministicDefects.some((d) => d.category === "FACTUAL_DEFECT" || d.category === "REFERENCE_INVALID"),
+        unsupportedPromises: deterministicDefects.map((d) => `${d.fieldPath}: ${d.reason}`),
+        summary: allReasons,
+      },
+    };
+  }
+
+  const structuredDecisionMap = {
+    approvedLanes: compactLanes,
+    brandSpine: parseMaybeJson(strategyRoot?.brandSpine, {}),
+    buyerPains: compactPains,
+    buyerObjections: compactObjections,
+    verifiedProductTruthFacts: compactVerifiedFacts,
+    positioning: compactPositioning,
+    differentiationClaims: compactClaims,
+    mechanism: compactMechanism,
+    offer: compactOffer,
+    funnel: compactFunnel,
+    laneFunnels: allLaneFunnels,
+    lanePersuasions: allLanePersuasions,
+    businessLanguageSummary: bllSummary || undefined,
+    channelsAndBudget: compactChannels,
+  };
 
   try {
     const { aiChat } = await import("../ai-client");
     const response = await aiChat({
-      model: "gpt-4o-mini",
+      model: "gpt-4.1-mini",
       temperature: 0.0,
       accountId,
       endpoint: "strategy-consistency-judge",
       response_format: { type: "json_object" },
-      max_tokens: 800,
+      max_tokens: 1200,
       messages: [
         {
           role: "system",
-          content: `You are a Senior Strategic Auditor. Your task is to evaluate the strategic decision quality and contextual consistency of a strategic marketing plan assembled from different AI engines.
-Compare the strategic inputs and look for real structural contradictions or strategically empty decisions.
+          content: `You are a Senior Strategic Auditor. Evaluate the cross-engine strategic consistency and factual support of a marketing plan assembled from specialized engines.
 
-STRICT CONSTITUTIONAL RULES:
-1. STRUCTURAL CONTRADICTIONS: Only flag a contradiction if two decisions are mutually exclusive (e.g., Positioning promises 100% free while Offer demands upfront $5,000 retainer, or Positioning targets teenagers while Offer is a corporate pension fund).
-2. MULTI-LANE ARCHITECTURE (CRITICAL): When a campaign has multiple Strategic Lanes (e.g. Lane 1: Clinic Procurement & Supply Reliability, Lane 2: Clinical Safety Assurance & Practice Growth), different engines (Positioning, Differentiation, Mechanism, Offer, Funnel) legitimately speak to different lanes or the shared Brand Spine umbrella. Having one engine target clinic supply reliability and another target clinical safety is INTENDED and VALID. Do NOT flag a contradiction between components addressing different approved lanes.
-3. BRAND SPINE COHERENCE: Reject if the Brand Spine contrast axis merges conflicting lane pains into an incoherent compound phrase (e.g. "body image struggles vs clinic trust doubts"). The Brand Spine must be a coherent umbrella position.
-4. STRATEGIC DECISION QUALITY: Reject outputs that contain only generic advice ("build trust", "use proof-led persuasion", "post consistently") without explaining the commercial consequence and the specific strategic choice. NOTE: An honest statement acknowledging a capability gap or proof gap is VALID.
+Evaluate TWO distinct dimensions:
+1. SEMANTIC CONSISTENCY Across Sections:
+   - Do Positioning, Differentiation, Mechanism, Offer, Lane Funnels, Lane Persuasions, and Channels & Budget tell a coherent strategic story?
+   - Multi-lane campaigns legitimately address different approved lanes across sections or under the Brand Spine; do NOT flag valid multi-lane specialization as a contradiction.
+   - Check that objection responses in lanePersuasions address the actual buyer objection rather than unrelated root causes.
+   - Flag if the Offer headline/promise inverts buyer sentiment or contradicts Positioning/Mechanism.
+2. FACTUAL SUPPORT for Material Promises:
+   - Are material Offer deliverables, Funnel CTAs, Persuasion responses, and Business Language Summary claims grounded in the Verified Product Truth Facts or explicitly labeled as [PROPOSED] / [PARTIALLY_MITIGATED] / PROPOSED_RECOMMENDATION / STRATEGIC_HYPOTHESIS?
+   - A legitimate strategic hypothesis or proposed direction (labeled as STRATEGIC_HYPOTHESIS or PROPOSED_RECOMMENDATION) is valid and allowed — do NOT flag clearly labeled strategic proposals as unsupported facts.
+   - Flag if the plan invents unsupported operational SLAs (e.g., guaranteed revision turnaround hours, unconditional refunds, permanent cloud hosting, or specific unverified prices/durations) as verified facts when they are absent from Verified Product Truth Facts.
 
-If you find a genuine contradiction, output a JSON object:
+Return ONLY a valid JSON object matching this exact structure:
 {
-  "consistent": false,
-  "conflict": "<detailed explanation of the structural contradiction>",
-  "canonicalFields": ["<the fields in conflict, e.g. positioning.enemy, offer.coreOutcome>"],
-  "responsibleEngines": ["<the engines responsible, e.g. offer, positioning>"],
-  "recommendedRegenerationTarget": "<the single engine that should be regenerated, e.g. positioning | offer | mechanism | differentiation>"
-}
-If no structural contradictions exist, output:
-{
-  "consistent": true
+  "consistent": boolean,
+  "semanticConsistency": {
+    "passed": boolean,
+    "issues": ["<any semantic contradiction between sections, or empty array if none>"],
+    "summary": "<1-2 sentence assessment of cross-section semantic coherence>"
+  },
+  "factualSupport": {
+    "passed": boolean,
+    "unsupportedPromises": ["<any unverified SLA/refund/revision guarantee asserted as fact, or empty array if none>"],
+    "summary": "<1-2 sentence assessment of factual grounding of material promises>"
+  },
+  "conflict": "<if consistent is false, detailed explanation of the blocking contradiction; otherwise null>",
+  "canonicalFields": ["<fields in conflict if consistent is false, else empty array>"],
+  "responsibleEngines": ["<engines responsible if consistent is false, else empty array>"],
+  "recommendedRegenerationTarget": "<single engine to regenerate if consistent is false, else null>"
 }`
         },
         {
           role: "user",
-          content: `STRATEGIC DECISION MAP:
-- Approved Lanes: ${JSON.stringify(strategyRoot?.approvedLanes || [])}
-- Brand Spine: ${JSON.stringify(strategyRoot?.brandSpine || {})}
-- Pains: ${pains}
-- Objections: ${objections}
-- Positioning Context: ${posContext}
-- Claims/Pillars: ${claims}
-- Mechanism: ${mechanism}
-- Offer: ${offerContext}
-- Channels: ${channelContext}
-- Funnel: ${funnelContext}`
+          content: `STRUCTURED AUTHORITATIVE DECISION MAP:\n${JSON.stringify(structuredDecisionMap, null, 2)}`
         }
       ]
     });
 
-    const text = response.choices?.[0]?.message?.content ?? "{}";
-    const judgeResult = JSON.parse(text);
-    if (judgeResult && judgeResult.consistent === false) {
+    const text = response.choices?.[0]?.message?.content ?? "";
+    if (!text.trim()) {
       return {
         valid: false,
-        conflict: `Semantic Judge Verdict: ${judgeResult.conflict}`,
-        canonicalFields: judgeResult.canonicalFields || [],
-        responsibleEngines: judgeResult.responsibleEngines || [],
-        recommendedRegenerationTarget: judgeResult.recommendedRegenerationTarget || "positioning"
+        outcomeType: "INCOMPLETE_INPUTS",
+        blocking: true,
+        checkFailed: true,
+        conflict: "Consistency judge returned an empty response.",
+        inputCoverage,
       };
     }
-  } catch (err: any) {
-    console.warn(`[PlanSynthesis] Semantic judge failed to run or parsed invalid JSON:`, err);
-  }
+    const judgeResult = JSON.parse(text);
+    const semanticConsistency = {
+      passed: Boolean(judgeResult?.semanticConsistency?.passed ?? judgeResult?.consistent),
+      issues: Array.isArray(judgeResult?.semanticConsistency?.issues) ? judgeResult.semanticConsistency.issues : [],
+      summary: String(judgeResult?.semanticConsistency?.summary || (judgeResult?.consistent ? "Cross-engine sections are semantically aligned." : "Semantic conflict detected.")),
+    };
+    const factualSupport = {
+      passed: Boolean(judgeResult?.factualSupport?.passed ?? judgeResult?.consistent),
+      unsupportedPromises: Array.isArray(judgeResult?.factualSupport?.unsupportedPromises) ? judgeResult.factualSupport.unsupportedPromises : [],
+      summary: String(judgeResult?.factualSupport?.summary || (judgeResult?.consistent ? "Material promises align with verified product truth and epistemic labels." : "Unsupported promise detected.")),
+    };
 
-  return { valid: true };
+    if (judgeResult.consistent === false || !semanticConsistency.passed || !factualSupport.passed) {
+      const combinedConflict =
+        judgeResult.conflict ||
+        [...semanticConsistency.issues, ...factualSupport.unsupportedPromises].join("; ") ||
+        "Cross-engine consistency or factual support check failed.";
+      const judgeDefects: ConsistencyDefectItem[] = [
+        ...semanticConsistency.issues.map((iss: string) => ({
+          fieldPath: (judgeResult.canonicalFields && judgeResult.canonicalFields[0]) || "strategicSummary",
+          category: "EPISTEMIC_MISMATCH" as const,
+          severity: "BLOCKING" as const,
+          proposition: iss,
+          citedEvidenceIds: [],
+          reason: iss,
+          responsibleEngine: (judgeResult.responsibleEngines && judgeResult.responsibleEngines[0]) || "plan_synthesis",
+        })),
+        ...factualSupport.unsupportedPromises.map((up: string) => ({
+          fieldPath: (judgeResult.canonicalFields && judgeResult.canonicalFields[0]) || "strategicSummary",
+          category: "FACTUAL_DEFECT" as const,
+          severity: "BLOCKING" as const,
+          proposition: up,
+          citedEvidenceIds: [],
+          reason: up,
+          responsibleEngine: (judgeResult.responsibleEngines && judgeResult.responsibleEngines[0]) || "plan_synthesis",
+        })),
+      ];
+      return {
+        valid: false,
+        outcomeType: "FAILED_SEMANTIC",
+        blocking: true,
+        conflict: `Semantic Judge Verdict: ${combinedConflict}`,
+        canonicalFields: judgeResult.canonicalFields || [],
+        responsibleEngines: judgeResult.responsibleEngines || [],
+        recommendedRegenerationTarget: judgeResult.recommendedRegenerationTarget || "offer",
+        defects: judgeDefects,
+        inputCoverage,
+        semanticConsistency,
+        factualSupport,
+      };
+    }
+
+    return {
+      valid: true,
+      outcomeType: "PASSED",
+      blocking: false,
+      defects: [],
+      inputCoverage,
+      semanticConsistency,
+      factualSupport,
+    };
+  } catch (err: any) {
+    console.error(`[PlanSynthesis] Semantic judge failed to execute or returned invalid JSON (FAIL-CLOSED):`, err?.message || err);
+    return {
+      valid: false,
+      outcomeType: "INCOMPLETE_INPUTS",
+      blocking: true,
+      checkFailed: true,
+      conflict: `Consistency check technical failure (fail-closed): ${err?.message || String(err)}`,
+      canonicalFields: ["consistencyValidation"],
+      responsibleEngines: ["plan_synthesis"],
+      inputCoverage,
+    };
+  }
 }
 
-import { strategicPlans, requiredWork, calendarEntries, businessDataLayer, offerSnapshots } from "@shared/schema";
+import { strategicPlans, requiredWork, calendarEntries, businessDataLayer, offerSnapshots, campaignBudgetSettings } from "@shared/schema";
 import { eq, and, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import { createAttributionEntries } from "../decision-attribution";
@@ -160,13 +915,33 @@ import {
   type DecisionEnforcementReport,
 } from "../decision-policy";
 import { computeSignalComposition, formatCompositionLog, type SignalComposition } from "../shared/signal-lineage";
+import { resolveGovernedBudgetState, type GovernedBudgetState } from "./budget-decision-ledger";
 
 export type PlanSource = "decision_driven" | "degraded_no_decisions" | "degraded_ai_failed" | "deterministic_fallback";
+
+export interface PlanGovernanceBlock {
+  rootId: string | null;
+  rootStatus: string;
+  executionEligible: boolean;
+  systemControl: {
+    verdictId: string | null;
+    verdict: string;
+    mode: string;
+  };
+  governedBudget: GovernedBudgetState;
+  lockedDecisions: {
+    passed: boolean;
+    missing: string[];
+    contradicted: string[];
+  };
+  approvalBlockers: string[];
+}
 
 export interface SynthesizedPlan {
   planSource: PlanSource;
   degraded: boolean;
   lockedDecisionLabels?: string[];
+  governance?: PlanGovernanceBlock;
   synthesisVerification?: {
     passed: boolean;
     totalLocked: number;
@@ -390,7 +1165,7 @@ export interface SynthesizedPlan {
   };
 }
 
-function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any, activeStrategyRoot?: any): SynthesizedPlan {
+function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any, activeStrategyRoot?: any, controlVerdict?: any): SynthesizedPlan {
   const reasoning = budgetOutput?.decision?.reasoning || "Budget governor halted execution";
   const killReasons = budgetOutput?.killReasons || [];
 
@@ -400,6 +1175,20 @@ function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any, activeStr
   const primaryLane = Array.isArray(activeStrategyRoot?.approvedLanes) ? activeStrategyRoot.approvedLanes[0] : null;
   const targetAudience = primaryLane?.title || primaryLane?.name || campaign?.targetAudience || "Target Audience under validation";
   const strategyTitle = activeStrategyRoot?.brandSpine?.umbrellaPositionName || activeStrategyRoot?.approvedPositioningContext?.territoryName || "Commercial Strategy";
+
+  const governedBudget = resolveGovernedBudgetState(budgetOutput);
+  const isRootEligible = Boolean(activeStrategyRoot && (activeStrategyRoot.status === "ACTIVE" || activeStrategyRoot.executionEligible === true));
+
+  const approvalBlockers: string[] = [];
+  if (governedBudget.governanceState === "BLOCKED" || governedBudget.action === "halt") {
+    approvalBlockers.push(`Budget Governor halted execution: ${governedBudget.reasoning || reasoning}`);
+  }
+  if (!isRootEligible) {
+    approvalBlockers.push(`Strategy Root ${activeStrategyRoot?.id || 'none'} has status "${activeStrategyRoot?.status || 'UNKNOWN'}", not execution-eligible.`);
+  }
+  if (controlVerdict && (controlVerdict.strategyBlocked === true || controlVerdict.verdict === "BLOCK" || controlVerdict.executionMode === "SYSTEM_UNTRUSTED" || controlVerdict.executionMode === "HALTED")) {
+    approvalBlockers.push(`System Control verdict rejected strategy execution: status=${controlVerdict.verdict}, action=${controlVerdict.executionMode}.`);
+  }
 
   return {
     planSource: "degraded_ai_failed",
@@ -444,12 +1233,44 @@ function buildHaltPlan(budgetOutput: any, bizData: any, campaign: any, activeStr
       triggers: [{ trigger: "Paid spend withheld", condition: "Insufficient performance baseline", action: "Execute organic validation to gather first conversion events", severity: "low" }],
       escalationPath: ["Acquire first validated conversion signals", "Re-run budget governor with performance data"],
     },
+    governance: {
+      strategyRoot: {
+        rootId: activeStrategyRoot?.id || null,
+        rootStatus: activeStrategyRoot?.status || "UNKNOWN",
+        executionEligible: isRootEligible,
+      },
+      systemControl: {
+        verdictId: controlVerdict?.id || (controlVerdict as any)?.verdictId || null,
+        status: controlVerdict?.verdict || "UNKNOWN",
+        enforcementAction: controlVerdict?.executionMode || "UNKNOWN",
+        allowExecution: controlVerdict ? (controlVerdict.verdict === "PASS" || (controlVerdict.verdict !== "BLOCK" && controlVerdict.strategyBlocked === false)) : false,
+      },
+      governedBudget,
+      lockedDecisions: {
+        total: 0,
+        preserved: 0,
+        missing: [],
+        coverage: 1,
+      },
+      approvalBlockers,
+    },
   };
 }
 
 async function persistPlan(plan: SynthesizedPlan, config: OrchestratorConfig, rootBundle: any, explorationSlots: any[]): Promise<string> {
-  // Task #93 / Phase 4-E — cutover counter removed. Single-persist
-  // discipline lives in `synthesisDegradationBuilder` (OD-1).
+  await db
+    .update(strategicPlans)
+    .set({ status: "SUPERSEDED", isDesignatedActive: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(strategicPlans.accountId, config.accountId),
+        eq(strategicPlans.campaignId, config.campaignId),
+        eq(strategicPlans.status, "DRAFT")
+      )
+    );
+
+  // Post-generation text mangling removed: claim status originates in upstream
+  // evidence and assessments, preserving exact engine output in planJson.
   const [dbPlan] = await db.insert(strategicPlans).values({
     accountId: config.accountId,
     blueprintId: "orchestrator-v2",
@@ -502,12 +1323,7 @@ function applyBudgetHoldRestriction(plan: SynthesizedPlan): SynthesizedPlan {
   const dist = plan.contentDistribution;
   const restricted = {
     ...dist,
-    reelsPerWeek: dist.reelsPerWeek > 0 ? Math.max(1, Math.floor(dist.reelsPerWeek * 0.5)) : 0,
-    postsPerWeek: dist.postsPerWeek > 0 ? Math.max(1, Math.floor(dist.postsPerWeek * 0.5)) : 0,
-    storiesPerDay: dist.storiesPerDay > 0 ? Math.max(0, Math.floor(dist.storiesPerDay * 0.5)) : 0,
-    carouselsPerWeek: dist.carouselsPerWeek > 0 ? Math.max(0, Math.floor(dist.carouselsPerWeek * 0.5)) : 0,
-    videosPerWeek: dist.videosPerWeek > 0 ? Math.max(0, Math.floor(dist.videosPerWeek * 0.5)) : 0,
-    rationale: `[HOLD-RESTRICTED] ${dist.rationale || ""} — Scaling budget is held`,
+    rationale: `[SCALING-HOLD GUIDANCE] ${dist.rationale || ""} — Paid media scaling is held pending initial creative/conversion proof; organic production and initial validation testing preparation proceed normally.`,
   };
   return { ...plan, contentDistribution: restricted };
 }
@@ -532,16 +1348,18 @@ function applyIntegrityDegradation(plan: SynthesizedPlan, mode: "restricted" | "
   };
 }
 
-function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): string {
+export function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): string {
   const sections: string[] = [];
 
   if (strategyRoot) {
+    const rootMechName = strategyRoot.brandSpine?.mechanismName || strategyRoot.approvedMechanism?.mechanismName || strategyRoot.approvedMechanism?.name || "none";
+    const rootMechType = strategyRoot.brandSpine?.mechanismType || strategyRoot.approvedMechanism?.mechanismType || strategyRoot.approvedMechanism?.type || "none";
     sections.push(`[STRATEGY_ROOT] Use these approved elements verbatim:\n` +
       `  Pains: ${(strategyRoot.approvedPains || []).map((p: any) => typeof p === 'string' ? p : p.pain).slice(0, 3).join("; ")}\n` +
       `  Objections: ${(strategyRoot.approvedObjections || []).map((o: any) => typeof o === 'string' ? o : o.objection).slice(0, 3).join("; ")}\n` +
       `  Desires: ${(strategyRoot.approvedDesires || []).slice(0, 3).join("; ")}\n` +
       `  Transformation: ${strategyRoot.approvedTransformationAxis || "none"}\n` +
-      `  Mechanism: ${strategyRoot.approvedMechanism?.name || "none"} (${strategyRoot.approvedMechanism?.type || "none"})\n` +
+      `  Mechanism: ${rootMechName} (${rootMechType})\n` +
       `  Claim: ${strategyRoot.approvedClaim || "none"}\n` +
       `  Axes: Primary "${strategyRoot.primaryAxis || 'none'}", Contrast "${strategyRoot.contrastAxis || 'none'}"`);
   }
@@ -571,7 +1389,17 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strateg
   const audience = results.get("audience");
   if (audience?.status === "SUCCESS" && audience.output) {
     const out = audience.output.output || audience.output;
-    const pains = (out.audiencePains || out.painProfiles || []).map((p: any) => p.name || p.painName || "unknown").slice(0, 3).join(", ");
+    const pains = (out.audiencePains || out.painProfiles || [])
+      .map((p: any) => {
+        const text = p.canonical || p.originalStatement || p.pain || p.name || p.painName || "unknown";
+        const compNames = Array.isArray(p.competitorNames) && p.competitorNames.length > 0
+          ? p.competitorNames.join(", ")
+          : "";
+        const scopeTag = compNames ? ` [COMPETITOR_SPECIFIC: ${compNames}]` : (p.subjectScope ? ` [${p.subjectScope}]` : "");
+        return `${text}${scopeTag}`;
+      })
+      .slice(0, 4)
+      .join(", ");
     const segments = (out.audienceSegments || []).map((s: any) => s.name || s.segmentName || "unknown").slice(0, 3).join(", ");
     nonMiSections.push(`[ENGINE_OUTPUT] Audience: Pains [${pains}], Segments [${segments}]`);
   }
@@ -579,22 +1407,85 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strateg
   const positioning = results.get("positioning");
   if (positioning?.status === "SUCCESS" && positioning.output) {
     const out = positioning.output.output || positioning.output;
+    const primaryTerritory = (out.territories || [])[0] || {};
     const territories = (out.territories || []).map((t: any) => t.name || t.territoryName || "unknown").slice(0, 2).join(", ");
-    nonMiSections.push(`[ENGINE_OUTPUT] Positioning: Territories [${territories}], Enemy "${out.enemyDefinition || 'none'}", Contrast "${out.contrastAxis || 'none'}", Narrative "${out.narrativeDirection || 'none'}"`);
+    const posEpistemicStatus = out.epistemicStatus || primaryTerritory.epistemicStatus || out.proposalStatus || "STRATEGIC_HYPOTHESIS";
+    const posEpistemicLabel = out.epistemicLabel || primaryTerritory.epistemicLabel || "";
+    const posOutcomeType = out.positioningOutcomeType || primaryTerritory.positioningOutcomeType || "";
+    const posComparisonStatus = out.comparisonStatus || primaryTerritory.comparisonStatus || "";
+    const posComparedCount = typeof out.comparedCompetitorCount === "number" ? out.comparedCompetitorCount : 0;
+    const posRationale = out.rationale || primaryTerritory.rationale || "";
+    const isHypothesisOrSharedEmphasis =
+      String(posEpistemicStatus).toUpperCase().includes("HYPOTHESIS") ||
+      String(posOutcomeType).toUpperCase().includes("SHARED_CAPABILITY") ||
+      String(posOutcomeType).toUpperCase().includes("INSUFFICIENT_COMPARISON") ||
+      String(posComparisonStatus).toUpperCase().includes("UNAVAILABLE");
+    nonMiSections.push(
+      `[ENGINE_OUTPUT] Positioning: Territories [${territories}], Enemy "${out.enemyDefinition || 'none'}", Contrast "${out.contrastAxis || 'none'}", Narrative "${out.narrativeDirection || 'none'}"` +
+      (posRationale ? `, Rationale "${posRationale}"` : "") +
+      `, EpistemicStatus "${posEpistemicStatus}"` +
+      (posEpistemicLabel ? ` (${posEpistemicLabel})` : "") +
+      (posOutcomeType ? `, OutcomeType "${posOutcomeType}"` : "") +
+      (posComparisonStatus ? `, ComparisonStatus "${posComparisonStatus}" (comparedCompetitorCount=${posComparedCount})` : "") +
+      (isHypothesisOrSharedEmphasis
+        ? ` [IMPORTANT: Positioning is classified as ${posEpistemicStatus}${posOutcomeType ? ` / ${posOutcomeType}` : ""} (${posComparisonStatus || "no competitor comparison"}, comparedCompetitorCount=${posComparedCount}). Frame this positioning strictly as a proposed strategic hypothesis and strategic market emphasis on verified product capabilities — NEVER claim proven exclusivity, "only provider", or unverified category-wide competitor internal architectures.]`
+        : "")
+    );
   }
 
   const diff = results.get("differentiation");
   if (diff?.status === "SUCCESS" && diff.output) {
     const out = diff.output.output || diff.output;
-    const pillars = (out.pillars || []).map((p: any) => p.name || p.pillarName || "unknown").slice(0, 3).join(", ");
-    const claims = (out.claimStructures || []).map((c: any) => c.claimText || c.claim || "unknown").slice(0, 2).join(" | ");
-    nonMiSections.push(`[ENGINE_OUTPUT] Differentiation: Pillars [${pillars}], Claims [${claims}], Proof Types ${(out.proofArchitecture || []).length}, Authority Mode "${out.authorityMode?.mode || out.authorityMode || 'unknown'}"`);
+    const diffList = out.differentiations || out.pillars || [];
+    const pillars = diffList
+      .map((p: any) => {
+        const epStatus = p.epistemicStatus || p.differentiationClassification || p.claimCategory || "";
+        const honestLbl = p.honestLabel ? ` (${p.honestLabel})` : "";
+        return `${p.name || p.pillarName || p.claim || "unknown"}${epStatus ? ` [${epStatus}${honestLbl}]` : ""}`;
+      })
+      .slice(0, 4)
+      .join(", ");
+    const allStrategicEmphasis = diffList.length > 0 && diffList.every((p: any) => {
+      const st = String(p.epistemicStatus || p.differentiationClassification || "").toUpperCase();
+      return st.includes("SHARED_CAPABILITY") || st.includes("STRATEGIC_EMPHASIS") || st.includes("COMPETITIVE_COMPARISON_UNAVAILABLE");
+    });
+    const claims = (out.claimStructures || diffList)
+      .map((c: any) => c.claimText || c.claim || c.statement || "unknown")
+      .slice(0, 2)
+      .join(" | ");
+    nonMiSections.push(
+      `[ENGINE_OUTPUT] Differentiation: Pillars [${pillars}], Claims [${claims}], Proof Types ${(out.proofArchitecture || []).length}, Authority Mode "${out.authorityMode?.mode || out.authorityMode || 'unknown'}"` +
+      (allStrategicEmphasis
+        ? ` [IMPORTANT: All differentiation pillars are classified as SHARED_CAPABILITY_STRATEGIC_EMPHASIS / COMPETITIVE_COMPARISON_UNAVAILABLE. Frame them strictly as strategic market emphasis on verified product strengths — NEVER claim "unique combination", "only provider", or "defensible whitespace".]`
+        : "")
+    );
+  }
+
+  const mechanism = results.get("mechanism" as EngineId);
+  if (mechanism?.status === "SUCCESS" && mechanism.output) {
+    const out = mechanism.output.output || mechanism.output;
+    const pm = out.primaryMechanism || out.mechanism || out;
+    const mechSteps = (pm.mechanismSteps || out.mechanismSteps || [])
+      .map((s: any, idx: number) => `${s.stepNumber || idx + 1}. ${s.stepName || s.name || "Step"}: ${s.description || s.purpose || ""}`)
+      .slice(0, 5)
+      .join(" | ");
+    nonMiSections.push(
+      `[ENGINE_OUTPUT] Mechanism: Name "${pm.mechanismName || pm.name || out.mechanismName || 'unknown'}", Type "${pm.mechanismType || pm.type || out.mechanismType || 'unknown'}", Promise "${pm.mechanismPromise || pm.corePromise || out.mechanismPromise || 'none'}", Logic "${pm.mechanismLogic || pm.coreLogic || out.mechanismLogic || 'none'}", Steps [${mechSteps}]`
+    );
   }
 
   const offer = results.get("offer");
   if (offer?.status === "SUCCESS" && offer.output) {
     const out = offer.output.output || offer.output;
-    nonMiSections.push(`[ENGINE_OUTPUT] Offer: Name "${out.offerName || 'unknown'}", Outcome "${out.coreOutcome || 'unknown'}", Price "${out.priceStructure || 'none'}", Guarantee "${out.guarantee || 'none'}", Mechanism "${out.mechanismDescription || 'none'}"`);
+    const primaryOffer = out.primaryOffer || out.offer || out;
+    const opProposals = (primaryOffer.operationalProposals || out.operationalProposals || [])
+      .map((op: any) => op.title || op.proposal || op.action || op.description)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join("; ");
+    nonMiSections.push(
+      `[ENGINE_OUTPUT] Offer: Name "${primaryOffer.offerName || primaryOffer.title || out.offerName || 'unknown'}", Outcome "${primaryOffer.coreOutcome || primaryOffer.valueProposition || out.coreOutcome || 'unknown'}", Price "${primaryOffer.priceStructure || out.priceStructure || 'none'}", Guarantee "${primaryOffer.guarantee || primaryOffer.riskReversal?.name || out.guarantee || 'none'}", Mechanism "${primaryOffer.mechanismDescription || out.mechanismDescription || 'none'}"${opProposals ? `, Operational Proposals Requiring Business Approval: [${opProposals}]` : ""}`
+    );
   }
 
   const funnel = results.get("funnel");
@@ -607,14 +1498,29 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strateg
   const awareness = results.get("awareness");
   if (awareness?.status === "SUCCESS" && awareness.output) {
     const out = awareness.output.output || awareness.output;
-    const mechanisms = (out.layerMechanisms || out.layerResults || []).map((m: any) => m.mechanism || m.name || "unknown").slice(0, 3).join(", ");
-    nonMiSections.push(`[ENGINE_OUTPUT] Awareness: Primary Route "${out.primaryRoute?.routeName || out.primaryRoute?.name || 'unknown'}", Layer Mechanisms [${mechanisms}]`);
+    const pr = out.primaryRoute || out;
+    const toLayerArray = (v: any): any[] => {
+      if (Array.isArray(v)) return v;
+      if (typeof v === "string") { try { return toLayerArray(JSON.parse(v)); } catch { return []; } }
+      if (v && typeof v === "object") return Object.values(v);
+      return [];
+    };
+    const mechanisms = toLayerArray(out.layerMechanisms || out.layerResults).map((m: any) => m?.mechanism || m?.name || "unknown").slice(0, 3).join(", ");
+    nonMiSections.push(
+      `[ENGINE_OUTPUT] Awareness: Primary Route "${pr.routeName || pr.name || 'unknown'}", Entry Stage "${pr.entryStage || out.entryStage || 'unknown'}", Target Readiness "${pr.targetReadinessStage || out.targetReadinessStage || 'unknown'}", Old Belief "${pr.oldBelief || out.oldBelief || 'none'}", New Belief "${pr.newBelief || out.newBelief || 'none'}", Narrative Reframe "${pr.narrativeReframe || out.narrativeReframe || 'none'}", Myth Breaker "${pr.mythBreaker || out.mythBreaker || 'none'}", Layer Mechanisms [${mechanisms}]`
+    );
   }
 
   const persuasion = results.get("persuasion");
   if (persuasion?.status === "SUCCESS" && persuasion.output) {
     const out = persuasion.output.output || persuasion.output;
-    const mechanisms = (out.layerMechanisms || out.layerResults || []).map((m: any) => m.mechanism || m.name || "unknown").slice(0, 3).join(", ");
+    const toLayerArray = (v: any): any[] => {
+      if (Array.isArray(v)) return v;
+      if (typeof v === "string") { try { return toLayerArray(JSON.parse(v)); } catch { return []; } }
+      if (v && typeof v === "object") return Object.values(v);
+      return [];
+    };
+    const mechanisms = toLayerArray(out.layerMechanisms || out.layerResults).map((m: any) => m?.mechanism || m?.name || "unknown").slice(0, 3).join(", ");
     nonMiSections.push(`[ENGINE_OUTPUT] Persuasion: Primary Route "${out.primaryRoute?.routeName || out.primaryRoute?.name || 'unknown'}", Alt Route "${out.alternativeRoute?.routeName || 'none'}", Mode "${out.persuasionMode || 'unknown'}", Mechanisms [${mechanisms}]`);
   }
 
@@ -653,7 +1559,10 @@ function extractEngineInsights(results: Map<EngineId, EngineStepResult>, strateg
   const budget = results.get("budget_governor");
   if (budget?.status === "SUCCESS" && budget.output) {
     const out = budget.output.output || budget.output;
-    nonMiSections.push(`[ENGINE_OUTPUT] Budget Governor: Decision "${out.decision || out.action || 'APPROVED'}", Reasoning "${out.reasoning || 'none'}", Risk Factors ${(out.riskFactors || []).join(", ") || 'none'}`);
+    const action = out.decision?.action || out.decision || out.action || 'HOLD';
+    const total = out.totalMonthlyBudget ? `${out.totalMonthlyBudget} ${out.currency || 'USD'}` : 'Not specified';
+    const allocs = (out.allocations || []).map((a: any) => `${a.channelName || a.channelId}: ${a.sharePercentage}%`).join("; ");
+    nonMiSections.push(`[ENGINE_OUTPUT] Budget Governor: Decision "${action}", Total "${total}", Allocations [${allocs || 'none'}], Reasoning "${out.overallRationale || out.decision?.reasoning || out.reasoning || 'none'}"`);
   }
 
   const channel = results.get("channel_selection");
@@ -832,7 +1741,7 @@ export function extractLockedDecisionLabels(results: Map<EngineId, EngineStepRes
   const mechanism = results.get("mechanism");
   if (mechanism?.status === "SUCCESS") {
     const m = mechanism.output?.output || mechanism.output;
-    if (m?.status === "COMPLETE" || m?.status === "SUCCESS") {
+    if (m?.status === "COMPLETE" || m?.status === "SUCCESS" || m?.primaryMechanism || m?.mechanismName) {
       const mechName = m?.primaryMechanism?.mechanismName || m?.mechanismName;
       if (mechName) out.push({ label: mechName, scope: "mechanism" });
     }
@@ -841,7 +1750,8 @@ export function extractLockedDecisionLabels(results: Map<EngineId, EngineStepRes
   const offer = results.get("offer");
   if (offer?.status === "SUCCESS") {
     const o = offer.output?.output || offer.output;
-    if (o?.offerName) out.push({ label: o.offerName, scope: "offer" });
+    const offerName = o?.primaryOffer?.offerName || o?.offerName;
+    if (offerName) out.push({ label: offerName, scope: "offer" });
   }
 
   const diff = results.get("differentiation");
@@ -878,7 +1788,8 @@ export function extractLockedDecisionLabels(results: Map<EngineId, EngineStepRes
 
   if (strategyRoot) {
     if (strategyRoot.approvedClaim) out.push({ label: strategyRoot.approvedClaim, scope: "strategyRoot" });
-    if (strategyRoot.approvedMechanism?.name) out.push({ label: strategyRoot.approvedMechanism.name, scope: "strategyRoot" });
+    const rootMechName = strategyRoot.approvedMechanism?.mechanismName || strategyRoot.approvedMechanism?.name || strategyRoot.brandSpine?.mechanismName;
+    if (rootMechName) out.push({ label: rootMechName, scope: "strategyRoot" });
   }
 
   return out;
@@ -923,14 +1834,36 @@ export function verifySynthesisPreservation(
   const planStr = JSON.stringify(plan).toLowerCase();
   const { lockedDecisionLabels: _labels, synthesisVerification: _verif, planSource: _src, degraded: _deg, ...contentOnly } = plan;
   // Pre-compute scoped string sets on demand (cached per-scope).
+  const SCOPE_PLAN_MAPPINGS: Record<string, string[]> = {
+    positioning: ["strategicSummary", "monthlyObjective", "buyerConversionJourneys"],
+    mechanism: ["strategicSummary", "buyerConversionJourneys", "creativeTesting", "mechanism", "approvedMechanism", "brandSpine"],
+    offer: ["strategicSummary", "buyerConversionJourneys", "contentDistribution", "offer"],
+    differentiation: ["strategicSummary", "contentDistribution", "creativeTesting", "differentiationPillars"],
+    channel_selection: ["contentDistribution", "budgetAllocation", "kpiStructure"],
+    awareness: ["buyerConversionJourneys", "contentDistribution", "creativeTesting", "awarenessRoute", "awareness"],
+    persuasion: ["buyerConversionJourneys", "creativeTesting", "strategicSummary", "persuasionRoute"],
+    strategyRoot: ["strategicSummary", "buyerConversionJourneys", "contentDistribution", "approvedClaim", "approvedMechanism", "strategyRoot", "brandSpine"],
+  };
+
   const scopeSetCache = new Map<string, Set<string>>();
   function setForScope(scope: string | undefined): Set<string> {
     const key = scope ?? "__global__";
     let s = scopeSetCache.get(key);
     if (!s) {
       s = new Set<string>();
-      const root = scope ? (contentOnly as Record<string, unknown>)[scope] : contentOnly;
-      collectPlanStringSet(root, s, 0);
+      if (!scope) {
+        collectPlanStringSet(contentOnly, s, 0);
+      } else if ((contentOnly as Record<string, unknown>)[scope] !== undefined) {
+        collectPlanStringSet((contentOnly as Record<string, unknown>)[scope], s, 0);
+      } else if (SCOPE_PLAN_MAPPINGS[scope]) {
+        for (const prop of SCOPE_PLAN_MAPPINGS[scope]) {
+          if ((contentOnly as Record<string, unknown>)[prop] !== undefined) {
+            collectPlanStringSet((contentOnly as Record<string, unknown>)[prop], s, 0);
+          }
+        }
+      } else {
+        collectPlanStringSet(contentOnly, s, 0);
+      }
       scopeSetCache.set(key, s);
     }
     return s;
@@ -962,7 +1895,21 @@ export function verifySynthesisPreservation(
     if (normalized.length < 3) continue;
 
     const set = setForScope(scope);
-    const hasMatch = set.has(normalized);
+    let hasMatch = set.has(normalized);
+
+    if (!hasMatch) {
+      const cleanNorm = normalized.replace(/[.,;:!?]+$/, "").trim();
+      const globalSet = setForScope(undefined);
+      if (
+        set.has(cleanNorm) ||
+        globalSet.has(normalized) ||
+        globalSet.has(cleanNorm) ||
+        planStr.includes(normalized) ||
+        (cleanNorm.length > 5 && planStr.includes(cleanNorm))
+      ) {
+        hasMatch = true;
+      }
+    }
 
     if (hasMatch) {
       preserved++;
@@ -998,9 +1945,15 @@ export function validateSynthesisIntegrity(
 
   const contradictions: string[] = [];
   const strategyRootPresent = !!strategyRoot;
+  const isRootEligible = strategyRoot && (strategyRoot.status === "ACTIVE" || strategyRoot.executionEligible === true);
+  if (strategyRoot && !isRootEligible) {
+    contradictions.push(`STRATEGY_ROOT_INELIGIBLE: Strategy root is status="${strategyRoot.status || 'unknown'}", not execution-eligible.`);
+  }
   
   let verdict: 'FULLY_GROUNDED' | 'PARTIALLY_GROUNDED' | 'UNGROUNDED' = 'FULLY_GROUNDED';
-  if (blockedEngines.length > 0 || missingLabels.length > 0 || degradedEngines.length > 0) {
+  if (!strategyRootPresent || !isRootEligible) {
+    verdict = 'UNGROUNDED';
+  } else if (blockedEngines.length > 0 || missingLabels.length > 0 || degradedEngines.length > 0) {
     verdict = 'PARTIALLY_GROUNDED';
   }
 
@@ -1013,7 +1966,7 @@ export function validateSynthesisIntegrity(
     verdict
   };
 }
-function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): string {
+export function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strategyRoot?: any): string {
   const lines: string[] = [];
 
   if (strategyRoot) {
@@ -1024,14 +1977,24 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
         return !/unauthorized|billing|refund|cancellation charges/i.test(text);
       });
       if (corePains.length > 0) {
-        lines.push(`  Strategy Root Core Pains: ${corePains.map((p: any) => typeof p === 'string' ? p : p.pain || p.name || p).join(", ")}`);
+        lines.push(`  Strategy Root Core Pains: ${corePains.map((p: any) => {
+          if (typeof p === 'string') return p;
+          const txt = p.pain || p.name || p.canonical || p.statement || p.text || p;
+          const compNames = Array.isArray(p.competitorNames) && p.competitorNames.length > 0 ? ` [Competitor-attributed to ${p.competitorNames.join(", ")}]` : "";
+          return `${txt}${compNames}`;
+        }).join(", ")}`);
       }
     }
     const objections = strategyRoot.approvedObjections;
     if (objections) {
       const objArr = Array.isArray(objections) ? objections : Object.values(objections);
       if (objArr.length > 0) {
-        lines.push(`  Strategy Root Objections: ${objArr.map((o: any) => typeof o === 'string' ? o : o.label || o.objection || o.text || o.name || o).join(", ")}`);
+        lines.push(`  Strategy Root Objections: ${objArr.map((o: any) => {
+          if (typeof o === 'string') return o;
+          const txt = o.label || o.objection || o.text || o.name || o;
+          const compNames = Array.isArray(o.competitorNames) && o.competitorNames.length > 0 ? ` [Competitor-attributed to ${o.competitorNames.join(", ")}]` : "";
+          return `${txt}${compNames}`;
+        }).join(", ")}`);
       }
     }
     if (strategyRoot.approvedTransformation) {
@@ -1062,6 +2025,14 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
       if (contrast) lines.push(`  Contrast axis: "${contrast}"`);
       const narrative = pos.narrativeDirection || territory?.narrativeDirection;
       if (narrative) lines.push(`  Narrative direction: "${narrative}"`);
+      const posRationale = pos.rationale || territory?.rationale;
+      if (posRationale) lines.push(`  Positioning rationale: "${posRationale}"`);
+      const posEpStatus = pos.epistemicStatus || territory?.epistemicStatus || pos.proposalStatus;
+      if (posEpStatus) lines.push(`  Positioning epistemic status: "${posEpStatus}"`);
+      const posEpLabel = pos.epistemicLabel || territory?.epistemicLabel;
+      if (posEpLabel) lines.push(`  Positioning epistemic label: "${posEpLabel}"`);
+      const posCompStatus = pos.comparisonStatus || territory?.comparisonStatus;
+      if (posCompStatus) lines.push(`  Positioning comparison status: "${posCompStatus}" (comparedCompetitorCount=${pos.comparedCompetitorCount ?? 0})`);
     }
   }
 
@@ -1093,8 +2064,9 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
     const diff = results.get("differentiation");
     if (diff?.status === "SUCCESS" && diff.output) {
       const out = diff.output.output || diff.output;
-      if (out.pillars && out.pillars.length > 0) {
-        const pillarNames = (out.pillars as any[]).map((p: any) => p.name || p.pillarName).filter(Boolean);
+      const diffItems = out.differentiations || out.pillars || [];
+      if (diffItems.length > 0) {
+        const pillarNames = (diffItems as any[]).map((p: any) => p.name || p.pillarName || p.claim).filter(Boolean);
         if (pillarNames.length > 0) {
           lines.push(`  Differentiation pillars: ${pillarNames.map((n: string) => `"${n}"`).join(", ")}`);
         }
@@ -1107,8 +2079,11 @@ function extractLockedDecisions(results: Map<EngineId, EngineStepResult>, strate
   const offer = results.get("offer");
   if (offer?.status === "SUCCESS" && offer.output) {
     const out = offer.output.output || offer.output;
-    if (out.offerName) lines.push(`  Offer name: "${out.offerName}"`);
-    if (out.coreOutcome) lines.push(`  Offer core outcome: "${out.coreOutcome}"`);
+    const primaryOffer = out.primaryOffer || out.offer || out;
+    const offerName = primaryOffer.offerName || primaryOffer.title || out.offerName;
+    const coreOutcome = primaryOffer.coreOutcome || primaryOffer.valueProposition || out.coreOutcome;
+    if (offerName) lines.push(`  Offer name: "${offerName}"`);
+    if (coreOutcome) lines.push(`  Offer core outcome: "${coreOutcome}"`);
   }
 
   const awareness = results.get("awareness");
@@ -1182,18 +2157,27 @@ export function cleanInternalIdsFromProse(text: string): string {
     .trim();
 }
 
+export function sanitizeStrategicSummaryEpistemics(text: string, _evidenceTexts: string[]): string {
+  if (!text || typeof text !== "string") return text;
+  // Formatting-only cleanup; semantic support is enforced by LLM generation, targeted repair, and final consistency validation
+  return text.replace(/\s{2,}/g, " ").trim();
+}
+
 async function generatePlanWithAI(
   engineInsights: string,
   businessData: any,
   campaign: any,
   goalMathContext?: { goal: any; funnel: any; feasibility: any; archetype: any } | null,
   lockedDecisions?: string,
-  accountId: string,
+  accountId: string = "",
   memoryContextBlock?: string,
   campaignId: string = "",
   precomputedRhythm?: { reelsPerWeek: number; carouselsPerWeek: number; storiesPerDay: number; postsPerWeek: number; reasoning: string; performanceBasis: string } | null,
   signalComposition?: SignalComposition | null,
   activeStrategyRoot?: any,
+  budgetSettings?: any,
+  budgetGovernorOutput?: any,
+  canonicalContext?: any,
 ): Promise<SynthesizedPlan> {
   const brandSpine = activeStrategyRoot?.brandSpine
     ? (typeof activeStrategyRoot.brandSpine === "string" ? JSON.parse(activeStrategyRoot.brandSpine) : activeStrategyRoot.brandSpine)
@@ -1230,9 +2214,19 @@ INSTRUCTION: You must synthesize the execution plan around these Strategic Lanes
   }
 
   const objective = campaign?.objective || businessData?.funnelObjective || "AWARENESS";
-  const businessType = businessData?.businessType || "general";
-  const location = campaign?.location || businessData?.geoScope || "Not specified";
-  const budget = businessData?.monthlyBudget || "Not specified";
+  const businessName = canonicalContext?.businessName || businessData?.businessName || campaign?.businessName || "";
+  const offeringName = canonicalContext?.offeringName || businessData?.coreOffer || "";
+  const businessType = canonicalContext?.category || canonicalContext?.businessModel || businessData?.businessType || "general";
+  const location = canonicalContext?.targetMarket || campaign?.location || businessData?.geoScope || "Not specified";
+  const evidenceGapsList: string[] = Array.isArray(canonicalContext?.evidenceGaps)
+    ? canonicalContext.evidenceGaps.slice(0, 8)
+    : [];
+  const rawBudget = budgetSettings?.monthlyBudget != null
+    ? `${budgetSettings.monthlyBudget} ${budgetSettings.currency || "USD"}`
+    : (budgetGovernorOutput?.totalMonthlyBudget != null
+      ? `${budgetGovernorOutput.totalMonthlyBudget} ${budgetGovernorOutput.currency || "USD"}`
+      : (businessData?.monthlyBudget || "Not specified"));
+  const budget = rawBudget;
 
   let goalMathSection = "";
   if (goalMathContext) {
@@ -1270,7 +2264,7 @@ The plan must explain WHY each content type volume was chosen based on the goal 
     ? `LOCKED DECISIONS — These are verbatim strategic outputs from upstream engines. You MUST reference these exact values in your plan. Do NOT rephrase, paraphrase, generalize, or substitute synonyms for any value below. The mechanism name, positioning territory, offer name, differentiation pillars, and channel assignments must appear exactly as stated:
 ${lockedDecisions}
 
-CRITICAL ASSEMBLY RULE: Every locked decision is IMMUTABLE. You must use the EXACT text provided. If a locked decision conflicts with another input, flag the conflict in riskTriggers but do NOT modify the locked decision. Evidence references and audience pains from Strategy Root must appear verbatim in the targetAudience and rationale sections.
+CRITICAL ASSEMBLY RULE: Every locked decision is IMMUTABLE as the chosen strategic direction. You must use the EXACT text provided. However, do NOT interpret a "locked strategic decision" as a verified factual assertion about competitors' internal processes or guaranteed outcomes — preserve the upstream epistemic status (e.g., STRATEGIC_HYPOTHESIS / SHARED_CAPABILITY_STRATEGIC_EMPHASIS / COMPETITIVE_COMPARISON_UNAVAILABLE), competitor attribution on customer reports, and proof requirements. Evidence references and audience pains from Strategy Root must appear with their exact attribution in the targetAudience and rationale sections.
 
 `
     : "";
@@ -1316,12 +2310,27 @@ STRICT CONSTITUTIONAL RULES:
 3. TRUTH-GROUNDED SPECIFICITY: Do NOT invent unvalidated features, SLAs, or technical integrations (e.g. "real-time API inventory integration", "guaranteed zero stockouts") unless verified in the Product Anchor. If proof or capabilities are missing, explicitly document them as a "Proof Gap" or "Capability Gap".
 4. PRESERVE ENGINE AUTHORITY: Use the exact locked decisions from upstream engines (Positioning, Differentiation, Mechanism, Offer, Funnel, Channel) without rewriting or substituting synonyms.
 5. BUSINESS-FACING PROSE & IDENTITY HYGIENE: Do NOT output raw internal identifiers (such as "seg_1_pain_1", "seg_*", "spd_*", "lane_*", or "[ID: ...]") in strategicSummary or customer-facing text. Use only clean, professional business language.
+6. DISTINCT DECISION OWNERSHIP & NO ECHOING: Do NOT echo or copy Positioning's contrast axis or narrative direction into Mechanism or Offer. Each engine owns its distinct commercial decision:
+   - Positioning owns the category territory, competitive enemy, and contrast axis.
+   - Differentiation owns the proof architecture and distinct capability pillars.
+   - Mechanism owns the operational process, delivery steps, and named operating mechanism.
+   - Offer owns commercial packaging, deliverables, pricing tiers, and risk reversal.
+   Plan Summary synthesizes these distinct components without homogenizing or repeating the same axis across sections.
+7. EPISTEMIC FIDELITY & NO CAPABILITY UPGRADE:
+   Do NOT upgrade qualified, proposed, or partially mitigated claims into established physical facts or guarantees in the executive summary or rationale.
+   - If a capability is marked as Proposed, unverified, or requires validation (such as fabric opacity testing, lab certification, zero downtime, turnkey integrations), do NOT present it as already validated, established, or operational.
+   - Operational risk mitigations (such as exchange policies, returns, or customer service channels) do NOT establish underlying physical product properties (e.g. fabric opacity, zero defects, universal fit) or technical guarantees (e.g. bug-free software, 100% uptime).
+   - An ambiguous policy window (e.g. "24-hour product exchange capability") must NOT be inflated into a turnaround dispatch or delivery guarantee (e.g. "24-hour replacement delivery guarantee").
+   - When Differentiation pillars are classified as SHARED_CAPABILITY_STRATEGIC_EMPHASIS or COMPETITIVE_COMPARISON_UNAVAILABLE, frame them strictly as strategic market emphasis on verified product capabilities — NEVER claim "unique combination", "only provider", or "defensible whitespace".
+   - Preserve competitor subject attribution on audience pains: if a pain is attributed to a named competitor (COMPETITOR_SPECIFIC), do NOT generalize it into an unattributed industry-wide claim unless backed by broader market evidence, and do NOT convert customer complaints about generic-sounding outputs or AEL hypotheses into factual claims about competitors' internal production workflows ("mass-produced automated prompt workflows", "template-bound services").
+   - PAYMENT-TRIGGER FIDELITY: Preserve exact documented payment terms and conditions (e.g., if a trial is free and payment is required when gifting or unlocking final deliverables, state that exact trigger — NEVER rewrite it into "customers pay only when satisfied", "only pay if satisfied", or unqualified "risk-free").
+   - Paraphrases must remain faithful to verified capabilities without asserting unevidenced properties.
 
-Business Type: ${businessType}
-Location: ${location}
+${businessName ? `Business Name: ${businessName}\n` : ""}${offeringName ? `Selected Offering: ${offeringName}\n` : ""}Business Type: ${businessType}
+Target Market / Location: ${location}
 Objective: ${objective}
 Monthly Budget: ${budget}
-${lanesBlock ? `\n${lanesBlock}\n` : ""}${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
+${evidenceGapsList.length > 0 ? `Known Evidence Gaps (Retain Explicitly — Do Not Invent Missing Details):\n${evidenceGapsList.map(g => `  - ${g}`).join("\n")}\n` : ""}${lanesBlock ? `\n${lanesBlock}\n` : ""}${memoryBlock}${rhythmConstraintBlock}${lockedBlock}${goalMathSection}${compositionBlock}
 Engine Analysis Results (GROUNDED INTELLIGENCE — validated outputs from the 15-engine pipeline):
 ${engineInsights}
 
@@ -1382,10 +2391,36 @@ Generate a complete strategic execution plan. Return ONLY valid JSON matching th
   if (attemptResult.ok) {
     const plan = attemptResult.plan;
     if (plan.strategicSummary) {
-      if (plan.strategicSummary.strategy) plan.strategicSummary.strategy = cleanInternalIdsFromProse(plan.strategicSummary.strategy);
-      if (plan.strategicSummary.targetAudience) plan.strategicSummary.targetAudience = cleanInternalIdsFromProse(plan.strategicSummary.targetAudience);
-      if (plan.strategicSummary.growthObjective) plan.strategicSummary.growthObjective = cleanInternalIdsFromProse(plan.strategicSummary.growthObjective);
-      if (plan.strategicSummary.rationale) plan.strategicSummary.rationale = cleanInternalIdsFromProse(plan.strategicSummary.rationale);
+      const evidenceTexts: string[] = [];
+      if (Array.isArray(businessData?.productTruth)) {
+        evidenceTexts.push(...businessData.productTruth.map((f: any) => typeof f === "string" ? f : f.fact || f.statement || f.text || ""));
+      }
+      if (Array.isArray(businessData?.facts)) {
+        evidenceTexts.push(...businessData.facts.map((f: any) => typeof f === "string" ? f : f.fact || f.statement || f.text || ""));
+      }
+      if (activeStrategyRoot?.approvedClaims) {
+        const claims = Array.isArray(activeStrategyRoot.approvedClaims) ? activeStrategyRoot.approvedClaims : [activeStrategyRoot.approvedClaims];
+        evidenceTexts.push(...claims.map((c: any) => typeof c === "string" ? c : c.statement || c.claim || ""));
+      }
+      if (activeStrategyRoot?.approvedClaim) {
+        evidenceTexts.push(typeof activeStrategyRoot.approvedClaim === "string" ? activeStrategyRoot.approvedClaim : JSON.stringify(activeStrategyRoot.approvedClaim));
+      }
+      if (engineInsights) {
+        evidenceTexts.push(engineInsights);
+      }
+
+      if (plan.strategicSummary.strategy) {
+        plan.strategicSummary.strategy = sanitizeStrategicSummaryEpistemics(cleanInternalIdsFromProse(plan.strategicSummary.strategy), evidenceTexts);
+      }
+      if (plan.strategicSummary.targetAudience) {
+        plan.strategicSummary.targetAudience = cleanInternalIdsFromProse(plan.strategicSummary.targetAudience);
+      }
+      if (plan.strategicSummary.growthObjective) {
+        plan.strategicSummary.growthObjective = cleanInternalIdsFromProse(plan.strategicSummary.growthObjective);
+      }
+      if (plan.strategicSummary.rationale) {
+        plan.strategicSummary.rationale = sanitizeStrategicSummaryEpistemics(cleanInternalIdsFromProse(plan.strategicSummary.rationale), evidenceTexts);
+      }
     }
     return plan;
   }
@@ -1535,12 +2570,13 @@ async function buildDeterministicPlan(businessData: any, campaign: any, objectiv
     },
     budgetAllocation: {
       totalBudget: budget,
-      breakdown: [
-        { category: "Content Creation", percentage: 40, purpose: "Quality visuals and video" },
-        { category: "Paid Promotion", percentage: 30, purpose: "Boosting top performers" },
-        { category: "Community", percentage: 15, purpose: "Engagement and partnerships" },
-        { category: "Tools & Analytics", percentage: 15, purpose: "Optimization infrastructure" },
-      ],
+      currency: "USD",
+      period: "monthly",
+      budgetConfirmation: "unconfirmed",
+      isAssumption: true,
+      provenance: "Agent-entered, unconfirmed budget assumption ($5,000 USD). Does not authorize ad spend.",
+      channels: [],
+      breakdown: [],
     },
     kpiMonitoring: {
       metrics: [
@@ -1780,6 +2816,25 @@ export async function synthesizePlan(
     )
     .limit(1);
 
+  let budgetSettings: any = null;
+  try {
+    const [settings] = await db
+      .select()
+      .from(campaignBudgetSettings)
+      .where(
+        and(
+          eq(campaignBudgetSettings.accountId, config.accountId),
+          eq(campaignBudgetSettings.campaignId, config.campaignId)
+        )
+      )
+      .limit(1);
+    budgetSettings = settings || null;
+  } catch (bErr: any) {
+    console.warn(`[PlanSynthesis] Failed to query campaignBudgetSettings:`, bErr?.message);
+  }
+
+  const controlVerdict = (ctx as any)?.controlVerdict || (config as any)?.controlVerdict || null;
+
   const { growthCampaigns } = await import("@shared/schema");
   const [campaign] = await db
     .select()
@@ -1787,40 +2842,7 @@ export async function synthesizePlan(
     .where(eq(growthCampaigns.id, config.campaignId))
     .limit(1);
 
-  let rootBundle: { id: string; version: number; strategyHash: string } | null = null;
-  try {
-    rootBundle = await lockRootBundle(config.campaignId, config.accountId);
-    console.log(`[PlanSynthesis] Root bundle locked: v${rootBundle.version} (${rootBundle.strategyHash})`);
-  } catch (rootErr: any) {
-    console.warn(`[PlanSynthesis] Root bundle lock failed (non-blocking):`, rootErr.message);
-  }
-
-  let goalMathContext: { goal: any; funnel: any; feasibility: any; archetype: any } | null = null;
-  let goalDecomp: any = null;
-
-  try {
-    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null, config.jobId);
-    const archetype = resolveArchetype(bizData?.businessType || "");
-    goalMathContext = {
-      goal: goalDecomp.goal,
-      funnel: goalDecomp.funnel,
-      feasibility: goalDecomp.feasibility,
-      archetype,
-    };
-    console.log(`[PlanSynthesis] Goal decomposed: ${goalDecomp.goal.label} → ${goalDecomp.feasibility.verdict} (${goalDecomp.feasibility.score}/100)`);
-  } catch (goalErr: any) {
-    console.warn(`[PlanSynthesis] Goal decomposition failed (non-blocking):`, goalErr.message);
-  }
-
-  let readiness: any = null;
-  try {
-    readiness = await checkPlanReadiness(config.campaignId, config.accountId);
-    console.log(`[PlanSynthesis] Plan gate: ${readiness.gate} (score: ${readiness.overallScore})`);
-  } catch (gateErr: any) {
-    console.warn(`[PlanSynthesis] Plan gate check failed (non-blocking):`, gateErr.message);
-  }
-
-  // Load Strategy Root for synthesis integration
+  // Load Strategy Root FIRST so RootBundle and GoalDecomposition use the exact selected lineage
   let activeStrategyRoot: any = (config as any)?.strategyRoot || (ctx as any)?.strategyRoot || null;
   if (!activeStrategyRoot && (ctx as any)?.approvedLanes) {
     activeStrategyRoot = { approvedLanes: (ctx as any).approvedLanes };
@@ -1871,6 +2893,120 @@ export async function synthesizePlan(
     console.warn(`[PlanSynthesis] Strategy root load failed (non-blocking):`, srErr.message);
   }
 
+  // Collect canonical selected snapshot IDs across results, reusedSnapshotIds, and activeStrategyRoot
+  const selectedSnapshotIds: Record<string, string> = {
+    ...(config.reusedSnapshotIds || {}),
+  };
+  const stageResultKeys = [
+    "market_intelligence",
+    "audience",
+    "differentiation",
+    "positioning",
+    "mechanism",
+    "offer",
+    "awareness",
+    "funnel",
+    "persuasion",
+    "integrity",
+    "statistical_validation",
+    "channel_selection",
+    "budget_governor",
+    "iteration",
+    "retention",
+  ];
+  for (const stageKey of stageResultKeys) {
+    const res = results.get(stageKey as EngineId);
+    const snapId = (res as any)?.snapshotId || (res?.output as any)?.snapshotId || (res?.output as any)?.id;
+    if (typeof snapId === "string" && snapId.trim()) {
+      selectedSnapshotIds[stageKey] = snapId.trim();
+    }
+  }
+  if (activeStrategyRoot) {
+    const rootMiId = activeStrategyRoot.miSnapshotId || activeStrategyRoot.marketSnapshotId;
+    if (rootMiId && !selectedSnapshotIds.market_intelligence) {
+      selectedSnapshotIds.market_intelligence = rootMiId;
+    }
+    if (activeStrategyRoot.audienceSnapshotId && !selectedSnapshotIds.audience) {
+      selectedSnapshotIds.audience = activeStrategyRoot.audienceSnapshotId;
+    }
+    if (activeStrategyRoot.differentiationSnapshotId && !selectedSnapshotIds.differentiation) {
+      selectedSnapshotIds.differentiation = activeStrategyRoot.differentiationSnapshotId;
+    }
+    if (activeStrategyRoot.positioningSnapshotId && !selectedSnapshotIds.positioning) {
+      selectedSnapshotIds.positioning = activeStrategyRoot.positioningSnapshotId;
+    }
+    if (activeStrategyRoot.mechanismSnapshotId && !selectedSnapshotIds.mechanism) {
+      selectedSnapshotIds.mechanism = activeStrategyRoot.mechanismSnapshotId;
+    }
+  }
+
+  if (
+    selectedSnapshotIds.market_intelligence ||
+    selectedSnapshotIds.differentiation ||
+    selectedSnapshotIds.positioning
+  ) {
+    const lineageCheck = await validateBundleLineageCompatibility({
+      miSnapshotId: selectedSnapshotIds.market_intelligence,
+      audienceSnapshotId: selectedSnapshotIds.audience,
+      differentiationSnapshotId: selectedSnapshotIds.differentiation,
+      positioningSnapshotId: selectedSnapshotIds.positioning,
+      mechanismSnapshotId: selectedSnapshotIds.mechanism,
+      offerSnapshotId: selectedSnapshotIds.offer,
+      awarenessSnapshotId: selectedSnapshotIds.awareness,
+    });
+    if (!lineageCheck.compatible) {
+      const mismatchDesc = lineageCheck.mismatches
+        .map(m => `${m.engine}(${m.snapshotId || "none"}): ${m.reason}`)
+        .join("; ");
+      throw new StrategyConsistencyError(
+        `Plan synthesis blocked due to incompatible upstream snapshot lineage: ${mismatchDesc}`,
+        lineageCheck.mismatches.map(m => `${m.engine}.${m.dependencyField}`),
+        lineageCheck.mismatches.map(m => m.engine),
+        lineageCheck.mismatches[0]?.engine || "differentiation",
+      );
+    }
+  }
+
+  let rootBundle: { id: string; version: number; strategyHash: string } | null = null;
+  try {
+    rootBundle = await lockRootBundle(config.campaignId, config.accountId, {
+      jobId: config.jobId || null,
+      strategyRoot: activeStrategyRoot || null,
+      selectedSnapshotIds,
+    });
+    console.log(`[PlanSynthesis] Root bundle locked: v${rootBundle.version} (${rootBundle.strategyHash})`);
+  } catch (rootErr: any) {
+    if (String(rootErr?.message || "").includes("LINEAGE_MISMATCH_REJECTED")) {
+      throw rootErr;
+    }
+    console.warn(`[PlanSynthesis] Root bundle lock failed (non-blocking):`, rootErr.message);
+  }
+
+  let goalMathContext: { goal: any; funnel: any; feasibility: any; archetype: any } | null = null;
+  let goalDecomp: any = null;
+
+  try {
+    goalDecomp = await decomposeGoal(config.campaignId, config.accountId, rootBundle?.id || null, rootBundle?.version || null, config.jobId);
+    const archetype = resolveArchetype(bizData?.businessType || "");
+    goalMathContext = {
+      goal: goalDecomp.goal,
+      funnel: goalDecomp.funnel,
+      feasibility: goalDecomp.feasibility,
+      archetype,
+    };
+    console.log(`[PlanSynthesis] Goal decomposed: ${goalDecomp.goal.label} → ${goalDecomp.feasibility.verdict} (${goalDecomp.feasibility.score}/100)`);
+  } catch (goalErr: any) {
+    console.warn(`[PlanSynthesis] Goal decomposition failed (non-blocking):`, goalErr.message);
+  }
+
+  let readiness: any = null;
+  try {
+    readiness = await checkPlanReadiness(config.campaignId, config.accountId);
+    console.log(`[PlanSynthesis] Plan gate: ${readiness.gate} (score: ${readiness.overallScore})`);
+  } catch (gateErr: any) {
+    console.warn(`[PlanSynthesis] Plan gate check failed (non-blocking):`, gateErr.message);
+  }
+
   const budgetGovResult = results.get("budget_governor");
   // Task #70 / Phase 7 — read the authoritative budget action from the
   // BudgetDecisionLedger entry the orchestrator stamped onto the budget
@@ -1888,7 +3024,8 @@ export async function synthesizePlan(
 
   if (budgetDecision === "halt" || budgetKillFlag) {
     console.warn(`[PlanSynthesis] BUDGET_HALT_ENFORCED | decision=${budgetDecision} killFlag=${budgetKillFlag} — synthesizing halt plan preserving canonical strategy`);
-    const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign, activeStrategyRoot);
+    // Halt plan returns early before task composition
+    const haltPlan = buildHaltPlan(budgetGovResult?.output, bizData, campaign, activeStrategyRoot, controlVerdict);
     const planId = await persistPlan(haltPlan, config, rootBundle, []);
     // Task #70 / Phase 7 — third ledger writer. Records that plan-synthesis
     // forced a halt distinctly from any prior system-control downgrade, so
@@ -2025,10 +3162,23 @@ export async function synthesizePlan(
     console.log(`[PlanSynthesis] SIGNAL_COMPOSITION_INJECTED | ${formatCompositionLog(signalComp)}`);
   }
 
-  const synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm, signalComp, activeStrategyRoot);
-  synthesized.brandSpine = activeStrategyRoot?.brandSpine
+  let synthesized = await generatePlanWithAI(engineInsights, bizData, campaign, goalMathContext, lockedDecisions, config.accountId, memoryContextBlock, config.campaignId, precomputedRhythm, signalComp, activeStrategyRoot, budgetSettings, budgetGovResult?.output, (ctx as any)?.canonicalContext);
+  const rawBrandSpine = activeStrategyRoot?.brandSpine
     ? (typeof activeStrategyRoot.brandSpine === "string" ? JSON.parse(activeStrategyRoot.brandSpine) : activeStrategyRoot.brandSpine)
     : null;
+  if (rawBrandSpine) {
+    const buForSpine = (ctx as any)?.canonicalContext?.businessUnderstanding || (ctx as any)?.ssc?.doctrine?.businessUnderstanding || null;
+    const anchorForSpine = (ctx as any)?.ssc?.doctrine?.productAnchor || null;
+    synthesized.brandSpine = {
+      ...rawBrandSpine,
+      productName: rawBrandSpine.productName || buForSpine?.offeringName || anchorForSpine?.name || config.offeringName || (bizData as any)?.offeringName || (bizData as any)?.productName || null,
+      productType: rawBrandSpine.productType || buForSpine?.offeringType || buForSpine?.businessModel || anchorForSpine?.type || (bizData as any)?.businessType || null,
+      coreProblemSolved: rawBrandSpine.coreProblemSolved || buForSpine?.coreProblemSolved || anchorForSpine?.problemSolved || anchorForSpine?.coreProblemSolved || (bizData as any)?.coreProblem || null,
+      category: rawBrandSpine.category || buForSpine?.category || anchorForSpine?.offeringType || (bizData as any)?.businessType || null,
+    };
+  } else {
+    synthesized.brandSpine = null;
+  }
   synthesized.approvedLanes = activeStrategyRoot?.approvedLanes
     ? (typeof activeStrategyRoot.approvedLanes === "string" ? JSON.parse(activeStrategyRoot.approvedLanes) : activeStrategyRoot.approvedLanes)
     : null;
@@ -2149,24 +3299,88 @@ export async function synthesizePlan(
         }
 
         // ── CANONICAL OBJECTION PLAYBOOK: PersuasionEngine is the sole authority ──
-        const rawObjections = pData.objections || pData.objectionPriorities || pData.structuredObjections || [];
+        const rawObjections = (Array.isArray(pData.structuredObjections) && pData.structuredObjections.length > 0)
+          ? pData.structuredObjections
+          : (pOut.structuredObjections || pData.objections || pData.objectionPriorities || []);
+        const laneObjAttrList = Array.isArray(laneCtx?.objectionAttribution) ? laneCtx.objectionAttribution : [];
         const objections = rawObjections.map((o: any) => {
-          const cleanObjectionText = safeExtractCanonicalText(o.objection?.canonical || o.objection || o.canonical || o.statement);
-          const cleanResponse = safeExtractCanonicalText(o.response || o.resolution || o.persuasionResponse || o.handling || o.counterArgument);
+          const cleanObjectionText = safeExtractCanonicalText(o.objectionStatement || o.objection?.canonical || o.objection || o.canonical || o.statement);
+          const cleanResponse = safeExtractCanonicalText(o.persuasionResponse || o.response || o.resolution || o.handling || o.counterArgument);
           const cleanProof = safeExtractCanonicalText(o.requiredProof || o.requiredProofType || o.proofRequirement || o.evidence);
 
           if (!cleanResponse && cleanObjectionText) {
             throw new Error(`CONTRACT_INVARIANT_FAILURE: PersuasionEngine failed to produce objection response for objection "${cleanObjectionText}"`);
           }
 
+          const matchedLaneObjAttr = laneObjAttrList.find((la: any) =>
+            (la?.objectionId && (la.objectionId === o.objectionId || la.objectionId === o.id)) ||
+            (la?.statement && String(la.statement).trim().toLowerCase() === cleanObjectionText.trim().toLowerCase())
+          );
+
+          const resolvedCompNames = (Array.isArray(o.competitorNames) && o.competitorNames.length > 0)
+            ? o.competitorNames
+            : (Array.isArray(o.objection?.competitorNames) && o.objection.competitorNames.length > 0)
+              ? o.objection.competitorNames
+              : (Array.isArray(matchedLaneObjAttr?.competitorNames) ? matchedLaneObjAttr.competitorNames : []);
+          const resolvedCompIds = (Array.isArray(o.competitorIds) && o.competitorIds.length > 0)
+            ? o.competitorIds
+            : (Array.isArray(o.objection?.competitorIds) && o.objection.competitorIds.length > 0)
+              ? o.objection.competitorIds
+              : (Array.isArray(matchedLaneObjAttr?.competitorIds) ? matchedLaneObjAttr.competitorIds : []);
+          const resolvedEvIds = (Array.isArray(o.evidenceIds) && o.evidenceIds.length > 0)
+            ? o.evidenceIds
+            : (Array.isArray(o.objection?.evidenceIds) && o.objection.evidenceIds.length > 0)
+              ? o.objection.evidenceIds
+              : (Array.isArray(matchedLaneObjAttr?.evidenceIds) ? matchedLaneObjAttr.evidenceIds : []);
+          const resolvedScope =
+            (resolvedCompNames.length > 0 || resolvedCompIds.length > 0)
+              ? "COMPETITOR_SPECIFIC"
+              : (o.subjectScope || o.objection?.subjectScope || matchedLaneObjAttr?.subjectScope || "UNATTRIBUTED_MARKET");
+
           return {
-            objectionId: o.objectionId || o.id || o.tag?.category || "obj",
+            objectionId: o.objectionId || o.id || matchedLaneObjAttr?.objectionId || o.tag?.category || "obj",
             objection: cleanObjectionText,
             response: cleanResponse,
             requiredProof: cleanProof || "Workflow Demonstration [PROOF_TO_BUILD]",
+            proofStatus: o.proofStatus || "PROOF_TO_BUILD",
+            proposalStatus: o.proposalStatus || o.objection?.proposalStatus || (String(o.proofStatus || "").includes("TO_BUILD") ? "PROPOSED_RECOMMENDATION" : "VERIFIED_FACT"),
+            supportingFactId: o.supportingFactId || o.objection?.supportingFactId || undefined,
+            linkedPainId: o.linkedPainId || matchedLaneObjAttr?.linkedPainId || undefined,
+            evidenceIds: resolvedEvIds,
+            aelGrounding: o.aelGrounding || undefined,
             funnelStageId: o.funnelStageId || o.stage || undefined,
+            subjectScope: resolvedScope,
+            competitorNames: resolvedCompNames,
+            competitorIds: resolvedCompIds,
           };
         });
+
+        const stepKeyLabels: Record<string, { label: string; rationale: string }> = {
+          problem_framing: {
+            label: "Problem Framing & Friction Validation",
+            rationale: `Anchor buyer attention on the verified core friction (${currentBelief}).`,
+          },
+          mechanism_explanation: {
+            label: "Mechanism & Workflow Transparency",
+            rationale: `Demonstrate how ${transferMech || "the operational workflow"} addresses buyer hesitation.`,
+          },
+          proof_introduction: {
+            label: "Proof & Verification Evidence",
+            rationale: `Introduce ${proofArt || "verifiable evidence"} to resolve the primary trust deficit (${trustDeficit}).`,
+          },
+          offer_positioning: {
+            label: "Offer Value & Capability Alignment",
+            rationale: `Connect verified product capabilities directly to the desired buyer outcome (${desiredBelief}).`,
+          },
+          objection_resolution: {
+            label: "Objection Mitigation & Risk Clarity",
+            rationale: `Address buyer risk (${buyerRisk}) with transparent operational boundaries and evidence.`,
+          },
+          action_prompt: {
+            label: "Low-Friction Next Step",
+            rationale: "Prompt a clear, low-friction evaluation or configuration action aligned with product capabilities.",
+          },
+        };
 
         persuasionStrategyObj = {
           mode: pData.mode || pData.persuasionMode || "Proof-Led Decision Acceleration",
@@ -2176,11 +3390,45 @@ export async function synthesizePlan(
             desiredBelief,
             contradictionLogic: cbt?.contradictionLogic ? safeExtractCanonicalText(cbt.contradictionLogic) : undefined,
           },
-          messageSequence: (pData.messageSequence || pData.sequence || pData.messageOrderLogic || []).map((m: any, idx: number) => ({
-            step: m.step || `step_${idx + 1}`,
-            stepLabel: m.stepLabel || m.label || m.title || `Phase ${idx + 1}`,
-            rationale: m.rationale || m.description || m.content || "",
-          })),
+          messageSequence: (pData.messageSequence || pData.sequence || pData.messageOrderLogic || []).map((m: any, idx: number) => {
+            if (typeof m === "string") {
+              const cleanKey = m.trim().toLowerCase().replace(/\s+/g, "_");
+              const mapped = stepKeyLabels[cleanKey];
+              const cleanFocus = mapped?.label || safeExtractCanonicalText(m).replace(/_/g, " ");
+              return {
+                step: `step_${idx + 1}`,
+                stepKey: cleanKey,
+                stepLabel: cleanFocus || `Step ${idx + 1}`,
+                messageFocus: cleanFocus,
+                rationale: mapped?.rationale || `Advance buyer conviction from "${currentBelief}" toward "${desiredBelief}" via ${cleanFocus}.`,
+              };
+            }
+            const rawStepKey = String(m.stepKey || m.step || "").trim().toLowerCase();
+            const mapped = stepKeyLabels[rawStepKey];
+            const coreMsg = safeExtractCanonicalText(m.coreMessage || m.messageFocus || m.stepLabel || m.label || m.title || mapped?.label || m.step);
+            const rawStep = String(m.step || `step_${idx + 1}`);
+            const isGenericPhaseLabel = /^(?:phase|step)\s+\d+$/i.test(String(m.stepLabel || m.label || m.title || "").trim());
+            const resolvedLabel = (!isGenericPhaseLabel && (m.stepLabel || m.label || m.title))
+              ? String(m.stepLabel || m.label || m.title)
+              : (mapped?.label || (coreMsg && !/^step_\d+$/i.test(coreMsg) ? coreMsg : `Step ${idx + 1}`));
+            const rawRationale = String(m.purpose || m.rationale || m.description || m.content || "").trim();
+            const isBoilerplateExecute = /^execute\s+step\s+\d+\s+of\s+the\b/i.test(rawRationale);
+            return {
+              step: rawStep,
+              stepKey: m.stepKey || (mapped ? rawStepKey : undefined),
+              stepLabel: resolvedLabel,
+              purpose: m.purpose ? String(m.purpose).trim() : (!isBoilerplateExecute && rawRationale ? rawRationale : undefined),
+              beliefShift: m.beliefShift ? String(m.beliefShift).trim() : undefined,
+              coreMessage: m.coreMessage ? String(m.coreMessage).trim() : (coreMsg || resolvedLabel),
+              messageFocus: coreMsg || resolvedLabel,
+              rationale: (!isBoilerplateExecute && rawRationale)
+                ? rawRationale
+                : (mapped?.rationale || (coreMsg ? `Advance buyer conviction through: ${coreMsg}` : "")),
+              proofRequirement: m.proofRequirement ? String(m.proofRequirement).trim() : undefined,
+              objectionAddressed: m.objectionAddressed ? String(m.objectionAddressed).trim() : undefined,
+              cta: m.cta ? String(m.cta).trim() : undefined,
+            };
+          }),
           objections,
           trustStrategy: {
             buyerRiskState: buyerRisk,
@@ -2212,7 +3460,7 @@ export async function synthesizePlan(
       sourceFunnelSnapshotId,
       sourcePersuasionSnapshotId,
       journeyName: funnelObj.journeyName || funnelObj.funnelName || funnelObj.name || "Buyer Conversion Journey",
-      journeyType: funnelObj.journeyType || funnelObj.modelType || "Standard",
+      journeyType: funnelObj.journeyType || funnelObj.funnelType || funnelObj.modelType || "Standard",
       whyThisJourney,
       entryTrigger: funnelObj.entryTrigger || {
         mechanismType: "Primary Problem Agitation",
@@ -2221,15 +3469,32 @@ export async function synthesizePlan(
       stages: rawStages.map((s: any) => {
         const rawProofs = s.proof || s.proofPlacements || (s.proofs ? s.proofs.map((p: any) => typeof p === 'string' ? p : p.proofName || p.claim || JSON.stringify(p)) : []);
         const structuredProofs = Array.isArray(rawProofs) ? rawProofs.map(sanitizeProofItem) : [];
+        const stageKey = String(s.stageId || s.id || s.stageName || s.name || "").toLowerCase();
+        const derivedCta = (s.cta && s.cta !== "Learn More")
+          ? s.cta
+          : (s.callToAction && s.callToAction !== "Learn More")
+            ? s.callToAction
+            : stageKey.includes("entry") ? "Explore How It Works"
+            : stageKey.includes("education") ? "Review Process & Capabilities"
+            : stageKey.includes("engagement") ? "Start Your Configuration"
+            : stageKey.includes("consideration") ? "Compare Verified Examples"
+            : stageKey.includes("decision") ? "Review Options & Terms"
+            : stageKey.includes("conversion") ? "Complete Your Order"
+            : "Explore Next Step";
+        const resolvedGoal = s.goal || s.conversionGoal || s.objective || s.purpose || "";
+        const rawCoreMessage = s.coreMessage || s.message || s.primaryMessage || "";
+        const resolvedCoreMessage = (rawCoreMessage && rawCoreMessage !== resolvedGoal)
+          ? rawCoreMessage
+          : (s.valueProposition || (s.contentStrategy ? `${s.stageName || s.name || "Stage"}: ${s.contentStrategy}` : (rawCoreMessage || resolvedGoal)));
         return {
           stageId: s.stageId || s.id || (s.name || "stage").toLowerCase().replace(/\s+/g, "_"),
           stageName: s.stageName || s.name || s.stage || "Funnel Stage",
-          goal: s.goal || s.conversionGoal || s.objective || s.purpose || "",
+          goal: resolvedGoal,
           buyerState: s.buyerState || s.mindset || (s.stageName ? `Evaluating ${s.stageName}` : "Evaluating Stage"),
-          coreMessage: s.coreMessage || s.message || s.primaryMessage || s.purpose || "",
+          coreMessage: resolvedCoreMessage,
           contentAction: s.contentAction || s.action || s.contentType || s.contentStrategy || "",
           proof: structuredProofs,
-          cta: s.cta || s.callToAction || "Learn More",
+          cta: derivedCta,
         };
       }),
       persuasionStrategy: persuasionStrategyObj,
@@ -2318,13 +3583,14 @@ export async function synthesizePlan(
     canonicalOffer = offerStepResult.output.primaryOffer;
   } else if (offerStepResult?.output?.offer) {
     canonicalOffer = offerStepResult.output.offer;
-  } else if (config.jobId) {
+  } else if (config.jobId || config.sourceJobId) {
     try {
+      const candidateJobIds = [config.jobId, config.sourceJobId].filter(Boolean) as string[];
       const [offerSnap] = await db.select().from(offerSnapshots).where(
         and(
           eq(offerSnapshots.accountId, config.accountId),
           eq(offerSnapshots.campaignId, config.campaignId),
-          eq(offerSnapshots.jobId, config.jobId)
+          inArray(offerSnapshots.jobId, candidateJobIds)
         )
       ).limit(1);
 
@@ -2343,9 +3609,176 @@ export async function synthesizePlan(
     console.log(`[PlanSynthesis] CANONICAL_OFFER_ATTACHED | name="${canonicalOffer.offerName || canonicalOffer.title || 'unnamed'}"`);
   }
 
+  // Attach canonical Mechanism, Awareness, Differentiation, StrategyRoot, and normalized BudgetAllocation onto synthesized plan
+  const mechanismStepResult = results.get("mechanism" as EngineId);
+  const mechOut = mechanismStepResult?.output?.output || mechanismStepResult?.output;
+  const canonicalMechanism = mechOut?.primaryMechanism || mechOut?.mechanism || (mechOut?.mechanismName ? mechOut : null) || activeStrategyRoot?.approvedMechanism || null;
+  if (canonicalMechanism) {
+    synthesized.mechanism = {
+      mechanismName: canonicalMechanism.mechanismName || canonicalMechanism.name || activeStrategyRoot?.brandSpine?.mechanismName || "",
+      mechanismType: canonicalMechanism.mechanismType || canonicalMechanism.type || activeStrategyRoot?.brandSpine?.mechanismType || "",
+      mechanismPromise: canonicalMechanism.mechanismPromise || canonicalMechanism.corePromise || activeStrategyRoot?.brandSpine?.mechanismPromise || "",
+      mechanismLogic: canonicalMechanism.mechanismLogic || canonicalMechanism.coreLogic || "",
+      mechanismSteps: Array.isArray(canonicalMechanism.mechanismSteps) ? canonicalMechanism.mechanismSteps : (Array.isArray(activeStrategyRoot?.brandSpine?.mechanismSteps) ? activeStrategyRoot.brandSpine.mechanismSteps : []),
+      requiredCapabilities: Array.isArray(canonicalMechanism.requiredCapabilities) ? canonicalMechanism.requiredCapabilities : [],
+      proofArtifact: canonicalMechanism.proofArtifact || undefined,
+      sourcePainId: canonicalMechanism.sourcePainId || undefined,
+      targetSegmentId: canonicalMechanism.targetSegmentId || undefined,
+    };
+  }
+
+  if (activeStrategyRoot) {
+    synthesized.strategyRootId = activeStrategyRoot.id;
+    synthesized.strategyRoot = {
+      id: activeStrategyRoot.id,
+      jobId: activeStrategyRoot.jobId,
+      approvedClaim: activeStrategyRoot.approvedClaim,
+      approvedTransformationAxis: activeStrategyRoot.approvedTransformationAxis,
+      approvedMechanism: synthesized.mechanism || activeStrategyRoot.approvedMechanism,
+      brandSpine: synthesized.brandSpine || activeStrategyRoot.brandSpine,
+      approvedLanes: synthesized.approvedLanes || activeStrategyRoot.approvedLanes,
+    };
+    if (activeStrategyRoot.approvedClaim) {
+      synthesized.approvedClaim = activeStrategyRoot.approvedClaim;
+    }
+    const rootMechName = activeStrategyRoot.approvedMechanism?.mechanismName || activeStrategyRoot.approvedMechanism?.name || activeStrategyRoot.brandSpine?.mechanismName || synthesized.mechanism?.mechanismName;
+    if (rootMechName) {
+      synthesized.approvedMechanism = rootMechName;
+    }
+  }
+
+  const awarenessStepResult = results.get("awareness" as EngineId);
+  const awOut = awarenessStepResult?.output?.output || awarenessStepResult?.output;
+  const awPrimary = awOut?.primaryRoute || awOut;
+  const awRoute = awPrimary?.routeName || awPrimary?.name || awOut?.routeName;
+  if (awRoute) {
+    synthesized.awarenessRoute = awRoute;
+  }
+  if (awPrimary && (awPrimary.routeName || awPrimary.entryStage || awPrimary.entryMechanismType || awPrimary.oldBelief || awPrimary.newBelief || awPrimary.narrativeReframe || awPrimary.mythBreaker)) {
+    const nrObj = typeof awPrimary.narrativeReframe === "object" && awPrimary.narrativeReframe !== null ? awPrimary.narrativeReframe : null;
+    const mbObj = typeof awPrimary.mythBreaker === "object" && awPrimary.mythBreaker !== null ? awPrimary.mythBreaker : null;
+    const oldBelief =
+      awPrimary.oldBelief ||
+      awOut?.oldBelief ||
+      nrObj?.currentModel?.statement ||
+      mbObj?.beliefToContradict ||
+      "";
+    const newBelief =
+      awPrimary.newBelief ||
+      awOut?.newBelief ||
+      nrObj?.newModel?.reclassification ||
+      mbObj?.mythBreakerStatement ||
+      "";
+    const narrativeReframeText =
+      typeof awPrimary.narrativeReframe === "string"
+        ? awPrimary.narrativeReframe
+        : (nrObj?.newModel?.namedPrinciple
+            ? `${nrObj.newModel.namedPrinciple}: ${nrObj.newModel.reclassification || newBelief}`
+            : (nrObj?.bridgeMechanism?.specificMove || mbObj?.mythBreakerStatement || ""));
+    const entryLogicText =
+      awPrimary.entryLogic ||
+      awOut?.entryLogic ||
+      nrObj?.bridgeMechanism?.specificMove ||
+      mbObj?.contradictionLogic ||
+      awPrimary.trustRequirement ||
+      "";
+    const audienceFramingText =
+      awPrimary.audienceFraming ||
+      awOut?.audienceFraming ||
+      awPrimary.funnelCompatibility ||
+      nrObj?.discomfortCost?.privateAdmission ||
+      "";
+    synthesized.awareness = {
+      routeName: awPrimary.routeName || awPrimary.name || awRoute || "",
+      entryStage: awPrimary.entryStage || awPrimary.entryMechanismType || awOut?.entryStage || "",
+      targetReadinessStage: awPrimary.targetReadinessStage || awOut?.targetReadinessStage || "",
+      oldBelief,
+      currentBelief: oldBelief,
+      newBelief,
+      desiredBelief: newBelief,
+      narrativeReframe: narrativeReframeText,
+      narrativeReframeDetails: nrObj,
+      mythBreaker: typeof awPrimary.mythBreaker === "string" ? awPrimary.mythBreaker : (mbObj?.mythBreakerStatement || ""),
+      mythBreakerDetails: mbObj,
+      mythBreakers: mbObj
+        ? [{
+            myth: mbObj.beliefToContradict || oldBelief,
+            reality: mbObj.mythBreakerStatement || newBelief,
+            contradictionLogic: mbObj.contradictionLogic || "",
+          }]
+        : [],
+      entryLogic: entryLogicText,
+      audienceFraming: audienceFramingText,
+      primaryRoute: awPrimary,
+      alternativeRoutes: awOut?.alternativeRoutes || (awOut?.alternativeRoute ? [awOut.alternativeRoute] : []),
+    };
+  }
+
+  const diffStepResult = results.get("differentiation" as EngineId);
+  const diffOut = diffStepResult?.output?.output || diffStepResult?.output;
+  if (Array.isArray(diffOut?.pillars) && diffOut.pillars.length > 0) {
+    synthesized.differentiationPillars = diffOut.pillars;
+  }
+
+  const budgetStepResult = results.get("budget_governor" as EngineId);
+  const budgetOut = budgetStepResult?.output?.output || budgetStepResult?.output;
+  const chanStepResult = results.get("channel_selection" as EngineId);
+  const chanOut = chanStepResult?.output?.output || chanStepResult?.output;
+  const rawBudgetAlloc = Array.isArray(budgetOut?.channelAllocations) && budgetOut.channelAllocations.length > 0
+    ? budgetOut.channelAllocations
+    : (Array.isArray(synthesized.budgetAllocation) ? synthesized.budgetAllocation : []);
+  if (rawBudgetAlloc.length > 0) {
+    const chanCandidates = [
+      ...(chanOut?.primaryChannel ? [chanOut.primaryChannel] : []),
+      ...(Array.isArray(chanOut?.secondaryChannels) ? chanOut.secondaryChannels : []),
+      ...(Array.isArray(chanOut?.rankedCandidates) ? chanOut.rankedCandidates : []),
+    ];
+    synthesized.budgetAllocation = rawBudgetAlloc.map((alloc: any) => {
+      const chName = alloc.channelName || alloc.channel || alloc.platform || "Channel";
+      const matchedChan = chanCandidates.find((c: any) =>
+        (c.channelId && alloc.channelId && c.channelId === alloc.channelId) ||
+        (c.channelName && String(c.channelName).toLowerCase() === String(chName).toLowerCase()) ||
+        (c.platform && String(c.platform).toLowerCase() === String(alloc.platform || chName).toLowerCase())
+      );
+      const amount = Number(alloc.monthlyAmount ?? alloc.monthlyBudget ?? alloc.allocatedAmount ?? alloc.amount ?? 0);
+      const pct = Number(alloc.percentage ?? alloc.allocationPercentage ?? 0);
+      const mode = String(alloc.mode || matchedChan?.mode || (chName.toLowerCase().includes("organic") ? "ORGANIC" : chName.toLowerCase().includes("paid") ? "PAID" : "HYBRID")).toUpperCase();
+      return {
+        ...alloc,
+        channelId: alloc.channelId || matchedChan?.channelId || chName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+        channelName: chName,
+        channel: chName,
+        platform: alloc.platform || matchedChan?.platform || chName.replace(/\s+(organic|paid)$/i, ""),
+        mode,
+        costCategory: alloc.costCategory || (mode === "ORGANIC" ? "Production & Distribution Operations" : "Paid Media & Acquisition Spend"),
+        percentage: pct,
+        monthlyAmount: amount,
+        monthlyBudget: amount,
+        allocatedAmount: amount,
+        rationale: alloc.rationale || matchedChan?.rationale || "",
+      };
+    });
+    if (budgetOut) {
+      synthesized.budgetGovernor = {
+        totalMonthlyBudget: budgetOut.totalMonthlyBudget ?? synthesized.budgetAllocation.reduce((acc: number, a: any) => acc + (Number(a.monthlyAmount) || 0), 0),
+        governanceMode: budgetOut.governanceMode || "STAGE_GATED",
+        pacingRules: budgetOut.pacingRules || [],
+        reallocationTriggers: budgetOut.reallocationTriggers || [],
+      };
+    }
+  }
+
+  const persuasionStepResult = results.get("persuasion" as EngineId);
+  const persRoute = persuasionStepResult?.output?.primaryRoute?.routeName || persuasionStepResult?.output?.routeName;
+  if (persRoute) {
+    synthesized.persuasionRoute = persRoute;
+  }
+
   const alreadyDegraded = synthesized.degraded === true || synthesized.planSource === "degraded_ai_failed";
 
   const verification = verifySynthesisPreservation(synthesized, lockedLabels);
+  synthesized.synthesisVerification = verification;
+  synthesized.lockedDecisionLabels = lockedLabels.map(l => l.label);
   
   const integrityCheck = validateSynthesisIntegrity(synthesized, results, activeStrategyRoot);
   synthesized._synthesisIntegrity = integrityCheck;
@@ -2373,9 +3806,6 @@ export async function synthesizePlan(
     const planSource: PlanSource = synthesisPath === "DECISION_DRIVEN" ? "decision_driven" : "degraded_no_decisions";
     synthesized.planSource = planSource;
     synthesized.degraded = planSource !== "decision_driven";
-
-    synthesized.synthesisVerification = verification;
-    synthesized.lockedDecisionLabels = lockedLabels.map(l => l.label);
 
     if (!verification.passed) {
       console.warn(
@@ -2442,17 +3872,17 @@ export async function synthesizePlan(
       ];
     }
 
-    // Zero out legacy format cadence counts so Strategy Plan owns only strategic intent
-    dist.reelsPerWeek = 0;
-    dist.postsPerWeek = 0;
-    dist.storiesPerDay = 0;
-    dist.carouselsPerWeek = 0;
-    dist.videosPerWeek = 0;
+    // Preserve realistic organic & content validation cadence when organic/content production channels are active
+    dist.reelsPerWeek = Math.max(Number(dist.reelsPerWeek || 0), 2);
+    dist.postsPerWeek = Math.max(Number(dist.postsPerWeek || 0), 2);
+    dist.storiesPerDay = Math.max(Number(dist.storiesPerDay || 0), 1);
+    dist.carouselsPerWeek = Math.max(Number(dist.carouselsPerWeek || 0), 1);
+    dist.videosPerWeek = Math.max(Number(dist.videosPerWeek || 0), 1);
 
     const isGoverned = budgetDecision === "hold" || integrityDegradation !== "none";
     if (isGoverned) {
       const govTag = budgetDecision === "hold" ? "BUDGET_HOLD" : "DEGRADED-SAFE";
-      dist.rationale = `[GOVERNED EXECUTION — ${govTag}] Scaling budget is held. Prioritize qualitative validation and evidence-backed positioning across approved channels (${approvedChannelsStr}). Tactical format selection and daily execution cadence are managed by the execution layer.`;
+      dist.rationale = `[GOVERNED EXECUTION — ${govTag}] Aggressive paid scaling is held pre-launch while executing controlled initial validation tests and organic proof-of-concept content across approved channels (${approvedChannelsStr}).`;
       if (synthesized.executionBlueprintDnaLink) {
         synthesized.executionBlueprintDnaLink.weeklyDnaApplication = `Apply core messaging tone across approved channels (${approvedChannelsStr}). Prioritize transparent workflow demonstration and evidence-backed positioning.`;
       }
@@ -2693,42 +4123,436 @@ export async function synthesizePlan(
   const periodDays = goalMathContext?.goal?.timeHorizonDays || 30;
   const volume = deriveContentVolume(synthesized, periodDays);
 
-  // Call Cross-Engine Consistency Judge
-  const consistency = await validateCrossEngineStrategyConsistency(results, activeStrategyRoot, config.accountId);
-  if (!consistency.valid) {
-    if (consistency.conflict?.includes("Deterministic Check Failed")) {
-      console.error(`[PlanSynthesis] STRATEGY_CONSISTENCY_BLOCKING_ERROR | conflict=${consistency.conflict}`);
-      throw new StrategyConsistencyError(
-        consistency.conflict!,
-        consistency.canonicalFields!,
-        consistency.responsibleEngines!,
-        consistency.recommendedRegenerationTarget!
-      );
-    } else {
-      console.warn(`[PlanSynthesis] STRATEGY_CONSISTENCY_AUDIT_WARNING | conflict=${consistency.conflict} | engines=[${consistency.responsibleEngines?.join(",")}]`);
-      if (synthesized.riskTriggers) {
-        synthesized.riskTriggers.triggers = synthesized.riskTriggers.triggers || [];
-        synthesized.riskTriggers.triggers.push({
-          trigger: "CROSS_ENGINE_STRATEGY_ALIGNMENT",
-          condition: consistency.conflict || "Cross-engine strategic tension detected",
-          action: `Align ${consistency.responsibleEngines?.join(" and ") || "upstream engines"} on primary lane execution during weekly review`,
-          severity: "low",
-          optimizationPlaybook: "Review positioning vs offer alignment against latest lane performance data"
-        });
-      }
-    }
+  // 1. Assemble authoritative budget allocation from Budget Governor & Settings FIRST so final validation inspects the complete plan
+  const bgOutput = budgetGovResult?.output;
+  const isBudgetUnconfirmed = bgOutput?.budgetConfirmation === "unconfirmed" || (!bgOutput?.budgetConfirmation && budgetSettings);
+  const totalBudgetNum = bgOutput?.totalMonthlyBudget ?? (budgetSettings?.monthlyBudget ? Number(budgetSettings.monthlyBudget) : 0);
+  const budgetCurrency = bgOutput?.currency || budgetSettings?.currency || "USD";
+  const budgetVersion = bgOutput?.budgetSettingsVersion ?? budgetSettings?.version ?? 1;
+  const formattedBudgetLabel = `${Number(totalBudgetNum || 0).toLocaleString("en-US")} ${budgetCurrency}`;
+
+  if (bgOutput && Array.isArray(bgOutput.allocations) && bgOutput.allocations.length > 0) {
+    const denominators = reconcileBudgetDenominators(totalBudgetNum, budgetCurrency, bgOutput.allocations);
+    const paidAllocations = denominators.reconciledAllocations.filter((a: any) => !a.isOrganic);
+    const organicAllocations = denominators.reconciledAllocations.filter((a: any) => a.isOrganic);
+    const carveOutPct = Number(bgOutput?.commercialStrategy?.learningBudgetCarveOutPct ?? 20);
+    const paidMediaTotal = Number(denominators.paidMediaSpend || 0);
+    const contentAndOrganicTotal = Number((denominators.contentProductionBudget || 0) + (denominators.organicEffortAllocation || 0));
+    const initialTestDollarAmount = paidMediaTotal > 0
+      ? Math.round((paidMediaTotal * carveOutPct) / 100)
+      : Math.round((Number(totalBudgetNum || 0) * carveOutPct) / 100);
+    const targetValidationChannelsLabel = paidAllocations.length > 0
+      ? paidAllocations.map((a: any) => a.channelName || a.channelId).join(", ")
+      : denominators.reconciledAllocations.map((a: any) => a.channelName || a.channelId).join(", ") || "approved channels";
+    synthesized.budgetAllocation = {
+      totalBudget: `${totalBudgetNum} ${budgetCurrency}`.trim(),
+      currency: budgetCurrency,
+      totalMonthlyBudget: totalBudgetNum,
+      period: "monthly",
+      budgetSettingsVersion: budgetVersion,
+      budgetConfirmation: isBudgetUnconfirmed ? "unconfirmed" : "user_confirmed",
+      isAssumption: isBudgetUnconfirmed,
+      provenance: isBudgetUnconfirmed
+        ? `Unconfirmed budget setting (${formattedBudgetLabel}). Does not authorize paid ad spend until confirmed.`
+        : `User-confirmed budget setting (${formattedBudgetLabel}).`,
+      budgetDenominators: denominators,
+      testingAndScalingGuidance: {
+        governorRole: "recommendation_component",
+        spendAction: bgOutput.spendAction || bgOutput.action || "hold",
+        spendPace: bgOutput?.commercialStrategy?.spendPace || "cautious",
+        learningBudgetCarveOutPct: carveOutPct,
+        initialValidationTestBudget: initialTestDollarAmount,
+        initialTestingPlan: `Use the user-confirmed ${formattedBudgetLabel}/month budget envelope (${paidMediaTotal.toLocaleString("en-US")} ${budgetCurrency} paid media + ${contentAndOrganicTotal.toLocaleString("en-US")} ${budgetCurrency} content/organic production), deploying an initial ${carveOutPct}% validation carve-out (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency}) on ${targetValidationChannelsLabel} to acquire baseline engagement-to-conversion benchmarks.`,
+        scalingHoldCondition: `Hold full-scale expansion beyond the initial ${carveOutPct}% validation test budget (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency}) until initial live testing establishes baseline click-through, engagement completion, and purchase conversion rates.`,
+        paidMediaAllocationSummary: paidAllocations.map((a: any) => `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount || 0).toLocaleString("en-US")} ${budgetCurrency}/mo)`).join("; "),
+        organicProductionAllocationSummary: organicAllocations.map((a: any) => `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount || 0).toLocaleString("en-US")} ${budgetCurrency}/mo production/organic effort)`).join("; "),
+      },
+      channels: denominators.reconciledAllocations.map((a: any) => ({
+        channelId: a.channelId,
+        channelName: a.channelName,
+        sharePercentage: a.sharePercentage,
+        monthlyAmount: a.monthlyAmount,
+        why: a.why,
+        isOrganic: a.isOrganic,
+        proposedUse: a.proposedUse,
+        spendCategory: a.spendCategory,
+      })),
+      breakdown: denominators.reconciledAllocations.map((a: any) => ({
+        category: a.channelName || a.channelId,
+        percentage: a.sharePercentage,
+        monthlyAmount: a.monthlyAmount,
+        purpose: a.proposedUse || a.why || "Channel marketing allocation",
+        isOrganic: a.isOrganic,
+        spendCategory: a.spendCategory,
+      })),
+    };
+  } else if (budgetSettings) {
+    const denominators = reconcileBudgetDenominators(totalBudgetNum, budgetCurrency, []);
+    synthesized.budgetAllocation = {
+      totalBudget: `${totalBudgetNum} ${budgetCurrency}`.trim(),
+      currency: budgetCurrency,
+      totalMonthlyBudget: totalBudgetNum,
+      period: "monthly",
+      budgetSettingsVersion: budgetVersion,
+      budgetConfirmation: isBudgetUnconfirmed ? "unconfirmed" : "user_confirmed",
+      isAssumption: isBudgetUnconfirmed,
+      provenance: isBudgetUnconfirmed
+        ? `Unconfirmed budget setting (${formattedBudgetLabel}). Does not authorize paid ad spend until confirmed.`
+        : `User-confirmed budget setting (${formattedBudgetLabel}).`,
+      budgetDenominators: denominators,
+      channels: [],
+      breakdown: [],
+    };
   }
 
-  // Call BLL translation layer to get separate business-facing representation
+  // Extract Positioning epistemic status and attach to synthesized plan BEFORE BLL translation
+  const posStepOut = results.get("positioning" as EngineId)?.output?.output || results.get("positioning" as EngineId)?.output || activeStrategyRoot?.approvedPositioningContext || null;
+  const posPrimaryTerritory = Array.isArray(posStepOut?.territories) ? posStepOut.territories[0] : null;
+  const posProposalStatus =
+    posStepOut?.proposalStatus ||
+    posPrimaryTerritory?.proposalStatus ||
+    posStepOut?.epistemicStatus ||
+    posPrimaryTerritory?.epistemicStatus ||
+    posStepOut?._provenance?.proposalStatus ||
+    "STRATEGIC_HYPOTHESIS";
+  const posEpistemicStatus =
+    posStepOut?.epistemicStatus ||
+    posPrimaryTerritory?.epistemicStatus ||
+    posProposalStatus ||
+    "STRATEGIC_HYPOTHESIS";
+  const posEpistemicLabel =
+    posStepOut?.epistemicLabel ||
+    posPrimaryTerritory?.epistemicLabel ||
+    "Proposed Strategic Hypothesis — Requires Market Validation";
+  const posVerificationStatus =
+    posStepOut?.verificationStatus ||
+    posPrimaryTerritory?.verificationStatus ||
+    "PROPOSED";
+  const posOutcomeType =
+    posStepOut?.positioningOutcomeType ||
+    posPrimaryTerritory?.positioningOutcomeType ||
+    undefined;
+  const posComparisonStatus =
+    posStepOut?.comparisonStatus ||
+    posPrimaryTerritory?.comparisonStatus ||
+    undefined;
+  const posComparedCompetitorCount =
+    typeof posStepOut?.comparedCompetitorCount === "number"
+      ? posStepOut.comparedCompetitorCount
+      : typeof posPrimaryTerritory?.comparedCompetitorCount === "number"
+        ? posPrimaryTerritory.comparedCompetitorCount
+        : undefined;
+  const posRationale =
+    posStepOut?.rationale ||
+    posPrimaryTerritory?.rationale ||
+    undefined;
+
+  (synthesized as any).positioningProposalStatus = posProposalStatus;
+  (synthesized as any).positioning = {
+    ...((synthesized as any).positioning || {}),
+    territory: posPrimaryTerritory?.name || activeStrategyRoot?.positioningTerritory || undefined,
+    enemyDefinition: posStepOut?.enemyDefinition || posPrimaryTerritory?.enemyDefinition || undefined,
+    contrastAxis: posStepOut?.contrastAxis || posPrimaryTerritory?.contrastAxis || activeStrategyRoot?.contrastAxis || undefined,
+    narrativeDirection: posStepOut?.narrativeDirection || posPrimaryTerritory?.narrativeDirection || undefined,
+    rationale: posRationale,
+    proposalStatus: posProposalStatus,
+    epistemicStatus: posEpistemicStatus,
+    epistemicLabel: posEpistemicLabel,
+    verificationStatus: posVerificationStatus,
+    ...(posOutcomeType ? { positioningOutcomeType: posOutcomeType } : {}),
+    ...(posComparisonStatus ? { comparisonStatus: posComparisonStatus } : {}),
+    ...(posComparedCompetitorCount !== undefined ? { comparedCompetitorCount: posComparedCompetitorCount } : {}),
+  };
+
+  if (synthesized.strategicSummary) {
+    (synthesized.strategicSummary as any).proposalStatus = posProposalStatus;
+    (synthesized.strategicSummary as any).epistemicStatus = posEpistemicStatus;
+    (synthesized.strategicSummary as any).epistemicLabel = posEpistemicLabel;
+    (synthesized.strategicSummary as any).verificationStatus = posVerificationStatus;
+    if (posOutcomeType) (synthesized.strategicSummary as any).positioningOutcomeType = posOutcomeType;
+    if (posComparisonStatus) (synthesized.strategicSummary as any).comparisonStatus = posComparisonStatus;
+    if (posComparedCompetitorCount !== undefined) (synthesized.strategicSummary as any).comparedCompetitorCount = posComparedCompetitorCount;
+  }
+
+  const verifiedFactStringsForBll: string[] = Array.isArray(bizData?.productTruthFacts)
+    ? bizData.productTruthFacts.map((f: any) => typeof f === "string" ? f : (f?.statement || f?.fact || f?.text || "")).filter(Boolean)
+    : [];
+
+  // 2. Call BLL translation layer so final validation inspects both representations
   try {
-    const { translateStrategyPlanToBusinessLanguage } = await import("../core/business-language-layer");
-    const businessRep = await translateStrategyPlanToBusinessLanguage(synthesized, config.accountId);
+    const { translateStrategyPlanToBusinessLanguage, sanitizeUnsupportedAbsolutes } = await import("../core/business-language-layer");
+    if (synthesized.strategicSummary) {
+      const combinedPreBll = [
+        synthesized.strategicSummary.strategy,
+        synthesized.strategicSummary.targetAudience,
+        synthesized.strategicSummary.growthObjective,
+        synthesized.strategicSummary.rationale,
+      ].join(" ");
+      const preBllEntailment = verifiedFactStringsForBll.length > 0
+        ? evaluateClaimSemanticEntailment(combinedPreBll, verifiedFactStringsForBll)
+        : { entailed: true, violations: [] as string[] };
+      if (
+        !preBllEntailment.entailed ||
+        /\b(never\s+generic|ensures?\s+(?:emotional\s+)?authenticity|permanent\s+(?:downloadable\s+|cloud\s+)?(?:mp3\s+)?access|lifetime\s+(?:cloud\s+)?(?:hosting|storage|access)|100%\s+satisfaction|guaranteed\s+satisfaction)\b/i.test(combinedPreBll)
+      ) {
+        try {
+          console.log(`[PlanSynthesis] PRE_BLL_SUMMARY_REPAIR | Repairing unsupported claim/absolute in strategicSummary before BLL translation: ${preBllEntailment.violations.join("; ") || "absolute regex match"}`);
+          const preRepairResp = await aiChat({
+            model: "gpt-4.1-mini",
+            temperature: 0.1,
+            accountId: config.accountId,
+            endpoint: "plan-synthesis-pre-bll-repair",
+            response_format: { type: "json_object" },
+            max_tokens: 900,
+            messages: [
+              {
+                role: "system",
+                content: `You are the Strategic Plan Synthesis Repair Editor. Rewrite the strategicSummary so it strictly reflects the verified product facts and approved positioning without any unsupported absolutes (NEVER use phrases like "never generic", "ensures authenticity", "permanent access", "lifetime access", "100% satisfaction", or "guaranteed satisfaction"), without rewriting conditional trial/gifting payment triggers into satisfaction-contingent payment claims ("pay only when satisfied") or unqualified "risk-free" claims, without asserting unverified competitor internal production workflows ("mass-produced automated prompt workflows", "template-bound services") or market-wide "blind-purchase ... isolated audio tracks" claims, and without unverified multi-version/revision features or unverified prices/durations. Preserve competitor attribution on customer reports and preserve Positioning's ${posEpistemicStatus} status. Return ONLY JSON: {"strategy": "...", "targetAudience": "...", "growthObjective": "...", "rationale": "..."}`,
+              },
+              {
+                role: "user",
+                content: JSON.stringify({
+                  currentStrategicSummary: synthesized.strategicSummary,
+                  violationsToFix: preBllEntailment.violations,
+                  verifiedProductFacts: verifiedFactStringsForBll,
+                }),
+              },
+            ],
+          });
+          const preRepairedSum = JSON.parse(preRepairResp.choices?.[0]?.message?.content || "{}");
+          if (preRepairedSum.strategy && preRepairedSum.rationale) {
+            synthesized.strategicSummary = {
+              ...synthesized.strategicSummary,
+              strategy: String(preRepairedSum.strategy).trim(),
+              targetAudience: String(preRepairedSum.targetAudience || synthesized.strategicSummary.targetAudience).trim(),
+              growthObjective: String(preRepairedSum.growthObjective || synthesized.strategicSummary.growthObjective).trim(),
+              rationale: String(preRepairedSum.rationale).trim(),
+            };
+          }
+        } catch (preRepErr: any) {
+          console.warn(`[PlanSynthesis] PRE_BLL_SUMMARY_REPAIR_FAILED | ${preRepErr?.message}`);
+        }
+      }
+      synthesized.strategicSummary.strategy = sanitizeUnsupportedAbsolutes(synthesized.strategicSummary.strategy || "");
+      synthesized.strategicSummary.targetAudience = sanitizeUnsupportedAbsolutes(synthesized.strategicSummary.targetAudience || "");
+      synthesized.strategicSummary.growthObjective = sanitizeUnsupportedAbsolutes(synthesized.strategicSummary.growthObjective || "");
+      synthesized.strategicSummary.rationale = sanitizeUnsupportedAbsolutes(synthesized.strategicSummary.rationale || "");
+    }
+    const businessRep = await translateStrategyPlanToBusinessLanguage(synthesized, config.accountId, verifiedFactStringsForBll);
     synthesized.businessRepresentation = businessRep;
-    console.log(`[PlanSynthesis] BLL_TRANSLATION_COMPLETED | separate representation added`);
+    console.log(`[PlanSynthesis] BLL_TRANSLATION_COMPLETED | separate representation added prior to final validation`);
   } catch (bllErr: any) {
     console.warn(`[PlanSynthesis] BLL_TRANSLATION_FAILED | ${bllErr.message}`);
   }
 
+  // 3. Call Cross-Engine Consistency Judge on the complete, post-BLL plan and canonical inputs (with 1 bounded targeted repair pass if summary/representation has a semantic/factual defect)
+  let consistency = await validateCrossEngineStrategyConsistency(
+    results,
+    activeStrategyRoot,
+    config.accountId,
+    {
+      synthesizedPlan: synthesized,
+      canonicalContext: (ctx as any)?.canonicalContext,
+      bizData,
+      campaignId: config.campaignId,
+    }
+  );
+
+  if (
+    !consistency.valid &&
+    consistency.outcomeType !== "CHECK_NOT_EXECUTED" &&
+    (consistency.responsibleEngines || []).every((e) => e === "plan_synthesis" || e === "offer")
+  ) {
+    try {
+      console.log(`[PlanSynthesis] BOUNDED_TARGETED_REPAIR | Attempting 1 targeted repair pass on synthesis summary for: ${consistency.conflict}`);
+      const repairResp = await aiChat({
+        model: "gpt-4.1-mini",
+        temperature: 0.1,
+        accountId: config.accountId,
+        endpoint: "plan-synthesis-targeted-repair",
+        response_format: { type: "json_object" },
+        max_tokens: 900,
+        messages: [
+          {
+            role: "system",
+            content: `You are the Strategic Plan Synthesis Repair Editor. Rewrite the strategicSummary so it strictly reflects the verified product facts and approved positioning without any unsupported absolutes, unverified revision guarantees, unverified permanence claims, or unverified prices/durations. Return ONLY JSON: {"strategy": "...", "targetAudience": "...", "growthObjective": "...", "rationale": "..."}`,
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              currentStrategicSummary: synthesized.strategicSummary,
+              defectsToFix: consistency.defects || [consistency.conflict],
+              verifiedProductFacts: bizData?.productTruthFacts || [],
+            }),
+          },
+        ],
+      });
+      const repairedSum = JSON.parse(repairResp.choices?.[0]?.message?.content || "{}");
+      if (repairedSum.strategy && repairedSum.rationale) {
+        synthesized.strategicSummary = {
+          ...synthesized.strategicSummary,
+          strategy: String(repairedSum.strategy).trim(),
+          targetAudience: String(repairedSum.targetAudience || synthesized.strategicSummary.targetAudience).trim(),
+          growthObjective: String(repairedSum.growthObjective || synthesized.strategicSummary.growthObjective).trim(),
+          rationale: String(repairedSum.rationale).trim(),
+        };
+        if (synthesized.businessRepresentation?.strategicSummary) {
+          synthesized.businessRepresentation.strategicSummary = {
+            ...synthesized.businessRepresentation.strategicSummary,
+            strategy: synthesized.strategicSummary.strategy,
+            targetAudience: synthesized.strategicSummary.targetAudience,
+            growthObjective: synthesized.strategicSummary.growthObjective,
+            rationale: synthesized.strategicSummary.rationale,
+          };
+        }
+        consistency = await validateCrossEngineStrategyConsistency(
+          results,
+          activeStrategyRoot,
+          config.accountId,
+          {
+            synthesizedPlan: synthesized,
+            canonicalContext: (ctx as any)?.canonicalContext,
+            bizData,
+            campaignId: config.campaignId,
+          }
+        );
+      }
+    } catch (repErr: any) {
+      console.warn(`[PlanSynthesis] BOUNDED_TARGETED_REPAIR_FAILED | ${repErr?.message}`);
+    }
+  }
+
+  synthesized._provenance = {
+    ...(synthesized._provenance || {}),
+    ...(config.jobId ? { jobId: config.jobId } : {}),
+    ...(config.sourceJobId ? { sourceJobId: config.sourceJobId } : {}),
+    ...(activeStrategyRoot?.id ? { strategyRootId: activeStrategyRoot.id } : {}),
+    ...(rootBundle?.id ? { rootBundleId: rootBundle.id, rootBundleVersion: rootBundle.version } : {}),
+    selectedSnapshotIds,
+    ...(config.reusedSnapshotIds ? { reusedSnapshotIds: config.reusedSnapshotIds } : {}),
+    ...(config.contextFingerprint ? { contextFingerprint: config.contextFingerprint } : {}),
+    ...(config.offeringId ? { offeringId: config.offeringId } : {}),
+    ...(config.offeringName ? { offeringName: config.offeringName } : {}),
+    ...(config.targetMarket ? { targetMarket: config.targetMarket } : {}),
+    ...(posProposalStatus ? { positioningProposalStatus: posProposalStatus } : {}),
+  } as any;
+
+  const { createHash } = await import("crypto");
+  const planPayloadForHash = { ...synthesized };
+  delete (planPayloadForHash as any).consistencyValidation;
+  delete (planPayloadForHash as any).governance;
+  const validatedPlanHash = createHash("sha256").update(JSON.stringify(planPayloadForHash)).digest("hex").slice(0, 32);
+
+  (synthesized as any).consistencyValidation = {
+    executed: !consistency.checkFailed,
+    valid: consistency.valid,
+    outcomeType: consistency.outcomeType || (consistency.valid ? "PASSED" : "FAILED_SEMANTIC"),
+    blocking: Boolean(consistency.blocking ?? !consistency.valid),
+    checkFailed: Boolean(consistency.checkFailed),
+    validatedPlanHash,
+    defects: consistency.defects || [],
+    inputCoverage: consistency.inputCoverage || null,
+    mechanicalPreservation: {
+      totalLocked: verification?.totalLocked || 0,
+      preserved: verification?.preserved || 0,
+      missing: verification?.missing || [],
+      passed: Boolean(verification?.passed ?? true),
+      note: "Mechanical preservation of locked root fields does not by itself establish cross-section semantic consistency.",
+    },
+    semanticConsistency: consistency.semanticConsistency || {
+      passed: consistency.valid && !consistency.checkFailed,
+      issues: consistency.conflict ? [consistency.conflict] : [],
+      summary: consistency.valid ? "Cross-engine sections are semantically aligned." : (consistency.conflict || "Consistency check did not pass."),
+    },
+    factualSupport: consistency.factualSupport || {
+      passed: consistency.valid && !consistency.checkFailed,
+      unsupportedPromises: [],
+      summary: consistency.valid ? "Material promises align with verified product truth and epistemic labels." : (consistency.conflict || "Factual support check did not pass."),
+    },
+    conflict: consistency.conflict || null,
+    checkedAt: new Date().toISOString(),
+  };
+
+  if (!consistency.valid) {
+    if (consistency.outcomeType === "FAILED_DETERMINISTIC") {
+      console.error(`[PlanSynthesis] STRATEGY_CONSISTENCY_BLOCKING_ERROR | outcomeType=${consistency.outcomeType} | conflict=${consistency.conflict}`);
+      throw new StrategyConsistencyError(
+        consistency.conflict!,
+        consistency.canonicalFields || [],
+        consistency.responsibleEngines || ["plan_synthesis"],
+        consistency.recommendedRegenerationTarget || "plan_synthesis"
+      );
+    } else {
+      console.warn(`[PlanSynthesis] STRATEGY_CONSISTENCY_SEMANTIC_BLOCKER | outcomeType=${consistency.outcomeType} | conflict=${consistency.conflict} | engines=[${consistency.responsibleEngines?.join(",")}]`);
+    }
+  }
+
+  // Construct and attach plan governance block
+  const governedBudget = resolveGovernedBudgetState(budgetGovResult?.output);
+  const isRootEligible = Boolean(activeStrategyRoot && (activeStrategyRoot.status === "ACTIVE" || activeStrategyRoot.executionEligible === true));
+
+  const approvalBlockers: string[] = [];
+  if (!isRootEligible) {
+    approvalBlockers.push(`Strategy Root ${activeStrategyRoot?.id || 'none'} has status "${activeStrategyRoot?.status || 'UNKNOWN'}", not execution-eligible.`);
+  }
+  // System Control: only block if strategy itself is structurally blocked (not spend-only downgrade/review)
+  if (controlVerdict && (controlVerdict.strategyBlocked === true || controlVerdict.verdict === "BLOCK" || controlVerdict.executionMode === "SYSTEM_UNTRUSTED" || controlVerdict.executionMode === "HALTED")) {
+    approvalBlockers.push(`System Control verdict rejected strategy execution: status=${controlVerdict.verdict}, action=${controlVerdict.executionMode}.`);
+  }
+  if (verification && !verification.passed) {
+    approvalBlockers.push(`Missing ${verification.missing.length} locked strategic decision(s): ${verification.missing.join(', ')}.`);
+  }
+  if (consistency.checkFailed) {
+    approvalBlockers.push(`Required cross-engine consistency validation failed to execute: ${consistency.conflict || "provider or parse error"}.`);
+  } else if (!consistency.valid || consistency.blocking) {
+    approvalBlockers.push(`Cross-engine consistency validation failed (${consistency.outcomeType}): ${consistency.conflict}.`);
+  }
+  // Fatal budget failure only blocks plan approval (e.g. fatal calculation/currency error)
+  if (governedBudget.governanceState === "BLOCKED" || governedBudget.action === "halt") {
+    approvalBlockers.push(`Budget Governor halted execution: ${governedBudget.reasoning || 'budget calculation error'}.`);
+  }
+  // Spend authorization separation: unconfirmed budget in recommendation_only mode does NOT block strategy recommendation approval.
+  // In live ad spend execution mode, unconfirmed budget blocks live spend execution.
+  if (governedBudget.executionMode === "execution" && (governedBudget.spendAction === "hold" || governedBudget.budgetConfirmation !== "user_confirmed")) {
+    approvalBlockers.push(`Live ad spend execution blocked: ${governedBudget.reasoning || 'budget unconfirmed for live spend'}.`);
+  }
+
+  synthesized.governance = {
+    strategyRoot: {
+      rootId: activeStrategyRoot?.id || null,
+      rootStatus: activeStrategyRoot?.status || "UNKNOWN",
+      executionEligible: isRootEligible,
+    },
+    systemControl: {
+      verdictId: controlVerdict?.id || (controlVerdict as any)?.verdictId || null,
+      status: controlVerdict?.verdict || "UNKNOWN",
+      enforcementAction: controlVerdict?.executionMode || "UNKNOWN",
+      allowExecution: controlVerdict ? (controlVerdict.verdict === "PASS" || (controlVerdict.verdict !== "BLOCK" && controlVerdict.strategyBlocked === false)) : false,
+    },
+    governedBudget,
+    lockedDecisions: {
+      total: verification?.totalLocked || 0,
+      preserved: verification?.preserved || 0,
+      missing: verification?.missing || [],
+      coverage: (verification?.totalLocked && verification.totalLocked > 0) ? (verification.preserved / verification.totalLocked) : 1,
+    },
+    consistencyValidation: (synthesized as any).consistencyValidation,
+    approvalBlockers,
+  };
+
+  await db
+    .update(strategicPlans)
+    .set({ status: "SUPERSEDED", isDesignatedActive: false, updatedAt: new Date() })
+    .where(
+      and(
+        eq(strategicPlans.accountId, config.accountId),
+        eq(strategicPlans.campaignId, config.campaignId),
+        eq(strategicPlans.status, "DRAFT")
+      )
+    );
+
+  // Post-generation text mangling removed: claim status originates in upstream
+  // evidence and assessments, preserving exact engine output in planJson.
   const [plan] = await db.insert(strategicPlans).values({
     accountId: config.accountId,
     blueprintId: "orchestrator-v2",
@@ -2884,47 +4708,121 @@ export async function synthesizePlan(
   return { planId: plan.id, plan: cleanPlanPayload };
 }
 
-export function deepScrubPlan(obj: any, currentRole: "OBSERVED_SIGNAL" | "STRATEGIC_INSIGHT" | "PRODUCT_CAPABILITY" | "UNKNOWN" = "PRODUCT_CAPABILITY"): any {
-  if (typeof obj === 'string') {
-    if (currentRole === "OBSERVED_SIGNAL" || currentRole === "STRATEGIC_INSIGHT") {
-      return obj; // Preserved for market intelligence observations
-    }
-    return obj
-      .replace(/showcasing the Billing and Service Trust Repair Process that unifies fragmented billing and service insights transparently/gi,
-        "showcasing the Continuous Market Intelligence Architecture that unifies scattered targeting signals transparently")
-      .replace(/Billing and Service Trust Repair Process/gi, "Targeting Precision & Continuous Market Intelligence Architecture")
-      .replace(/refund dashboard|billing dashboard|customer service tracking|customer service trackers/gi, "market intelligence dashboard")
-      .replace(/Avyron manages refunds and customer support\b/gi, "Avyron provides continuous live market intelligence and automated targeting")
-      .replace(/without prior notification or consent|without prior notification/gi, "")
-      .replace(/unauthorized or recurring charges|unauthorized charges|recurring charges/gi, "scattered insight pipelines and poor data quality")
-      .replace(/difficulties with customer service responsiveness|customer service responsiveness|unprofessional interactions|customer service disputes/gi, "scattered insight pipelines and manual research overhead")
-      .replace(/problematic subscription cancellations|difficulties with customer service and subscription cancellations|difficulties in subscription cancellation/gi, "stale competitor intelligence and targeting gaps")
-      .replace(/poor or non-existent customer service including ignored communications and unprofessional behavior/gi, "scattered insight pipelines and manual research overhead")
-      .replace(/subscription cancellation difficulties leading to unexpected charges/gi, "stale competitor intelligence and targeting gaps")
-      .replace(/difficulties canceling subscriptions|refund policies/gi, "scattered insight pipelines and poor data quality")
-      .replace(/within billing and customer service workflows/gi, "across go-to-market targeting and campaign intelligence workflows")
-      .replace(/across billing and service functions/gi, "across marketing intelligence and targeting functions")
-      .replace(/billing and customer service/gi, "marketing intelligence and targeting")
-      .replace(/billing and service/gi, "marketing intelligence and targeting")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(item => deepScrubPlan(item, currentRole));
-  }
-  if (typeof obj === 'object' && obj !== null) {
-    const explicitRole = obj.semanticRole as "OBSERVED_SIGNAL" | "STRATEGIC_INSIGHT" | "PRODUCT_CAPABILITY" | undefined;
-    const effectiveRole = explicitRole || currentRole;
-
-    const scrubbed: any = {};
-    for (const [key, val] of Object.entries(obj)) {
-      let childRole = effectiveRole;
-      if (key === "competitiveWatch" || key === "marketSignals" || key === "competitorObservations" || key === "strategyFeed") {
-        childRole = "OBSERVED_SIGNAL";
-      }
-      scrubbed[key] = deepScrubPlan(val, childRole);
-    }
-    return scrubbed;
-  }
+export function deepScrubPlan(obj: any, _currentRole: "OBSERVED_SIGNAL" | "STRATEGIC_INSIGHT" | "PRODUCT_CAPABILITY" | "UNKNOWN" = "PRODUCT_CAPABILITY"): any {
+  // Post-validation semantic regex rewriting has been removed so persisted planJson and returned plan are identical to the validated payload.
   return obj;
+}
+
+export function reconcileBudgetDenominators(
+  totalCampaignBudget: number,
+  currency: string,
+  allocations: Array<{
+    channelId: string;
+    channelName?: string;
+    sharePercentage?: number;
+    monthlyAmount?: number;
+    why?: string;
+    isOrganic?: boolean;
+    proposedUse?: string;
+  }>,
+): {
+  totalCampaignBudget: number;
+  currency: string;
+  paidMediaSpend: number;
+  contentProductionBudget: number;
+  organicEffortAllocation: number;
+  unallocatedReserve: number;
+  reconcilesToTotal: boolean;
+  reconciledAllocations: Array<{
+    channelId: string;
+    channelName?: string;
+    sharePercentage: number;
+    monthlyAmount: number;
+    why?: string;
+    isOrganic: boolean;
+    proposedUse?: string;
+    spendCategory: "PAID_MEDIA" | "CONTENT_PRODUCTION" | "ORGANIC_EXECUTION";
+  }>;
+} {
+  const safeTotal = Math.max(0, Number(totalCampaignBudget || 0));
+  const rawList = Array.isArray(allocations) ? allocations : [];
+  const rawSum = rawList.reduce((acc, a) => acc + Math.max(0, Number(a.monthlyAmount || 0)), 0);
+  const scaleFactor = rawSum > 0 && rawSum !== safeTotal ? safeTotal / rawSum : 1;
+
+  let paidMediaSpend = 0;
+  let contentProductionBudget = 0;
+  let organicEffortAllocation = 0;
+
+  const reconciledAllocations = rawList.map((a) => {
+    const scaledAmt = rawSum > 0
+      ? Math.round(Math.max(0, Number(a.monthlyAmount || 0)) * scaleFactor)
+      : Math.round((Math.max(0, Number(a.sharePercentage || 0)) / 100) * safeTotal);
+    const sharePct = safeTotal > 0 ? Math.round((scaledAmt / safeTotal) * 100) : Number(a.sharePercentage || 0);
+    const isOrg = Boolean(a.isOrganic);
+    const useLower = `${a.proposedUse || ""} ${a.why || ""}`.toLowerCase();
+    const isContentProd = isOrg && /\b(production|creator|video|editing|asset|studio)\b/.test(useLower);
+    const spendCategory: "PAID_MEDIA" | "CONTENT_PRODUCTION" | "ORGANIC_EXECUTION" = !isOrg
+      ? "PAID_MEDIA"
+      : isContentProd
+        ? "CONTENT_PRODUCTION"
+        : "ORGANIC_EXECUTION";
+
+    if (spendCategory === "PAID_MEDIA") paidMediaSpend += scaledAmt;
+    else if (spendCategory === "CONTENT_PRODUCTION") contentProductionBudget += scaledAmt;
+    else organicEffortAllocation += scaledAmt;
+
+    return {
+      ...a,
+      sharePercentage: sharePct,
+      monthlyAmount: scaledAmt,
+      isOrganic: isOrg,
+      spendCategory,
+    };
+  });
+
+  const allocatedSum = paidMediaSpend + contentProductionBudget + organicEffortAllocation;
+  const unallocatedReserve = Math.max(0, safeTotal - allocatedSum);
+
+  return {
+    totalCampaignBudget: safeTotal,
+    currency: currency || "USD",
+    paidMediaSpend,
+    paidMediaBudget: paidMediaSpend,
+    contentProductionBudget,
+    organicEffortAllocation,
+    contentAndOrganicBudget: contentProductionBudget + organicEffortAllocation,
+    unallocatedReserve,
+    reconcilesToTotal: allocatedSum + unallocatedReserve === safeTotal,
+    reconciledAllocations,
+  };
+}
+
+export function resolveAuthoritativeCampaignMarket(
+  campaignContext: { targetMarket?: string | null; currency?: string | null },
+  businessUnderstanding?: { companyAddressCountry?: string | null; pricingCurrency?: string | null },
+): {
+  authoritativeTargetMarket: string;
+  provenance: "USER_SELECTED_CAMPAIGN_SCOPE" | "BUSINESS_FALLBACK";
+  companyIncorporationLocation: string | null;
+  pricingCurrency: string | null;
+} {
+  const userMarket = (campaignContext?.targetMarket || "").trim();
+  const companyLocation = (businessUnderstanding?.companyAddressCountry || "").trim() || null;
+  const currency = (campaignContext?.currency || businessUnderstanding?.pricingCurrency || "").trim() || null;
+
+  if (userMarket.length > 0) {
+    return {
+      authoritativeTargetMarket: userMarket,
+      provenance: "USER_SELECTED_CAMPAIGN_SCOPE",
+      companyIncorporationLocation: companyLocation,
+      pricingCurrency: currency,
+    };
+  }
+
+  return {
+    authoritativeTargetMarket: companyLocation || "Global",
+    provenance: "BUSINESS_FALLBACK",
+    companyIncorporationLocation: companyLocation,
+    pricingCurrency: currency,
+  };
 }

@@ -16,7 +16,7 @@
 
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "../db";
-import { userPublicProfiles, ciCompetitors } from "@shared/schema";
+import { userPublicProfiles, ciCompetitors, competitorSources } from "@shared/schema";
 import type { CollectorEntityType, CollectorLane } from "./envelope";
 
 export interface DiscoveredItem {
@@ -44,6 +44,8 @@ function platformToCompetitorEntityType(platform: string | null | undefined): Co
   switch ((platform ?? "instagram").toLowerCase()) {
     case "tiktok":
       return "competitor_tiktok";
+    case "youtube":
+      return "competitor_youtube";
     case "website":
     case "site":
       return "competitor_website";
@@ -59,6 +61,7 @@ function platformToCompetitorEntityType(platform: string | null | undefined): Co
     case "yelp":
     case "trustpilot":
     case "reviews":
+    case "google_reviews":
       return "competitor_reviews";
     case "instagram":
     default:
@@ -115,13 +118,118 @@ export async function discoverEntities(
     .from(ciCompetitors)
     .where(and(...compQueryConds));
 
-  const competitorItems: DiscoveredItem[] = compRows.map((c) => ({
-    lane: "competitor",
-    entityType: platformToCompetitorEntityType(c.platform),
-    entityId: c.id,
-    discoveryRowId: c.id,
-    displayName: c.name ?? `competitor:${c.id.slice(0, 8)}`,
-  }));
+  const competitorItems: DiscoveredItem[] = [];
+  const seenCompetitorEntityTypes = new Set<string>();
+
+  // Pre-load competitor_sources so quarantined/disabled primary platforms are not scheduled
+  let allCampaignSources: Array<typeof competitorSources.$inferSelect> = [];
+  if (compRows.length > 0) {
+    try {
+      allCampaignSources = await db
+        .select()
+        .from(competitorSources)
+        .where(
+          and(
+            eq(competitorSources.campaignId, campaignId),
+            inArray(
+              competitorSources.competitorId,
+              compRows.map((c) => c.id),
+            ),
+          ),
+        );
+    } catch {
+      // Non-fatal fallback if competitor_sources is unavailable in isolated unit tests
+    }
+  }
+
+  for (const c of compRows) {
+    const primaryType = platformToCompetitorEntityType(c.platform);
+    const compSources = allCampaignSources.filter((s) => s.competitorId === c.id);
+    const matchingPrimarySources = compSources.filter((s) => {
+      const pUpper = (s.platform || "").toUpperCase();
+      if (primaryType === "competitor_instagram") return pUpper === "INSTAGRAM";
+      return platformToCompetitorEntityType(pUpper) === primaryType;
+    });
+    const isPrimaryQuarantinedOrDisabled =
+      compSources.length > 0 &&
+      (matchingPrimarySources.length === 0 ||
+        matchingPrimarySources.every(
+          (s) =>
+            s.status === "DISABLED" ||
+            s.status === "REJECTED" ||
+            s.verificationStatus === "REJECTED" ||
+            s.activityState === "QUARANTINED_MISATTRIBUTED"
+        ));
+
+    if (!isPrimaryQuarantinedOrDisabled) {
+      const primaryKey = `${c.id}:${primaryType}`;
+      seenCompetitorEntityTypes.add(primaryKey);
+      competitorItems.push({
+        lane: "competitor",
+        entityType: primaryType,
+        entityId: c.id,
+        discoveryRowId: c.id,
+        displayName: c.name ?? `competitor:${c.id.slice(0, 8)}`,
+      });
+    }
+
+    // If competitor has a websiteUrl but primary platform was social (e.g. instagram),
+    // also include competitor_website so Watchtower compares website changes too.
+    if (c.websiteUrl && primaryType !== "competitor_website") {
+      const webKey = `${c.id}:competitor_website`;
+      if (!seenCompetitorEntityTypes.has(webKey)) {
+        seenCompetitorEntityTypes.add(webKey);
+        competitorItems.push({
+          lane: "competitor",
+          entityType: "competitor_website",
+          entityId: c.id,
+          discoveryRowId: `${c.id}:website`,
+          displayName: `${c.name ?? `competitor:${c.id.slice(0, 8)}`} (website)`,
+        });
+      }
+    }
+  }
+
+  // Also discover registered active/verified competitor_sources (Instagram, TikTok, YouTube, Reviews, Website)
+  if (compRows.length > 0 && allCampaignSources.length > 0) {
+    const compById = new Map(compRows.map((c) => [c.id, c]));
+    const watchtowerSourcePlatforms = new Set([
+      "WEBSITE",
+      "INSTAGRAM",
+      "TIKTOK",
+      "YOUTUBE",
+      "REVIEWS",
+      "GOOGLE_REVIEWS",
+    ]);
+
+    for (const src of allCampaignSources) {
+      const platUpper = (src.platform || "").toUpperCase();
+      if (!watchtowerSourcePlatforms.has(platUpper)) continue;
+      if (src.status === "DISABLED" || src.status === "REJECTED" || src.verificationStatus === "REJECTED") continue;
+      if (
+        src.activityState === "UNSUPPORTED_PROVIDER" ||
+        src.activityState === "INVALID_HANDLE" ||
+        src.activityState === "NO_POSTS" ||
+        src.activityState === "QUARANTINED_MISATTRIBUTED"
+      ) {
+        continue;
+      }
+
+      const entityType = platformToCompetitorEntityType(platUpper);
+      const key = `${src.competitorId}:${entityType}`;
+      if (seenCompetitorEntityTypes.has(key)) continue;
+      seenCompetitorEntityTypes.add(key);
+
+      const comp = compById.get(src.competitorId);
+      competitorItems.push({
+        lane: "competitor",
+        entityType,
+        entityId: src.competitorId,
+        discoveryRowId: src.id,
+        displayName: `${comp?.name ?? `competitor:${src.competitorId.slice(0, 8)}`} (${platUpper.toLowerCase()})`,
+      });
+    }
+  }
 
   if (compRows.length === 0) {
     notes.push(

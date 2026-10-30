@@ -5,7 +5,6 @@ import type { CompetitorInput, CompetitorSignalResult } from "../market-intellig
 function makeCompetitor(overrides: Partial<CompetitorInput> & { id: string; name: string }): CompetitorInput {
   return {
     platform: "instagram",
-    profileLink: "https://instagram.com/test",
     businessType: "retail",
     postingFrequency: null,
     contentTypeRatio: null,

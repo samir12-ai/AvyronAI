@@ -164,7 +164,20 @@ export async function composeTasks(
     templates = applyStrategicGuards(templates, strategicContext);
   }
 
-  if (templates.length === 0) return [];
+  let initialStatus = "pending";
+  try {
+    const [planRow] = await db
+      .select({ status: strategicPlans.status, isDesignatedActive: strategicPlans.isDesignatedActive })
+      .from(strategicPlans)
+      .where(and(eq(strategicPlans.id, planId), eq(strategicPlans.accountId, accountId)))
+      .limit(1);
+    if (!planRow || planRow.status !== "APPROVED" || !planRow.isDesignatedActive) {
+      initialStatus = "DRAFT";
+    }
+  } catch (err: any) {
+    console.warn(`[TaskComposer] Could not verify plan active status, defaulting to DRAFT:`, err.message);
+    initialStatus = "DRAFT";
+  }
 
   const weeks = Math.ceil(periodDays / 7);
   let sortOrder = 0;
@@ -188,13 +201,13 @@ export async function composeTasks(
       description: t.description,
       category: t.category,
       priority: t.priority,
-      status: "pending",
+      status: initialStatus,
       sortOrder,
     };
   });
 
   await db.insert(executionTasks).values(values);
-  console.log(`[TaskComposer] Generated ${values.length} tasks for plan ${planId}`);
+  console.log(`[TaskComposer] Generated ${values.length} tasks for plan ${planId} with status ${initialStatus}`);
   return values;
 }
 

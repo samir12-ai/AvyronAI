@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { resolveAccountId } from "../auth";
 import { assertCampaignBelongsTo, handleOwnershipError } from "../auth-helpers";
 import { scrapeReviewsForCompetitor, scrapeReviewsForCampaign } from "./reviews-scraper";
+export { scrapeReviewsForCompetitor, scrapeReviewsForCampaign };
 import { scrapeTiktokForCompetitor, ingestTiktokPosts, type TiktokPost } from "./tiktok-scraper";
 import { db } from "../db";
 import { ciCompetitors } from "@shared/schema";

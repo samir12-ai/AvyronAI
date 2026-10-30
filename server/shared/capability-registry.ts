@@ -31,10 +31,23 @@ import type { ProductAnchor, ProductDnaLike } from "./strategic-doctrine";
 export interface ValidatedCapability {
   /** Stable content-hash id: cap_<12 hex chars of sha256(source+statement)>. */
   capabilityId: string;
-  /** The capability statement, verbatim from the authoritative source field. */
+  /** The capability or Product Truth fact statement, verbatim from the authoritative source field. */
   statement: string;
-  /** Which authoritative namespace field supplied this capability. */
+  /** Original Product Truth fact type (e.g. CAPABILITY, QUALITY, OPERATIONAL, PROOF, OFFER). */
+  factType?: string;
+  /** Which authoritative namespace field supplied this entry. */
   source:
+    | "product_truth.capability"
+    | "product_truth.quality"
+    | "product_truth.operational"
+    | "product_truth.proof"
+    | "product_truth.offer"
+    | "product_truth.delivery_mechanism"
+    | "product_truth.pricing_fact"
+    | "product_truth.differentiator"
+    | "product_truth.use_case"
+    | "product_truth.boundary"
+    | "product_truth.fact"
     | "anchor.differentiatingFeature"
     | "anchor.keyAttributes"
     | "anchor.coreProblemSolved"
@@ -43,6 +56,22 @@ export interface ValidatedCapability {
     | "dna.coreOffer";
   /** Human-readable source reference (field path). */
   sourceRef: string;
+  /** Source Product Truth fact ID when projected from canonical Product Truth */
+  sourceFactId?: string;
+  /** Verification status from canonical Product Truth (e.g. VERIFIED, USER_CONFIRMED) */
+  verificationStatus?: string;
+  /** Optional scope of the fact */
+  scope?: string;
+  /** Optional qualifications / rationale / limitations */
+  qualifications?: string;
+  /** Evidence reference IDs backing this fact */
+  evidenceRefIds?: string[];
+  /** Campaign offering ID this fact is scoped to */
+  campaignOfferingId?: string;
+  /** Canonical Product Truth snapshot ID / version */
+  snapshotId?: string;
+  /** Canonical Product Truth snapshot fingerprint */
+  snapshotFingerprint?: string;
   /** All registry entries are validated by construction (authoritative inputs only). */
   validationStatus: "VALIDATED";
   /** What kinds of claims this capability may support. */
@@ -56,11 +85,40 @@ export function computeCapabilityId(source: string, statement: string): string {
   );
 }
 
+function mapFactTypeToSource(factType: string): ValidatedCapability["source"] {
+  const norm = String(factType || "CAPABILITY").trim().toUpperCase();
+  switch (norm) {
+    case "CAPABILITY":
+      return "product_truth.capability";
+    case "QUALITY":
+      return "product_truth.quality";
+    case "OPERATIONAL":
+      return "product_truth.operational";
+    case "PROOF":
+      return "product_truth.proof";
+    case "OFFER":
+      return "product_truth.offer";
+    case "DELIVERY_MECHANISM":
+      return "product_truth.delivery_mechanism";
+    case "PRICING_FACT":
+      return "product_truth.pricing_fact";
+    case "DIFFERENTIATOR":
+      return "product_truth.differentiator";
+    case "USE_CASE":
+      return "product_truth.use_case";
+    case "BOUNDARY":
+      return "product_truth.boundary";
+    default:
+      return "product_truth.fact";
+  }
+}
+
 /**
- * Deterministically derive the validated capability registry for one campaign
- * from its Product Anchor and (optionally) Product DNA. Pure function — same
- * inputs always produce the same registry (and the same capabilityIds).
- * Duplicate statements (case-insensitive) are emitted once, anchor first.
+ * Deterministically derive the validated capability & Product Truth registry for one campaign
+ * from its Product Anchor, canonical Product Truth facts, and (optionally) Product DNA.
+ * Pure function — same inputs always produce the same registry (and the same capabilityIds).
+ * Preserves each Product Truth fact's original factType, ID, status, scope, and qualifications
+ * without restricting visibility to CAPABILITY-only facts.
  */
 export function deriveValidatedCapabilities(
   anchor: ProductAnchor | null | undefined,
@@ -68,7 +126,35 @@ export function deriveValidatedCapabilities(
 ): ValidatedCapability[] {
   const out: ValidatedCapability[] = [];
   const seen = new Set<string>();
-  const push = (source: ValidatedCapability["source"], sourceRef: string, statement: unknown) => {
+  const dnaAny = (dna || {}) as any;
+  const resolvedSnapshotId =
+    dnaAny.snapshotId ||
+    dnaAny.businessUnderstandingAuthorityId ||
+    dnaAny.canonicalProductTruthSnapshot?.snapshotId ||
+    undefined;
+  const resolvedFingerprint =
+    dnaAny.snapshotFingerprint ||
+    dnaAny.canonicalProductTruthSnapshot?.fingerprint ||
+    undefined;
+  const resolvedOfferingId =
+    dnaAny.campaignOfferingId ||
+    dnaAny.canonicalProductTruthSnapshot?.campaignOfferingId ||
+    undefined;
+
+  const push = (
+    source: ValidatedCapability["source"],
+    sourceRef: string,
+    statement: unknown,
+    meta?: {
+      factType?: string;
+      sourceFactId?: string;
+      verificationStatus?: string;
+      scope?: string;
+      qualifications?: string;
+      evidenceRefIds?: string[];
+      campaignOfferingId?: string;
+    },
+  ) => {
     const s = typeof statement === "string" ? statement.trim() : "";
     if (s.length === 0) return;
     const key = s.toLowerCase();
@@ -77,12 +163,62 @@ export function deriveValidatedCapabilities(
     out.push({
       capabilityId: computeCapabilityId(source, s),
       statement: s,
+      factType: meta?.factType,
       source,
       sourceRef,
+      sourceFactId: meta?.sourceFactId,
+      verificationStatus: meta?.verificationStatus,
+      scope: meta?.scope,
+      qualifications: meta?.qualifications,
+      evidenceRefIds: meta?.evidenceRefIds,
+      campaignOfferingId: meta?.campaignOfferingId || resolvedOfferingId,
+      snapshotId: resolvedSnapshotId,
+      snapshotFingerprint: resolvedFingerprint,
       validationStatus: "VALIDATED",
       allowedClaimScope: "product_capability_claims",
     });
   };
+
+  // 1. Canonical Product Truth facts (all verified fact types: CAPABILITY, QUALITY, OPERATIONAL, PROOF, OFFER, etc.)
+  const ptFacts = Array.isArray(dna?.productTruthFacts) ? dna!.productTruthFacts : [];
+  const verifiedFacts = ptFacts.filter((f: any) => {
+    if (!f) return false;
+    const st = String(f.status || "VERIFIED").trim().toUpperCase();
+    return st !== "REJECTED" && st !== "EXCLUDED" && st !== "UNVERIFIED" && st !== "INVALID";
+  });
+
+  if (verifiedFacts.length > 0) {
+    for (const fact of verifiedFacts) {
+      const stmt = fact.statement || fact.fact;
+      if (stmt && typeof stmt === "string") {
+        const factId = fact.productTruthFactId || fact.factId || fact.id;
+        const origFactType = String(fact.factType || "CAPABILITY").trim().toUpperCase();
+        const source = mapFactTypeToSource(origFactType);
+        push(
+          source,
+          fact.sourceRef || (factId ? `product_truth.facts[${factId}]` : "product_truth.facts"),
+          stmt,
+          {
+            factType: origFactType,
+            sourceFactId: factId,
+            verificationStatus: fact.status ? String(fact.status).trim() : "VERIFIED",
+            scope: fact.scope ? String(fact.scope).trim() : undefined,
+            qualifications: Array.isArray(fact.qualifications)
+              ? fact.qualifications.map((q: any) => String(q || "").trim()).filter(Boolean).join("; ")
+              : fact.qualifications
+                ? String(fact.qualifications).trim()
+                : fact.rationale
+                  ? String(fact.rationale).trim()
+                  : undefined,
+            evidenceRefIds: Array.isArray(fact.evidenceRefIds) ? [...fact.evidenceRefIds] : undefined,
+            campaignOfferingId: fact.campaignOfferingId || resolvedOfferingId,
+          },
+        );
+      }
+    }
+  }
+
+  // 2. Product Anchor fields (if anchor provided, project anchor fields that aren't already represented)
   if (anchor) {
     push("anchor.differentiatingFeature", "product_anchor.differentiatingFeature", anchor.differentiatingFeature);
     (anchor.keyAttributes ?? []).forEach((a, i) =>
@@ -90,16 +226,23 @@ export function deriveValidatedCapabilities(
     );
     push("anchor.coreProblemSolved", "product_anchor.coreProblemSolved", anchor.coreProblemSolved);
   }
-  if (dna) {
+
+  // 3. Fallback to DNA summary fields ONLY if no canonical product truth facts exist
+  if (dna && verifiedFacts.length === 0) {
     push("dna.uniqueMechanism", "business_data_layer.unique_mechanism", dna.uniqueMechanism ?? "");
     push("dna.strategicAdvantage", "business_data_layer.strategic_advantage", dna.strategicAdvantage ?? "");
   }
+
   return out;
 }
 
 /** Stable 16-char hash of the whole registry (for run lineage capture). */
 export function computeCapabilityRegistryHash(caps: ValidatedCapability[]): string {
-  const canonical = JSON.stringify(caps.map((c) => c.capabilityId).sort());
+  const canonical = JSON.stringify(
+    caps
+      .map((c) => `${c.capabilityId}:${c.factType || "CAPABILITY"}:${c.sourceFactId || ""}`)
+      .sort(),
+  );
   return crypto.createHash("sha256").update(canonical).digest("hex").slice(0, 16);
 }
 
@@ -107,21 +250,28 @@ export function computeCapabilityRegistryHash(caps: ValidatedCapability[]): stri
 export const capabilityRefsSchema = z.array(z.string()).optional();
 
 /**
- * Render the CAPABILITY_NAMESPACE prompt block: the validated capabilities with
- * their stable IDs. Returns "" when the registry is empty (truthful absence —
- * never fabricate a capability list).
+ * Render the CAPABILITY_NAMESPACE prompt block: the validated capabilities and Product Truth facts
+ * with their stable IDs and original fact types. Returns "" when the registry is empty.
  */
 export function buildCapabilityBlock(caps: ValidatedCapability[]): string {
   if (caps.length === 0) return "";
   const lines: string[] = [];
-  lines.push("\n═══ VALIDATED PRODUCT CAPABILITIES (the ONLY capabilities you may claim) ═══");
+  const snapId = caps.find((c) => c.snapshotId)?.snapshotId;
+  const snapFp = caps.find((c) => c.snapshotFingerprint)?.snapshotFingerprint;
+  lines.push(
+    `\n═══ VALIDATED PRODUCT TRUTH & CAPABILITIES${snapId || snapFp ? ` (snapshot=${snapId || "n/a"}, fingerprint=${snapFp || "n/a"})` : ""} ═══`,
+  );
   for (const c of caps) {
-    lines.push(`[${c.capabilityId}] ${c.statement}  (source: ${c.sourceRef})`);
+    const typeTag = c.factType ? ` [${c.factType}]` : "";
+    const factIdTag = c.sourceFactId ? ` (factId: ${c.sourceFactId})` : "";
+    const scopeTag = c.scope ? ` [scope: ${c.scope}]` : "";
+    const qualTag = c.qualifications ? ` [note: ${c.qualifications}]` : "";
+    lines.push(`[${c.capabilityId}]${typeTag}${factIdTag} ${c.statement}${scopeTag}${qualTag}  (source: ${c.sourceRef})`);
   }
   lines.push(
-    "Product-capability claims in your output MUST resolve to one of these IDs. Do NOT invent, extend, or merge capabilities. List the IDs you used in a structured \"capabilityRefs\": string[] field of your JSON output when the schema allows it.",
+    "Factual product claims in your output MUST be supported by these verified Product Truth facts. List the IDs you used in a structured \"capabilityRefs\": string[] field of your JSON output when the schema allows it.",
   );
-  lines.push("═══ END VALIDATED PRODUCT CAPABILITIES ═══\n");
+  lines.push("═══ END VALIDATED PRODUCT TRUTH & CAPABILITIES ═══\n");
   return lines.join("\n");
 }
 

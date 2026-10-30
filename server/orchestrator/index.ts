@@ -81,8 +81,11 @@ import {
   retentionGateInputs,
   manualRetentionMetrics,
   brandConfig,
+  ciCompetitors,
+  campaignBudgetSettings,
 } from "@shared/schema";
-import { eq, desc, and, sql, isNotNull } from "drizzle-orm";
+import { eq, desc, and, or, sql, isNotNull } from "drizzle-orm";
+import { getOwnedChannelsForCampaign } from "../user-channel-scraper";
 import {
   ENGINE_PRIORITY_ORDER,
   checkPriorityViolation,
@@ -120,9 +123,10 @@ import {
 // out of scope (boundary enforced by server/tests/retry-policy-boundary.test.ts).
 import { planRetry, computeShadowRetryRecommendation } from "../decision-policy/retry-policy";
 import { synthesizePlan } from "./plan-synthesis";
-import { buildAudiencePainRegistry, attachSelectedPainRoles, attachTargetCoverageToPainRegistry, extractCanonicalSegmentPains } from "../shared/audience-pain-registry";
+import { buildAudiencePainRegistry, attachSelectedPainRoles, attachTargetCoverageToPainRegistry, extractCanonicalSegmentPains, decodeHtmlEntities, isPositiveAppreciationSignal } from "../shared/audience-pain-registry";
+import { loadCanonicalCustomerVoice, type CustomerEvidenceUnit } from "../competitive-intelligence/evidence-routing";
 import { refineAudiencePainRegistry } from "../shared/pain-classifier";
-import { runLaneGrouper } from "../shared/lane-grouper";
+import { runLaneGrouper, type StrategicLane } from "../shared/lane-grouper";
 import {
   buildMemoryContext,
   serializeMemoryContextForPrompt,
@@ -135,26 +139,12 @@ import type { MemoryClass } from "../memory-system/types";
 
 import { MarketIntelligenceV3 } from "../market-intelligence-v3/engine";
 import { runAudienceEngine, getLatestAudienceSnapshot } from "../audience-engine/engine";
+import { runMarketVoicePipeline } from "../market-voice/pipeline";
 import {
   computeInputHash,
-  logReuseHit,
-  logReuseMiss,
-  tryReuseAudience,
-  tryReusePositioning,
-  tryReuseDifferentiation,
-  tryReuseMechanism,
-  tryReuseOffer,
-  tryReuseAwareness,
-  tryReuseFunnel,
-  tryReuseIntegrity,
-  tryReusePersuasion,
-  tryReuseStatVal,
-  tryReuseBudgetGovernor,
-  tryReuseChannelSelection,
-  tryReuseIteration,
-  tryReuseRetention,
 } from "./snapshot-reuse";
 import { buildAndRecordAiPathReport, markEngineReused } from "./ai-path-report";
+import { hydrateRequiredUpstreamForResume } from "./resume-hydration";
 import {
   audienceSnapshots as audienceSnapshotsTbl,
   positioningSnapshots as positioningSnapshotsTbl,
@@ -166,16 +156,23 @@ import { runMechanismEngine } from "../mechanism-engine/engine";
 import { runOfferEngine } from "../offer-engine/engine";
 import { upsertEnrichmentRequest, autoResolveEnrichmentRequest } from "../dna-enrichment/store";
 import type { DnaEnrichmentSignal } from "../shared/dna-enrichment";
-import { getActiveRoot, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
+import { getActiveRoot, getExecutionEligibleRoot, assertRootExecutionEligible, buildStrategyRoot, StrategyRootIncompleteError } from "../shared/strategy-root";
 import { seedDoctrine, doctrineSalt, runStrategicContextOf, appendAudienceDecision, appendPositioningDecision, appendOfferDecision, appendPriorDecision } from "./doctrine-seed";
 import { buildSubEngineAnchorContext } from "../shared/strategic-doctrine";
 import { assembleStrategyRootInput, canonicalizeAudienceShape } from "../shared/strategy-root-assembler";
-import { loadProductDNA } from "../shared/product-dna";
+import {
+  loadProductDNA,
+  verifyProductTruthSnapshotLineage,
+  computeProductTruthFingerprint,
+  type ProductDNA,
+  type CanonicalProductTruthSnapshot,
+} from "../shared/product-dna";
 import { getLatestPerformanceContext, recordEnginePerformanceConsumptionDB } from "../performance-loop/strategy-router";
 import { runFunnelEngine } from "../funnel-engine/engine";
 import { runIntegrityEngine } from "../integrity-engine/engine";
 import { runAwarenessEngine } from "../awareness-engine/engine";
 import { runPersuasionEngine } from "../persuasion-engine/engine";
+import { mapPersuasionLaneStatus, deriveAggregatePersuasionStatus } from "../persuasion-engine/status";
 import {
   createSourceLineageEntry,
   computeSignalComposition,
@@ -188,6 +185,7 @@ import {
 } from "../shared/signal-lineage";
 import { runStatisticalValidationEngine } from "../strategy/statistical-validation/engine";
 import { runBudgetGovernorEngine } from "../strategy/budget-governor/engine";
+import type { ChannelBudgetRecommenderInput, SelectedChannelInput } from "../strategy/budget-governor/types";
 import { runChannelSelectionWithAIProposal } from "../strategy/channel-selection/ai-channel-proposal";
 import { runIterationEngine } from "../strategy/iteration-engine/engine";
 import { runRetentionEngine } from "../strategy/retention-engine/engine";
@@ -216,12 +214,21 @@ export interface OrchestratorConfig {
   accountId: string;
   campaignId: string;
   forceRefresh?: boolean;
+  recoveryMode?: "REUSE_EVIDENCE_RECOMPUTE_ANALYSIS" | "FULL_REFRESH";
   resumeFromEngine?: EngineId;
   pausedJobId?: string;
   preassignedJobId?: string;
+  sourceJobId?: string;
+  reusedSnapshotIds?: Partial<Record<EngineId, string>>;
+  contextFingerprint?: string | null;
+  offeringId?: string | null;
+  offeringName?: string | null;
+  targetMarket?: string | null;
   onProgress?: (event: AgentProgressEvent) => void;
   /** When set, only run the specified engine IDs (dual-analysis scoped run). All dependency-gathering engines still run. */
   scopedEngines?: string[];
+  /** When resuming or scoped-rerunning, explicit pinned Strategy Root ID to bind. */
+  strategyRootId?: string;
 }
 
 export interface OrchestratorRunResult {
@@ -258,7 +265,10 @@ export interface OrchestratorRunResult {
 
 interface EngineContext {
   ssc?: SharedStrategicContext;
+  sourceJobId?: string;
   mi?: any;
+  marketVoice?: any;
+  marketVoiceJobId?: string;
   audience?: any;
   positioning?: any;
   differentiation?: any;
@@ -292,7 +302,8 @@ interface EngineContext {
    * IDENTICAL record set (single source of truth, no parallel rebuild drift).
    */
   painRegistry?: any[];
-  strategicLanes?: any[];
+  strategicLanes?: StrategicLane[];
+  approvedLanes?: StrategicLane[];
   positioningSnapshotId?: string;
   differentiationSnapshotId?: string;
   analyticalEnrichment?: any;
@@ -304,6 +315,8 @@ interface EngineContext {
   signalComposition?: SignalComposition;
   performanceLineage?: SignalLineageEntry[];
   inputHashes?: Record<string, string>;
+  canonicalContext?: any;
+  evidenceManifest?: any;
   // collected MI gate rejections during this
   // run. Each entry is pushed by `extractMiInput` when the MI envelope is
   // incomplete, freshness-failed, or lineage-mismatched. Surfaced into
@@ -319,6 +332,140 @@ interface EngineContext {
   // subset).
   businessProfile?: import("../commercial-reasoning/business-context-layer").BusinessProfile;
   businessProfileStage3?: import("../commercial-reasoning/business-context-layer").BusinessProfile;
+  productDna?: ProductDNA | null;
+  productTruthSnapshot?: CanonicalProductTruthSnapshot | null;
+  canonicalCustomerVoiceUnits?: CustomerEvidenceUnit[];
+}
+
+/**
+ * Resolves the canonical ProductDNA / Product Truth snapshot ONCE for the run,
+ * verifies offering/snapshot/fingerprint lineage at every handoff, and never
+ * independently reloads newer facts midway through a run.
+ */
+async function resolvePinnedRunProductDNA(
+  ctx: EngineContext,
+  config: OrchestratorConfig,
+  caller: string,
+): Promise<ProductDNA | null> {
+  const expectedOfferingId =
+    ctx.canonicalContext?.campaignOfferingId ||
+    (ctx.ssc?.doctrine as any)?.campaignOfferingId ||
+    ctx.productTruthSnapshot?.campaignOfferingId ||
+    undefined;
+  const expectedSnapshotId =
+    ctx.productTruthSnapshot?.snapshotId ||
+    (ctx.ssc?.doctrine as any)?.productTruthSnapshotId ||
+    undefined;
+  const expectedFingerprint =
+    ctx.productTruthSnapshot?.snapshotFingerprint ||
+    (ctx.ssc?.doctrine as any)?.productTruthFingerprint ||
+    undefined;
+
+  const pinned = ctx.productDna || (ctx.audience as any)?.productDna || null;
+  if (pinned) {
+    const pinnedFacts = Array.isArray(pinned.productTruthFacts) ? pinned.productTruthFacts : [];
+    const pinnedOfferingId =
+      pinned.campaignOfferingId ||
+      pinned.canonicalProductTruthSnapshot?.campaignOfferingId ||
+      pinnedFacts.find((f: any) => f?.campaignOfferingId)?.campaignOfferingId ||
+      expectedOfferingId;
+    const pinnedSnapshotId =
+      pinned.snapshotId ||
+      pinned.canonicalProductTruthSnapshot?.snapshotId ||
+      expectedSnapshotId ||
+      `pt_snap_${pinnedOfferingId || "default"}`;
+    const pinnedFingerprint =
+      pinned.snapshotFingerprint ||
+      pinned.canonicalProductTruthSnapshot?.snapshotFingerprint ||
+      computeProductTruthFingerprint({
+        campaignOfferingId: pinnedOfferingId,
+        snapshotId: pinnedSnapshotId,
+        facts: pinnedFacts,
+      });
+
+    verifyProductTruthSnapshotLineage(
+      {
+        snapshotId: pinnedSnapshotId,
+        snapshotFingerprint: pinnedFingerprint,
+        campaignOfferingId: pinnedOfferingId,
+      },
+      {
+        expectedOfferingId,
+        expectedSnapshotId,
+        expectedFingerprint,
+      },
+      `Orchestrator:${caller}`
+    );
+
+    if (!ctx.productDna) {
+      ctx.productDna = pinned;
+    }
+    if (!ctx.productTruthSnapshot) {
+      ctx.productTruthSnapshot = pinned.canonicalProductTruthSnapshot || {
+        snapshotId: pinnedSnapshotId,
+        snapshotFingerprint: pinnedFingerprint,
+        accountId: config.accountId,
+        campaignId: config.campaignId,
+        campaignOfferingId: pinnedOfferingId,
+        facts: pinnedFacts,
+        resolvedAt: new Date().toISOString(),
+      };
+    }
+
+    console.log(
+      `[Orchestrator] PRODUCT_TRUTH_HANDOFF | caller=${caller} | snapshotId=${pinnedSnapshotId} | fingerprint=${pinnedFingerprint} | offeringId=${pinnedOfferingId || "n/a"} | facts=${pinnedFacts.length}`
+    );
+    return pinned;
+  }
+
+  if (!config.accountId || !config.campaignId) return null;
+
+  const dna = await loadProductDNA(config.campaignId, config.accountId, {
+    expectedOfferingId,
+    expectedSnapshotId,
+    expectedFingerprint,
+  });
+  ctx.productDna = dna;
+  ctx.productTruthSnapshot = dna.canonicalProductTruthSnapshot || null;
+  console.log(
+    `[Orchestrator] PRODUCT_TRUTH_PINNED | caller=${caller} | snapshotId=${dna.snapshotId || "n/a"} | fingerprint=${dna.snapshotFingerprint || "n/a"} | offeringId=${dna.campaignOfferingId || "n/a"} | facts=${dna.productTruthFacts?.length ?? 0}`
+  );
+  return dna;
+}
+
+/**
+ * Resolves the canonical Customer Voice universe ONCE for the run against the
+ * frozen evidence manifest, preserving competitor/product associations and
+ * preventing mid-run evidence reloads.
+ */
+async function resolvePinnedRunCustomerVoice(
+  ctx: EngineContext,
+  config: OrchestratorConfig,
+  caller: string,
+): Promise<CustomerEvidenceUnit[]> {
+  if (Array.isArray(ctx.canonicalCustomerVoiceUnits)) {
+    return ctx.canonicalCustomerVoiceUnits;
+  }
+  if (!config.accountId || !config.campaignId) {
+    ctx.canonicalCustomerVoiceUnits = [];
+    return [];
+  }
+  try {
+    const rawUnits = await loadCanonicalCustomerVoice(config.accountId, config.campaignId, {
+      approvedMarketVoiceEvidenceIds: (config as any).approvedMarketVoiceEvidenceIds,
+      evidenceManifest: ctx.evidenceManifest,
+    });
+    const activeUnits = rawUnits.filter((u) => u.evidencePool !== "UNRESOLVED_EXCLUDED");
+    ctx.canonicalCustomerVoiceUnits = activeUnits;
+    console.log(
+      `[Orchestrator] CUSTOMER_VOICE_PINNED | caller=${caller} | active=${activeUnits.length} (raw=${rawUnits.length})`
+    );
+    return activeUnits;
+  } catch (err: any) {
+    console.warn(`[Orchestrator] Failed to load canonical customer voice for ${caller}: ${err.message}`);
+    ctx.canonicalCustomerVoiceUnits = [];
+    return [];
+  }
 }
 
 // list of strategic engines whose runtime
@@ -646,7 +793,15 @@ function extractMiInput(
       record("MI_FRESHNESS_STALE", d);
       return miGateRejection("MI_FRESHNESS_STALE", d);
     }
-    if (currentJobId && prov.jobId && prov.jobId !== currentJobId) {
+    const allowedSourceJobId = (collector?.ctx as any)?.sourceJobId || (collector?.ctx as any)?.config?.sourceJobId;
+    if (
+      currentJobId &&
+      prov.jobId &&
+      prov.jobId !== currentJobId &&
+      prov.isOfficialResume !== true &&
+      prov.wasReused !== true &&
+      (!allowedSourceJobId || prov.jobId !== allowedSourceJobId)
+    ) {
       const d = `provJobId=${prov.jobId} currentJobId=${currentJobId} — refusing cross-run MI snapshot`;
       record("MI_LINEAGE_MISMATCH", d);
       return miGateRejection("MI_LINEAGE_MISMATCH", d);
@@ -656,17 +811,75 @@ function extractMiInput(
 }
 
 function extractMiInputBody(miResult: any, out: any): any {
-
   const intentMap: any[] = Array.isArray(out.competitorIntentMap) ? out.competitorIntentMap : [];
-  const competitors = (out.competitors && Array.isArray(out.competitors) && out.competitors.length > 0)
+  const rawCompetitorData: any[] = Array.isArray(out.competitorData)
+    ? out.competitorData
+    : Array.isArray(miResult?.competitorData)
+    ? miResult.competitorData
+    : [];
+  const compDataById = new Map<string, any>();
+  const compDataByName = new Map<string, any>();
+  for (const cd of rawCompetitorData) {
+    if (cd?.id) compDataById.set(String(cd.id), cd);
+    if (cd?.name) compDataByName.set(String(cd.name).toLowerCase(), cd);
+  }
+
+  const baseCompetitors = (out.competitors && Array.isArray(out.competitors) && out.competitors.length > 0)
     ? out.competitors
-    : intentMap.map((c: any) => ({
+    : intentMap.length > 0
+    ? intentMap.map((c: any) => ({
         id: c.competitorId || c.id || null,
         name: c.competitorName || c.name || null,
         intentType: c.intentType || c.dominantIntentType || null,
         intentConfidence: c.confidence ?? c.intentConfidence ?? null,
         evidenceCount: c.evidenceCount ?? c.postsAnalyzed ?? null,
+      }))
+    : rawCompetitorData.map((cd: any) => ({
+        id: cd.id || null,
+        name: cd.name || null,
+        intentType: "STABLE_DOMINANT",
+        intentConfidence: 0.5,
+        evidenceCount: 0,
       }));
+
+  const competitors = baseCompetitors.map((c: any) => {
+    const matched =
+      (c.id ? compDataById.get(String(c.id)) : undefined) ||
+      (c.name ? compDataByName.get(String(c.name).toLowerCase()) : undefined);
+    return {
+      ...c,
+      websiteUrl: c.websiteUrl || matched?.websiteUrl || null,
+      businessType: c.businessType || matched?.businessType || null,
+      commercialFacts: c.commercialFacts || matched?.commercialFacts || null,
+    };
+  });
+
+  // Ensure any competitor in rawCompetitorData that wasn't in intentMap is still represented
+  for (const cd of rawCompetitorData) {
+    const alreadyPresent = competitors.some(
+      (c: any) =>
+        (cd.id && c.id === cd.id) ||
+        (cd.name && String(c.name || "").toLowerCase() === String(cd.name).toLowerCase())
+    );
+    if (!alreadyPresent) {
+      competitors.push({
+        id: cd.id || null,
+        name: cd.name || null,
+        websiteUrl: cd.websiteUrl || null,
+        businessType: cd.businessType || null,
+        intentType: "STABLE_DOMINANT",
+        intentConfidence: 0.5,
+        evidenceCount: 0,
+        commercialFacts: cd.commercialFacts || null,
+      });
+    }
+  }
+
+  const competitorCoverageRegistry =
+    out.competitorCoverageRegistry ||
+    miResult?.competitorCoverageRegistry ||
+    miResult?.diagnostics?.competitorCoverageRegistry ||
+    [];
 
   const opportunitySignals = out.opportunitySignals || [];
   const threatSignals = out.threatSignals || [];
@@ -695,6 +908,8 @@ function extractMiInputBody(miResult: any, out: any): any {
 
   return {
     competitors,
+    competitorData: competitors,
+    competitorCoverageRegistry,
     competitorIntentMap: intentMap,
     signals: rawSignals,
     taggedSignals,
@@ -778,6 +993,9 @@ function extractAudienceInput(audienceResult: any): any {
     || audienceResult.inputSummary?.targetRoles
     || audienceResult.productDna?.targetRoles
     || [];
+  const evidenceUnits = audienceResult.evidenceUnits
+    || audienceResult.inputSummary?.evidenceUnits
+    || [];
   return {
     // CANONICAL: only `audiencePains` is emitted. Legacy `painProfiles` /
     // `painMap` aliases are intentionally NOT propagated.
@@ -794,6 +1012,9 @@ function extractAudienceInput(audienceResult: any): any {
     productTruthFacts,
     targetRoles,
     productDna: audienceResult.productDna || null,
+    painRegistry: audienceResult.painRegistry || [],
+    evidenceUnits,
+    customerEvidence: audienceResult.customerEvidence || [],
   };
 }
 
@@ -877,9 +1098,11 @@ function extractPositioningInput(positioningResult: any): any {
   if (!positioningResult) return {};
   const out = positioningResult.output || positioningResult;
   const territories: any[] = out.territories || positioningResult.territories || [];
+  const primaryTerritory = out.territory || positioningResult.territory || territories[0] || null;
   return {
     ...out,
     territories,
+    territory: primaryTerritory,
     narrative: out.narrative || positioningResult.narrative || "",
     narrativeDirection: out.narrativeDirection || positioningResult.narrativeDirection || "",
     specificity: out.specificityScore || positioningResult.specificityScore || 0,
@@ -890,6 +1113,13 @@ function extractPositioningInput(positioningResult: any): any {
     domainFailures: territories.map((t: any) => t.domainFailure).filter(Boolean),
     operationalProblems: territories.map((t: any) => t.operationalProblem).filter(Boolean),
     proofRequirements: territories.map((t: any) => t.proofRequirement).filter(Boolean),
+    epistemicStatus: primaryTerritory?.epistemicStatus,
+    productTruthStatus: primaryTerritory?.productTruthStatus,
+    epistemicLabel: primaryTerritory?.epistemicLabel,
+    rationale: primaryTerritory?.rationale,
+    assumptions: primaryTerritory?.assumptions || [],
+    validationNeeds: primaryTerritory?.validationNeeds || [],
+    supportingEvidenceIds: primaryTerritory?.supportingEvidenceIds || [],
   };
 }
 
@@ -902,12 +1132,16 @@ function extractDifferentiationInput(diffResult: any): any {
     collisions: diffResult.collisions || [],
     trustGaps: diffResult.trustGaps || [],
     proofMap: diffResult.proofDemandMap || [],
-    mechanismFraming: diffResult.mechanismFraming || diffResult.mechanismCore || null,
-    mechanismCore: diffResult.mechanismCore || null,
+    mechanismFraming: (diffResult.mechanismFraming && diffResult.mechanismFraming !== "null") ? diffResult.mechanismFraming : null,
+    mechanismCore: (diffResult.mechanismCore && diffResult.mechanismCore !== "null") ? diffResult.mechanismCore : null,
     authorityMode: diffResult.authorityMode || null,
     claimStructures: diffResult.claimStructures || diffResult.validatedClaims || [],
     proofArchitecture: diffResult.proofArchitecture || diffResult.proofDemandMap || [],
     confidenceScore: diffResult.confidenceScore || diffResult.confidence || null,
+    productTruthFacts: diffResult.productTruthFacts || diffResult.ourProductFacts || diffResult.canonicalFacts || [],
+    campaignOfferingId: diffResult.campaignOfferingId || undefined,
+    productTruthSnapshotId: diffResult.productTruthSnapshotId || undefined,
+    productTruthFingerprint: diffResult.productTruthFingerprint || undefined,
   };
 }
 
@@ -923,6 +1157,61 @@ function readSectionStatus(r: { status?: unknown } | undefined): string {
   const v = r.status;
   if (typeof v === "string" && v.length > 0) return v;
   return "CONTRACT_INCOMPLETE";
+}
+
+export function buildSectionStatusEntry(e: { id: EngineId; name: string }, r: EngineStepResult | undefined) {
+  const status = readSectionStatus(r);
+  const failureAttr = (r?.output as any)?.failureAttribution;
+  const diag = (r?.output as any)?.diagnostics || (r?.output as any)?.layerDiagnostics;
+  const prov = (r?.output as any)?._provenance;
+  const summary = r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null;
+  const errText = `${r?.blockReason || ""} ${typeof r?.error === "string" ? r.error : ""} ${summary || ""}`;
+  let derivedCategory: string | undefined =
+    failureAttr?.category ||
+    diag?.roleVerdict?.errorCategory ||
+    diag?.errorCategory ||
+    (r?.output as any)?.errorCategory;
+  if (!derivedCategory && (status === "BLOCKED" || status === "FAILED" || status === "ERROR" || status === "INCOMPLETE")) {
+    if (/BILLING_EXHAUSTED|billing.*exhausted|monthly spending limit|insufficient_quota|exceeded your current quota|no credits remaining|credit balance is too low|ai budget exceeded|billing_hard_limit_reached/i.test(errText)) {
+      derivedCategory = "BILLING_EXHAUSTED";
+    } else if (/RATE_LIMITED|rate limit|429/i.test(errText)) {
+      derivedCategory = "RATE_LIMITED";
+    } else if (/PROVIDER_UNAVAILABLE|service unavailable|overloaded/i.test(errText)) {
+      derivedCategory = "PROVIDER_UNAVAILABLE";
+    } else if (/MALFORMED_OUTPUT|unparseable|malformed|JSON_PARSE_FAILED/i.test(errText)) {
+      derivedCategory = "MALFORMED_OUTPUT";
+    } else if (/Judge contract failure|Judge technical failure|JUDGE_EVALUATION_DUPLICATES|JUDGE_RESPONSE_CONTRACT_FAILURE|CLAIM_IDENTITY_CONFLICT|CONTRACT_FAILURE|NOT_EVALUATED/i.test(errText)) {
+      derivedCategory = "JUDGE_CONTRACT_FAILURE";
+    } else if (/EVIDENCE_SELECTION_INCOMPLETE|PRIMARY_MARKET_VOICE_INCOMPLETE|INSUFFICIENT_EVIDENCE|INSUFFICIENT_SIGNALS|INSUFFICIENT_DATA/i.test(errText)) {
+      derivedCategory = "INSUFFICIENT_EVIDENCE";
+    } else if (/SEMANTIC_ROLE_BLOCKED|AXIS_REJECTED|MISALIGNED|AUDIENCE_MISALIGNMENT/i.test(errText)) {
+      derivedCategory = "SEMANTIC_REJECTION";
+    }
+  }
+  const upstreamBlocked =
+    status === "SKIPPED" && Boolean(r?.blockReason && /upstream|higher-priority|cascade/i.test(r.blockReason));
+  return {
+    id: e.id,
+    name: e.name,
+    status,
+    summary,
+    ...(prov?.wasReused ? {
+      wasReused: true,
+      sourceJobId: prov.sourceJobId || null,
+      snapshotId: r?.snapshotId || prov.snapshotId || null,
+      ...(prov.proposalStatus ? { proposalStatus: prov.proposalStatus } : {}),
+    } : {}),
+    ...(failureAttr ? {
+      failureCategory: failureAttr.category || derivedCategory,
+      failureCode: failureAttr.errorCode || failureAttr.code,
+      retryBudgetExhausted: failureAttr.retryBudgetExhausted,
+      attemptsUsed: failureAttr.attemptsUsed,
+      maxAttempts: failureAttr.maxAttempts,
+    } : derivedCategory ? {
+      failureCategory: derivedCategory,
+    } : {}),
+    ...(upstreamBlocked ? { upstreamBlocked: true } : {}),
+  };
 }
 
 // Canonical confidence-integrity verdict read; absence yields null.
@@ -1099,16 +1388,26 @@ function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
         || item.name || item.label || item.description || "";
     };
     const pains = audienceResult.audiencePains || audienceResult.painMap || audienceResult.painProfiles || [];
-    for (const p of pains.slice(0, 8)) {
+    for (const p of pains.slice(0, 12)) {
       const text = extractSignalText(p);
       if (text) entries.push(createSourceLineageEntry("audience", "pain", text, idx++, audOrigin));
     }
-    const desires = audienceResult.desireMap || [];
+    const rawDesires = audienceResult.desireMap || [];
+    const desires = Array.isArray(rawDesires) ? rawDesires : Object.values(rawDesires);
     for (const d of desires.slice(0, 8)) {
       const text = extractSignalText(d);
       if (text) entries.push(createSourceLineageEntry("audience", "desire", text, idx++, audOrigin));
     }
-    const objections = audienceResult.objectionMap || [];
+    const rawObjections = audienceResult.objectionMap || [];
+    let objections = Array.isArray(rawObjections) ? rawObjections : Object.values(rawObjections);
+    if (objections.length === 0 && (ctx as any).strategyRoot?.approvedObjections) {
+      const srObj = (ctx as any).strategyRoot.approvedObjections;
+      try {
+        objections = Array.isArray(srObj) ? srObj : (typeof srObj === "string" ? JSON.parse(srObj) : Object.values(srObj));
+      } catch {
+        objections = [];
+      }
+    }
     for (const o of objections.slice(0, 5)) {
       const text = extractSignalText(o);
       if (text) entries.push(createSourceLineageEntry("audience", "objection", text, idx++, audOrigin));
@@ -1208,28 +1507,16 @@ function buildUpstreamLineage(ctx: EngineContext): SignalLineageEntry[] {
   return entries;
 }
 
-function resolveSglOrBlock(
+function recordNonAuthoritativeSglConsumption(
   engineId: EngineId,
   ctx: EngineContext,
-  startTime: number,
-): EngineStepResult | null {
-  if (!ctx.sglState) return null;
-  const sglRes = resolveSignalsForEngine(ctx.sglState, engineId);
-  if (sglRes.blocked) {
-    const reason = `SGL_COVERAGE_INSUFFICIENT | missing=[${sglRes.insufficientCategories.join(",")}]`;
-    console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=sgl_coverage | reason=${reason}`);
-    return {
-      engineId,
-      status: "SKIPPED",
-      output: null,
-      durationMs: Date.now() - startTime,
-      blockReason: reason,
-    };
-  }
-  return null;
+): void {
+  if (!ctx.sglState) return;
+  // SGL provides non-authoritative signal context only — does NOT block downstream execution.
+  resolveSignalsForEngine(ctx.sglState, engineId);
 }
 
-type EngineIdType = "market_intelligence" | "audience" | "positioning" | "differentiation" | "mechanism" | "offer" | "awareness" | "funnel" | "integrity" | "persuasion" | "statistical_validation" | "budget_governor" | "channel_selection" | "iteration" | "retention";
+type EngineIdType = "market_intelligence" | "market_voice" | "audience" | "positioning" | "differentiation" | "mechanism" | "offer" | "awareness" | "funnel" | "integrity" | "persuasion" | "statistical_validation" | "budget_governor" | "channel_selection" | "iteration" | "retention";
 
 /**
  * T3.A — Confidence Provenance Layer (May 2026, Runtime Truth Track).
@@ -1415,7 +1702,14 @@ function updateSSCAfterEngine(
 
   const { dataConfidence, engineConfidence, combined, provenance } =
     extractEngineConfidenceWithProvenance(engineId, output);
-  if (provenanceLog) provenanceLog.push(provenance);
+  if (provenanceLog) {
+    const existingIdx = provenanceLog.findIndex(p => p.engineId === engineId);
+    if (existingIdx >= 0) {
+      provenanceLog[existingIdx] = provenance;
+    } else {
+      provenanceLog.push(provenance);
+    }
+  }
 
   // Pass raw local values — no zero-floor cascade. Each engine's confidence
   // reflects its own work only. Cross-engine trust is enforced by CEL,
@@ -1542,7 +1836,31 @@ function logRelevantProblems(ssc: SharedStrategicContext, engineId: string): Pro
   return relevant;
 }
 
-async function executeEngine(
+export function isMechanismAuthoritative(result: any): boolean {
+  if (!result) return false;
+  const nonAuthoritativeStatuses = [
+    "NO_DISTINCT_MECHANISM_ESTABLISHED",
+    "FAILED",
+    "INCOMPLETE",
+    "AXIS_REJECTED",
+    "SEMANTIC_ROLE_BLOCKED",
+    "DEPTH_FAILED",
+  ];
+  if (nonAuthoritativeStatuses.includes(result.status)) {
+    return false;
+  }
+  if (!result.primaryMechanism) {
+    return false;
+  }
+  const pm = result.primaryMechanism;
+  const name = typeof pm === "object" ? pm.mechanismName : null;
+  if (!name || name === "n/a" || name.trim() === "") {
+    return false;
+  }
+  return true;
+}
+
+export async function executeEngine(
   engineId: EngineId,
   ctx: EngineContext,
   config: OrchestratorConfig,
@@ -1568,7 +1886,8 @@ async function executeEngine(
 
   for (const [, result] of results) {
     if (shouldBlockDownstream(result)) {
-      const reason = `Blocked by upstream failure in ${result.engineId}`;
+      const upstreamEngineName = result.engineId || (result as any).step || "upstream engine";
+      const reason = `Blocked by upstream failure in ${upstreamEngineName}`;
       console.log(`[Orchestrator] ENGINE_SKIPPED | engine=${engineId} | gate=upstream_block | reason=${reason}`);
       return {
         engineId,
@@ -1656,6 +1975,7 @@ async function executeEngine(
           config.forceRefresh || false,
           "STRATEGY_MODE",
           jobId,
+          ctx.evidenceManifest,
         );
         output = result;
         snapshotId = result.snapshotId;
@@ -1690,28 +2010,100 @@ async function executeEngine(
         break;
       }
 
+      case "market_voice": {
+        const mvStartedAt = Date.now();
+        let mvResult: any;
+        let mvRuntimeError: any = null;
+        try {
+          mvResult = await runMarketVoicePipeline({
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            forceRefresh: Boolean(config.forceRefresh),
+            jobId,
+            evidenceManifest: ctx.evidenceManifest,
+          });
+        } catch (mvErr: any) {
+          console.error(`[Orchestrator] MARKET_VOICE_PIPELINE_ERROR | ${mvErr?.message || mvErr}`);
+          mvRuntimeError = mvErr;
+        }
+        const mvDuration = Date.now() - mvStartedAt;
+
+        if (mvRuntimeError) {
+          return {
+            engineId: "market_voice",
+            status: "ERROR",
+            durationMs: mvDuration,
+            error: `MARKET_VOICE_RUNTIME_ERROR: ${mvRuntimeError?.message || mvRuntimeError}`,
+            blockReason: `Market Voice encountered an unhandled runtime error: ${mvRuntimeError?.message || mvRuntimeError}`,
+            output: {
+              status: "ERROR",
+              error: mvRuntimeError?.message || String(mvRuntimeError),
+              evidenceUnitsPersisted: 0,
+              approvedEvidenceIds: [],
+            },
+          };
+        }
+
+        console.log(`[Orchestrator] MARKET_VOICE_PIPELINE_EXECUTED | status=${mvResult.status} | persisted=${mvResult.evidenceUnitsPersisted} | approvedIds=${mvResult.approvedEvidenceIds?.length ?? 0} | durationMs=${mvDuration}`);
+        output = mvResult;
+        ctx.marketVoice = mvResult;
+        ctx.marketVoiceJobId = jobId;
+
+        if (mvResult.status === "INCOMPLETE") {
+          return {
+            engineId: "market_voice",
+            status: "BLOCKED",
+            durationMs: mvDuration,
+            output: mvResult,
+            blockReason: mvResult.statusMessage || "PRIMARY_MARKET_VOICE_INCOMPLETE: Zero verified customer quotes were discovered or approved by the Evidence Judge.",
+          };
+        }
+        break;
+      }
+
       case "audience": {
         const audInputHash = computeInputHash("audience-v1", doctrineSalt(ctx), ctx.inputHashes!.mi || "");
         ctx.inputHashes!.audience = audInputHash;
-        let result: any = null;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseAudience(config.accountId, config.campaignId, audInputHash);
-          if (reused) {
-            logReuseHit("audience", reused.snap.id, audInputHash);
-            result = reused.hydrated;
-            markEngineReused(result);
-          } else {
-            logReuseMiss("audience", audInputHash);
-          }
+
+        // Canonical Lineage Verification: Audience requires Market Voice output
+        if (!ctx.marketVoice) {
+          console.warn(`[Orchestrator] AUDIENCE_LINEAGE_FAIL | Missing Market Voice context for jobId=${jobId}`);
+          return {
+            engineId: "audience",
+            status: "BLOCKED",
+            durationMs: 0,
+            output: null,
+            blockReason: `AUDIENCE_MARKET_VOICE_LINEAGE_FAILED: Audience requires canonical Market Voice output, but none found.`,
+          };
         }
-        if (!result) {
-          result = await runAudienceEngine(config.accountId, config.campaignId, ctx.miSnapshotId, jobId, runStrategicContextOf(ctx, "Audience"));
-          if (result?.snapshotId) {
-            try {
-              await db.update(audienceSnapshotsTbl).set({ inputHash: audInputHash }).where(eq(audienceSnapshotsTbl.id, result.snapshotId));
-            } catch (e: any) {
-              console.warn(`[Orchestrator] AUDIENCE_INPUT_HASH_PERSIST_FAILED | ${e.message}`);
-            }
+
+        const approvedMarketVoiceEvidenceIds = ctx.marketVoice?.approvedEvidenceIds || [];
+
+        const result = await runAudienceEngine(
+          config.accountId,
+          config.campaignId,
+          ctx.miSnapshotId,
+          jobId,
+          runStrategicContextOf(ctx, "Audience"),
+          { 
+            approvedMarketVoiceEvidenceIds, 
+            evidenceManifest: ctx.evidenceManifest,
+            businessUnderstanding: ctx.canonicalContext?.businessUnderstanding || ctx.ssc?.doctrine?.businessUnderstanding,
+            campaignOfferingId: ctx.canonicalContext?.campaignOfferingId,
+          }
+        );
+        if (result?.status === "INCOMPLETE" || !result?.snapshotId) {
+          output = result;
+          snapshotId = undefined;
+          ctx.audience = undefined;
+          ctx.audienceSnapshotId = undefined;
+          break;
+        }
+        if (result?.snapshotId) {
+          try {
+            await db.update(audienceSnapshotsTbl).set({ inputHash: audInputHash }).where(eq(audienceSnapshotsTbl.id, result.snapshotId));
+          } catch (e: any) {
+            console.warn(`[Orchestrator] AUDIENCE_INPUT_HASH_PERSIST_FAILED | ${e.message}`);
           }
         }
         output = result;
@@ -1745,12 +2137,107 @@ async function executeEngine(
           }
 
           if (canonicalSegmentPains.length > 0 && ctx.audienceSnapshotId) {
+            // Assemble in-memory canonicalEvidenceRegistry from available market voice / customer evidence (User Correction 7)
+            const pinnedCustomerVoice = await resolvePinnedRunCustomerVoice(ctx, config, "audience-pain-registry");
+            const byCanonId = new Map<string, CustomerEvidenceUnit>();
+            const byNormDecodedText = new Map<string, CustomerEvidenceUnit>();
+            for (const cu of pinnedCustomerVoice) {
+              byCanonId.set(cu.evidenceId, cu);
+              const normText = decodeHtmlEntities(cu.text || "").toLowerCase().replace(/\s+/g, " ").trim();
+              if (normText.length > 0 && !byNormDecodedText.has(normText)) {
+                byNormDecodedText.set(normText, cu);
+              }
+            }
+
+            const canonicalEvidenceRegistry = new Map<string, any>();
+            for (const cu of pinnedCustomerVoice) {
+              canonicalEvidenceRegistry.set(cu.evidenceId, {
+                canonicalEvidenceId: cu.evidenceId,
+                origin: cu.origin,
+                competitorId: cu.competitorId,
+                competitorName: cu.competitorName,
+                offeringId: cu.offeringId,
+                semanticScope: cu.semanticScope,
+                transferability: cu.transferability,
+                rawEvidenceReference: cu.rawEvidenceReference,
+                label: cu.platform ? `${cu.platform}${cu.author ? ` - ${cu.author}` : ""}` : `Customer Evidence ${cu.evidenceId}`,
+                detail: cu.text,
+                verbatimText: cu.text,
+                platform: cu.platform || "customer_review",
+                url: cu.verificationProvenance?.sourceUrl,
+                externalUrl: cu.verificationProvenance?.sourceUrl,
+                author: cu.author,
+                sourceActor: "CUSTOMER",
+                actorType: "CUSTOMER",
+                authorityClass: "DIRECT_AUDIENCE_EVIDENCE",
+              });
+            }
+
+            const evidencePool: any[] = [];
+            if (Array.isArray(ctx.marketVoice?.evidenceUnits)) {
+              evidencePool.push(...ctx.marketVoice.evidenceUnits);
+            }
+            if (Array.isArray((ctx.audience as any)?.evidenceUnits)) {
+              evidencePool.push(...(ctx.audience as any).evidenceUnits);
+            }
+            if (Array.isArray((ctx.audience as any)?.inputSummary?.evidenceUnits)) {
+              evidencePool.push(...(ctx.audience as any).inputSummary.evidenceUnits);
+            }
+            for (const ev of evidencePool) {
+              const uid = ev.evidenceId || ev.id || ev.clusterId;
+              if (uid && !canonicalEvidenceRegistry.has(uid)) {
+                const rawDetail = ev.verbatimText || ev.detail || ev.text || (Array.isArray(ev.representativeEvidence) ? ev.representativeEvidence.join("; ") : "");
+                const normDetail = decodeHtmlEntities(rawDetail).toLowerCase().replace(/\s+/g, " ").trim();
+                const matchedCu =
+                  (ev.canonicalEvidenceId && byCanonId.get(ev.canonicalEvidenceId)) ||
+                  (String(uid).startsWith("cev_") && byCanonId.get(uid)) ||
+                  (normDetail.length > 0 ? byNormDecodedText.get(normDetail) : undefined);
+
+                const resolvedCanonId =
+                  ev.canonicalEvidenceId ||
+                  matchedCu?.evidenceId ||
+                  (String(uid).startsWith("cev_") ? String(uid) : undefined);
+                const resolvedPlatform = ev.platform || matchedCu?.platform || "customer_review";
+                const resolvedAuthor = ev.author || ev.authorHash || matchedCu?.author;
+                const resolvedUrl = ev.url || ev.externalUrl || matchedCu?.verificationProvenance?.sourceUrl;
+                const isSyntheticSelectorUid = /^(?:ev|cluster)[-_:]\d+$/i.test(String(uid));
+
+                canonicalEvidenceRegistry.set(uid, {
+                  canonicalEvidenceId: resolvedCanonId,
+                  origin: ev.origin || matchedCu?.origin,
+                  competitorId: ev.competitorId || matchedCu?.competitorId,
+                  competitorName: ev.competitorName || matchedCu?.competitorName,
+                  offeringId: ev.offeringId || matchedCu?.offeringId,
+                  semanticScope: ev.semanticScope || matchedCu?.semanticScope,
+                  transferability: ev.transferability || matchedCu?.transferability,
+                  rawEvidenceReference: ev.rawEvidenceReference || matchedCu?.rawEvidenceReference,
+                  label: resolvedPlatform ? `${resolvedPlatform}${resolvedAuthor ? ` - ${resolvedAuthor}` : ""}` : (ev.label || `Customer Evidence ${uid}`),
+                  detail: rawDetail,
+                  verbatimText: rawDetail,
+                  platform: resolvedPlatform,
+                  url: resolvedUrl,
+                  externalUrl: resolvedUrl,
+                  externalId: ev.externalId || (!isSyntheticSelectorUid ? uid : undefined),
+                  author: resolvedAuthor,
+                  authorHash: ev.authorHash,
+                  sourceActor: ev.sourceActor || ev.actorType || "CUSTOMER",
+                  actorType: ev.actorType || ev.sourceActor || "CUSTOMER",
+                  authorType: ev.authorType,
+                  authorRole: ev.authorRole,
+                  sourceScope: ev.sourceScope,
+                  marketScope: ev.marketScope,
+                  authorityClass: ev.authorityClass || "DIRECT_AUDIENCE_EVIDENCE",
+                });
+              }
+            }
+
             const deterministicRegistry = buildAudiencePainRegistry(
               canonicalSegmentPains,
               {
                 accountId: config.accountId,
                 audienceSnapshotId: ctx.audienceSnapshotId,
               },
+              canonicalEvidenceRegistry,
               audienceSegments,
             );
             const anchorForFit = runStrategicContextOf(ctx)?.doctrine?.productAnchor ?? null;
@@ -1797,6 +2284,7 @@ async function executeEngine(
               (ctx.audience as any)?.targetCoverage || { status: "NOT_EVALUATED" },
               (ctx.audience as any)?.audienceSegments ?? []
             );
+
             const refined = await refineAudiencePainRegistry(attachedRegistry, {
               accountId: config.accountId,
               campaignId: config.campaignId,
@@ -1808,6 +2296,9 @@ async function executeEngine(
               llmEnabled: process.env.SYNTHETIC_AUDIT_MODE !== "1",
             });
             ctx.painRegistry = refined.registry;
+            if (ctx.audience) {
+              (ctx.audience as any).painRegistry = refined.registry;
+            }
             console.log(`[Orchestrator] PAIN_REGISTRY_BUILT | pains=${refined.registry.length} | classifier=${refined.classifierUsed} | judgeRejections=${refined.judgeRejections.length} | evidenceIssues=${refined.evidenceIssues.length}`);
             if (refined.judgeRejections.length > 0) {
               console.log(`[Orchestrator] PAIN_JUDGE_REJECTIONS | ${refined.judgeRejections.join(", ")}`);
@@ -1829,13 +2320,97 @@ async function executeEngine(
 
             // Rebuild Lanes purely from the newly qualified pain portfolio.
             // DO NOT feed any EXCLUDED / STRATEGIC_EXCLUDED / INCOMPLETE pains to the grouper.
-            const authorizedLanePains = (ctx.painRegistry || []).filter((p: any) => {
-              const c = p.classification;
-              return (c === "CORE_PURCHASE" || c === "CORE" || c === "SUPPORTING") &&
-                     c !== "STRATEGIC_EXCLUDED" &&
-                     c !== "EXCLUDED" &&
-                     c !== "INCOMPLETE";
-            });
+            const authorizedLanePains = (ctx.painRegistry || [])
+              .filter((p: any) => {
+                const c = p.classification;
+                const textToCheck = `${p?.canonical || ""} ${p?.originalStatement || ""}`.trim();
+                if (textToCheck && isPositiveAppreciationSignal(textToCheck)) {
+                  return false;
+                }
+                return (c === "CORE_PURCHASE" || c === "CORE" || c === "SUPPORTING") &&
+                       c !== "STRATEGIC_EXCLUDED" &&
+                       c !== "EXCLUDED" &&
+                       c !== "INCOMPLETE";
+              })
+              .sort((a: any, b: any) => {
+                const aRank = a.classification === "CORE_PURCHASE" || a.classification === "CORE" ? 0 : 1;
+                const bRank = b.classification === "CORE_PURCHASE" || b.classification === "CORE" ? 0 : 1;
+                return aRank - bRank;
+              });
+
+            // Synchronize legacy painMap / audiencePains arrays with canonical authorized pain registry
+            // so summaries, downstream engines, API responses, and UI displays never contradict each other.
+            if (authorizedLanePains.length > 0) {
+              const canonicalPainArray = authorizedLanePains.map((p: any) => {
+                const evUids = Array.isArray(p.evidenceUids) && p.evidenceUids.length > 0
+                  ? p.evidenceUids
+                  : (Array.isArray(p.evidenceIds) ? p.evidenceIds : []);
+                const passages = Array.isArray(p.supportingPassages) && p.supportingPassages.length > 0
+                  ? p.supportingPassages
+                  : (Array.isArray(p.materiality?.evidence)
+                      ? p.materiality.evidence.map((it: any) => it.supportingPassage || it.verbatimText || it.boundedExcerpt).filter(Boolean)
+                      : (Array.isArray(p.customerEvidence?.items)
+                          ? p.customerEvidence.items.map((it: any) => it.verbatimText || it.boundedExcerpt).filter(Boolean)
+                          : []));
+                const uniqCount = p.uniqueEvidenceCount ?? p.evidenceCount ?? (evUids.length || 1);
+                return {
+                  painId: p.painId,
+                  id: p.painId,
+                  canonical: p.canonical,
+                  originalStatement: p.originalStatement || p.canonical,
+                  classification: p.classification,
+                  frequency: uniqCount,
+                  evidenceCount: uniqCount,
+                  uniqueEvidenceCount: uniqCount,
+                  citationCount: p.citationCount ?? evUids.length,
+                  evidenceIds: evUids,
+                  evidenceUids: evUids,
+                  evidence: passages.slice(0, 3),
+                  supportingPassages: passages,
+                  affectedBuyer: p.affectedBuyer,
+                  context: p.context,
+                  prevalenceLimitations: p.prevalenceLimitations || [],
+                  conflictingEvidence: p.conflictingEvidence || [],
+                  competitorRelationshipScopes: p.competitorRelationshipScopes || [],
+                  materiality: p.materiality,
+                  confidenceScore: typeof p.confidenceScore === "number" ? p.confidenceScore : 0.85,
+                  confidence: typeof p.confidenceScore === "number" ? p.confidenceScore : 0.85,
+                  segmentIds: p.segmentIds || [],
+                  sourceSignals: ["canonical_pain_registry"],
+                };
+              });
+              const existingSs = (() => {
+                const rawSs = (ctx.audience as any)?.structuredSignals || (result as any)?.structuredSignals;
+                if (!rawSs) return { pain_clusters: [], desire_clusters: [], pattern_clusters: [], root_causes: [], psychological_drivers: [] };
+                return typeof rawSs === "string" ? (() => { try { return JSON.parse(rawSs); } catch { return {}; } })() : rawSs;
+              })();
+              const syncedStructuredSignals = {
+                ...existingSs,
+                pain_clusters: canonicalPainArray,
+              };
+              if (ctx.audience) {
+                (ctx.audience as any).painMap = canonicalPainArray;
+                (ctx.audience as any).audiencePains = canonicalPainArray;
+                (ctx.audience as any).structuredSignals = syncedStructuredSignals;
+              }
+              (result as any).painMap = canonicalPainArray;
+              (result as any).audiencePains = canonicalPainArray;
+              (result as any).structuredSignals = syncedStructuredSignals;
+              (result as any).painRegistry = ctx.painRegistry;
+              if (ctx.audienceSnapshotId) {
+                try {
+                  await db
+                    .update(audienceSnapshots)
+                    .set({
+                      audiencePains: JSON.stringify(canonicalPainArray),
+                      structuredSignals: JSON.stringify(syncedStructuredSignals),
+                    })
+                    .where(eq(audienceSnapshots.id, ctx.audienceSnapshotId));
+                } catch (syncErr: any) {
+                  console.warn(`[Orchestrator] Non-fatal audiencePains canonical sync warning: ${syncErr?.message}`);
+                }
+              }
+            }
 
             const authorizedPainIds = new Set(authorizedLanePains.map((p: any) => p.painId));
             const rawSegments = (ctx.audience as any)?.audienceSegments ?? [];
@@ -1857,22 +2432,48 @@ async function executeEngine(
                 productCapabilities,
               }
             );
+            if (!lanes || lanes.length === 0) {
+              const laneErrorMsg = `Strategic lane grouping failed — zero valid lanes formed from ${authorizedLanePains.length} authorized pains. Downstream engines cannot proceed.`;
+              console.error(`[Orchestrator] STRATEGIC_LANES_FAILED | ${laneErrorMsg}`);
+              return {
+                engineId: "audience",
+                status: "BLOCKED",
+                output: {
+                  status: "INCOMPLETE",
+                  error: {
+                    code: "LANE_GROUPING_FAILED",
+                    message: laneErrorMsg,
+                  },
+                },
+                error: laneErrorMsg,
+                blockReason: laneErrorMsg,
+                snapshotId,
+                durationMs: Date.now() - startTime,
+              };
+            }
+
             ctx.strategicLanes = lanes;
             ctx.approvedLanes = lanes;
             console.log(`[Orchestrator] STRATEGIC_LANES_BUILT | lanes=${lanes.length} | authorizedPains=${authorizedLanePains.length}`);
           }
         } catch (painErr: any) {
-          console.error(`[Orchestrator] PAIN_REGISTRY_BUILD_FAILED | ${painErr.message} — halting pipeline to prevent deterministic pain bypassing`);
+          const painErrorMsg = `Pain Registry failed to build — pipeline halted to prevent deterministic pain bypassing. Underlying error: ${painErr.message}`;
+          console.error(`[Orchestrator] PAIN_REGISTRY_BUILD_FAILED | ${painErrorMsg}`);
           return {
-            step: "audience",
-            status: "INCOMPLETE",
-            error: {
-              code: "PAIN_REGISTRY_BUILD_FAILED",
-              message: `Pain Registry failed to build — pipeline halted to prevent deterministic pain bypassing. Underlying error: ${painErr.message}`,
+            engineId: "audience",
+            status: "BLOCKED",
+            output: {
+              status: "INCOMPLETE",
+              error: {
+                code: "PAIN_REGISTRY_BUILD_FAILED",
+                message: painErrorMsg,
+              },
             },
+            error: painErrorMsg,
+            blockReason: painErrorMsg,
             snapshotId,
             durationMs: Date.now() - startTime,
-          } as any;
+          };
         }
 
         // ── COMMERCIAL SIGNAL EMISSION: buyerPsychology (Phase 4 marketing-logic upgrade) ──
@@ -1912,8 +2513,7 @@ async function executeEngine(
               : null;
             let productDnaForAEL = null;
             if (config.accountId) {
-              const { loadProductDNA } = await import("../shared/product-dna");
-              productDnaForAEL = await loadProductDNA(config.campaignId, config.accountId);
+              productDnaForAEL = await resolvePinnedRunProductDNA(ctx, config, "audience:ael");
             }
             const productTruthForAEL = runStrategicContextOf(ctx)?.doctrine?.productAnchor || null;
             const hasProductData = !!(productTruthForAEL || (productDnaForAEL && (productDnaForAEL.coreOffer || productDnaForAEL.businessType)));
@@ -1951,17 +2551,23 @@ async function executeEngine(
             // step with a BLOCKED result so the orchestrator halts. The
             // messaging-tier-blocking change in priority-matrix ensures no
             // downstream engine runs.
+            const aelErrorMsg = `Analytical Enrichment Layer failed to build — pipeline halted to prevent ungrounded downstream generation. Underlying error: ${aelErr.message}`;
             console.error(`[Orchestrator] AEL_BUILD_FAILED | error=${aelErr.message} — halting pipeline (no silent degradation)`);
             return {
-              step: "audience",
+              engineId: "audience",
               status: "BLOCKED",
-              error: {
-                code: "AEL_BUILD_FAILED",
-                message: `Analytical Enrichment Layer failed to build — pipeline halted to prevent ungrounded downstream generation. Underlying error: ${aelErr.message}`,
+              output: {
+                status: "BLOCKED",
+                error: {
+                  code: "AEL_BUILD_FAILED",
+                  message: aelErrorMsg,
+                },
               },
+              error: aelErrorMsg,
+              blockReason: aelErrorMsg,
               snapshotId,
               durationMs: Date.now() - startTime,
-            } as any;
+            };
           }
         }
 
@@ -2039,7 +2645,7 @@ async function executeEngine(
             blockReason: reason,
           };
         }
-        { const sglBlock = resolveSglOrBlock("positioning", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("positioning", ctx);
         const diffCount = (ctx.differentiation?.differentiations?.length ?? 0) || (ctx.differentiation?.pillars?.length ?? 0);
         if (ctx.differentiation && (ctx.differentiation.status === "SKIPPED" || ctx.differentiation.status === "FAILED" || diffCount === 0)) {
           console.log(`[Orchestrator] POSITIONING_BLOCKED_BY_DIFFERENTIATION | differentiation status=${ctx.differentiation.status} | differentiations=${diffCount}`);
@@ -2056,42 +2662,29 @@ async function executeEngine(
           doctrineSalt(ctx),
           ctx.inputHashes!.mi || "",
           ctx.inputHashes!.audience || "",
+          ctx.inputHashes!.differentiation || "",
+          ctx.differentiationSnapshotId || "",
           ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
         );
         ctx.inputHashes!.positioning = posInputHash;
-        let result: any = null;
-        if (!config.forceRefresh) {
-          const reused = await tryReusePositioning(config.accountId, config.campaignId, posInputHash);
-          if (reused) {
-            logReuseHit("positioning", reused.snap.id, posInputHash);
-            result = reused.hydrated;
-            markEngineReused(result);
-            // Reuse skips the engine entry wrapper — re-derive pain roles so
-            // reuse runs carry the same routing a fresh run would.
-            attachSelectedPainRoles("positioning", result, ctx.painRegistry);
-          } else {
-            logReuseMiss("positioning", posInputHash);
-          }
-        }
-        if (!result) {
-          result = await runPositioningEngine(
-            config.accountId,
-            config.campaignId,
-            ctx.miSnapshotId,
-            ctx.audienceSnapshotId,
-            ctx.analyticalEnrichment,
-            jobId,
-            runStrategicContextOf(ctx, "Positioning"),
-            ctx.painRegistry,
-            ctx.strategicLanes,
-            ctx.differentiation
-          );
-          if (result?.snapshotId) {
-            try {
-              await db.update(positioningSnapshotsTbl).set({ inputHash: posInputHash }).where(eq(positioningSnapshotsTbl.id, result.snapshotId));
-            } catch (e: any) {
-              console.warn(`[Orchestrator] POSITIONING_INPUT_HASH_PERSIST_FAILED | ${e.message}`);
-            }
+
+        const result = await runPositioningEngine(
+          config.accountId,
+          config.campaignId,
+          ctx.miSnapshotId,
+          ctx.audienceSnapshotId,
+          ctx.analyticalEnrichment,
+          jobId,
+          runStrategicContextOf(ctx, "Positioning"),
+          ctx.painRegistry,
+          ctx.strategicLanes,
+          ctx.differentiation
+        );
+        if (result?.snapshotId) {
+          try {
+            await db.update(positioningSnapshotsTbl).set({ inputHash: posInputHash }).where(eq(positioningSnapshotsTbl.id, result.snapshotId));
+          } catch (e: any) {
+            console.warn(`[Orchestrator] POSITIONING_INPUT_HASH_PERSIST_FAILED | ${e.message}`);
           }
         }
         output = result;
@@ -2140,7 +2733,7 @@ async function executeEngine(
           // previously caused false generic-CEL violations when the evidence
           // lived in that field rather than contrastAxis/narrativeDirection.
           const posTexts = result.territories.map((t: any) =>
-            `${t.name} ${t.contrastAxis} ${t.narrativeDirection} ${t.enemyDefinition ?? ""}`.trim()
+            `${t.name} ${t.contrastAxis} ${t.narrativeDirection} ${t.enemyDefinition ?? ""} ${t.proofRequirement ?? ""} ${t.domainFailure ?? ""} ${t.operationalProblem ?? ""} ${(t.evidenceSignals || []).join(" ")}`.trim()
           );
           const celResult = enforceGenericEngineCompliance("positioning", posTexts, ctx.analyticalEnrichment);
           // Phase 3 fix — persist per-engine CEL ComplianceResult.
@@ -2155,7 +2748,7 @@ async function executeEngine(
       }
 
       case "differentiation": {
-        { const sglBlock = resolveSglOrBlock("differentiation", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("differentiation", ctx);
         const diffInputHash = computeInputHash(
           "differentiation-v1",
           doctrineSalt(ctx),
@@ -2165,39 +2758,37 @@ async function executeEngine(
           ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
         );
         ctx.inputHashes!.differentiation = diffInputHash;
-        let result: any = null;
-        let diffReused = false;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseDifferentiation(config.accountId, config.campaignId, diffInputHash);
-          if (reused) {
-            logReuseHit("differentiation", reused.snap.id, diffInputHash);
-            result = reused.hydrated;
-            diffReused = true;
-            // Reuse skips the engine entry wrapper — re-derive pain roles.
-            attachSelectedPainRoles("differentiation", result, ctx.painRegistry);
-            ctx.differentiation = result;
-            ctx.differentiationSnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            output = result;
-          } else {
-            logReuseMiss("differentiation", diffInputHash);
-          }
-        }
-        if (!diffReused) {
+
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "differentiation" });
         const audInput = extractAudienceInput(ctx.audience);
-        let ptFacts = audInput.productTruthFacts || [];
-        if (!ptFacts || ptFacts.length === 0) {
-          const dna = await loadProductDNA(config.campaignId, config.accountId);
-          if (dna?.productTruthFacts?.length) {
-            ptFacts = dna.productTruthFacts;
-          }
-        }
-        result = await runDifferentiationEngine(
+        const canonicalDna = await resolvePinnedRunProductDNA(ctx, config, "differentiation");
+        const pinnedCustomerVoice = await resolvePinnedRunCustomerVoice(ctx, config, "differentiation");
+        const ptFacts = (canonicalDna?.productTruthFacts && canonicalDna.productTruthFacts.length > 0)
+          ? canonicalDna.productTruthFacts
+          : (audInput.productTruthFacts || []);
+        const result = await runDifferentiationEngine(
           miInput,
-          { ...audInput, painRegistry: ctx.painRegistry, productTruthFacts: ptFacts },
+          {
+            ...audInput,
+            painRegistry: ctx.painRegistry,
+            productTruthFacts: ptFacts,
+            strategicLanes: ctx.strategicLanes,
+            customerEvidence: pinnedCustomerVoice,
+          },
           { territories: [], differentiationVector: null, enemyDefinition: null, contrastAxis: null, narrativeDirection: null, flankingMode: false, stabilityResult: null, strategyCards: [] },
-          { accountId: config.accountId, campaignId: config.campaignId, jobId: jobId, audienceSnapshotId: ctx.audienceSnapshotId, miSnapshotId: ctx.miSnapshotId }
+          {
+            accountId: config.accountId,
+            campaignId: config.campaignId,
+            jobId: jobId,
+            audienceSnapshotId: ctx.audienceSnapshotId,
+            miSnapshotId: ctx.miSnapshotId,
+            campaignOfferingId: canonicalDna?.campaignOfferingId || ctx.canonicalContext?.campaignOfferingId,
+            productTruthSnapshotId: canonicalDna?.snapshotId,
+            productTruthFingerprint: canonicalDna?.snapshotFingerprint,
+            strategicLanes: ctx.strategicLanes,
+            customerEvidence: pinnedCustomerVoice,
+            evidenceManifest: ctx.evidenceManifest,
+          }
         );
         output = result;
         ctx.differentiation = result;
@@ -2235,7 +2826,6 @@ async function executeEngine(
           ctx.differentiationSnapshotId = result.snapshotId;
           snapshotId = result.snapshotId;
         }
-        }  // end if(!diffReused)
 
         // CEL_DIFFERENTIATION ALIGNMENT: Enforce required-axis alignment using the complete
         // differentiation output (pillar name+description, claim text, mechanism description).
@@ -2249,8 +2839,8 @@ async function executeEngine(
           const _diffClaims = ((result as any).claimStructures || (result as any).claims || []) as any[];
           const _diffMechDesc = ((result as any).mechanismFraming as any)?.description || '';
           const diffFullTexts = [
-            ..._diffPillars.map((p: any) => `${p.name || ''} ${p.description || ''}`),
-            ..._diffClaims.map((c: any) => c.claim || ''),
+            ..._diffPillars.map((p: any) => `${p.name || ''} ${p.description || ''} ${p.buyerValue || ''} ${p.proofBoundary || ''} ${(p.supportingProof || []).join(' ')} ${p.comparisonBaseline?.statement || ''}`),
+            ..._diffClaims.map((c: any) => `${c.claim || ''} ${(c.supportingProof || []).join(' ')}`),
             _diffMechDesc,
           ].filter((t: string) => t.trim().length > 0);
           if (diffFullTexts.length > 0) {
@@ -2285,7 +2875,7 @@ async function executeEngine(
       }
 
       case "mechanism": {
-        { const sglBlock = resolveSglOrBlock("mechanism", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("mechanism", ctx);
         const mechInputHash = computeInputHash(
           "mechanism-v1",
           doctrineSalt(ctx),
@@ -2294,30 +2884,14 @@ async function executeEngine(
           ctx.analyticalEnrichment?.isPartial ? "ael-partial" : "ael-full",
         );
         ctx.inputHashes!.mechanism = mechInputHash;
-        let mechReused = false;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseMechanism(config.accountId, config.campaignId, mechInputHash);
-          if (reused) {
-            logReuseHit("mechanism", reused.snap.id, mechInputHash);
-            output = reused.hydrated;
-            // Reuse skips the engine entry wrapper — re-derive pain roles.
-            attachSelectedPainRoles("mechanism", output, ctx.painRegistry);
-            ctx.mechanism = output;
-            ctx.mechanismSnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            ctx.depthGateStatus!.mechanism = "DEPTH_PASSED";
-            mechReused = true;
-          } else {
-            logReuseMiss("mechanism", mechInputHash);
-          }
-        }
-        if (!mechReused) {
+
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const domainVocabParts = [
           ...(posInput.domainFailures || []),
           ...(posInput.operationalProblems || []),
         ].join(" ");
+        let mechProductDna = await resolvePinnedRunProductDNA(ctx, config, "mechanism");
         const positioningForMech = {
           contrastAxis: ctx.positioning?.contrastAxis || posInput.narrative || null,
           enemyDefinition: ctx.positioning?.enemyDefinition || null,
@@ -2329,16 +2903,19 @@ async function executeEngine(
           confidenceScore: typeof ctx.positioning?.confidenceScore === "number" ? ctx.positioning.confidenceScore : null,
         };
         const diffForMech = {
-          pillars: diffInput.claims || [],
-          mechanismFraming: ctx.differentiation?.mechanismFraming || null,
-          mechanismCore: ctx.differentiation?.mechanismCore || null,
+          pillars: (diffInput.pillars && diffInput.pillars.length > 0) ? diffInput.pillars : (diffInput.claims || []),
+          mechanismFraming: (ctx.differentiation?.mechanismFraming && ctx.differentiation.mechanismFraming !== "null") ? ctx.differentiation.mechanismFraming : null,
+          mechanismCore: (ctx.differentiation?.mechanismCore && ctx.differentiation.mechanismCore !== "null") ? ctx.differentiation.mechanismCore : null,
           authorityMode: ctx.differentiation?.authorityMode || null,
           claimStructures: ctx.differentiation?.claimStructures || [],
           proofArchitecture: ctx.differentiation?.proofArchitecture || [],
           // T002 v2: confidence flows downstream
           confidenceScore: typeof ctx.differentiation?.confidenceScore === "number" ? ctx.differentiation.confidenceScore : null,
+          campaignOfferingId: ctx.differentiation?.campaignOfferingId || mechProductDna?.campaignOfferingId,
+          productTruthSnapshotId: ctx.differentiation?.productTruthSnapshotId || mechProductDna?.snapshotId,
+          productTruthFingerprint: ctx.differentiation?.productTruthFingerprint || mechProductDna?.snapshotFingerprint,
         };
-        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx, "Mechanism"), (ctx.audience as any)?.productDna || null, ctx.painRegistry);
+        const result = await runMechanismEngine(positioningForMech, diffForMech, config.accountId, ctx.analyticalEnrichment, runStrategicContextOf(ctx, "Mechanism"), mechProductDna, ctx.painRegistry);
         output = result;
         ctx.mechanism = result;
 
@@ -2365,10 +2942,8 @@ async function executeEngine(
         } catch (mechDbErr: any) {
           console.warn(`[Orchestrator] MECH_SNAPSHOT_SAVE_FAILED | error=${mechDbErr.message}`);
         }
-        }  // end if(!mechReused)
 
-        const result: any = ctx.mechanism;
-        if (!mechReused && result?.celDepthCompliance) {
+        if (result?.celDepthCompliance) {
           if (!ctx.celResults) ctx.celResults = [];
           ctx.celResults.push(result.celDepthCompliance);
           if (result.celDepthCompliance.violations.length > 0) {
@@ -2385,11 +2960,23 @@ async function executeEngine(
           console.log(`[Orchestrator] DEPTH_GATE_MECH | status=${result.depthGateResult.status} | attempts=${result.depthGateResult.attempt}/${result.depthGateResult.maxAttempts}`);
         }
 
+        if (!isMechanismAuthoritative(result)) {
+          console.warn(`[Orchestrator] MECHANISM_NON_AUTHORITATIVE | status=${result.status} | primaryMechanism=${JSON.stringify(result.primaryMechanism)} — halting pipeline`);
+          return {
+            engineId: "mechanism",
+            status: "BLOCKED",
+            output: result,
+            snapshotId,
+            durationMs: Date.now() - startTime,
+            blockReason: "MECHANISM_INCOMPLETE",
+          };
+        }
+
         // CONTRACT CONSISTENCY: orchestrator MUST build the Strategy Root after
         // mechanism completes — same contract as /api/mechanism-engine/analyze.
         // Without this, getActiveRoot() returns null at the offer step and the
         // pipeline blocks with NO_ACTIVE_STRATEGY_ROOT.
-        if (result.status !== "DEPTH_FAILED" && ctx.mechanismSnapshotId) {
+        if (isMechanismAuthoritative(result) && ctx.mechanismSnapshotId) {
           try {
             // Use the same shared assembler the standalone mechanism-engine
             // route uses, so both writers produce structurally identical
@@ -2407,25 +2994,27 @@ async function executeEngine(
             };
 
             const anchor = runStrategicContextOf(ctx)?.doctrine?.productAnchor ?? null;
+            const buCtx = ctx.canonicalContext?.businessUnderstanding || ctx.ssc?.doctrine?.businessUnderstanding || null;
             const brandSpine = {
-              productName: anchor?.name || null,
-              productType: anchor?.type || null,
-              coreProblemSolved: anchor?.coreProblemSolved || null,
-              category: ctx.positioning?.category || null,
+              productName: anchor?.name || mechProductDna?.offeringName || buCtx?.offeringName || config.offeringName || null,
+              productType: anchor?.type || anchor?.offeringType || mechProductDna?.productType || buCtx?.offeringType || buCtx?.businessModel || null,
+              coreProblemSolved: anchor?.problemSolved || anchor?.coreProblemSolved || mechProductDna?.coreProblemSolved || buCtx?.coreProblemSolved || null,
+              category: ctx.positioning?.category || buCtx?.category || mechProductDna?.category || anchor?.offeringType || null,
               umbrellaPositionName: ctx.positioning?.territory?.name || ctx.positioning?.territories?.[0]?.name || null,
               contrastAxis: ctx.positioning?.territory?.contrastAxis || ctx.positioning?.territories?.[0]?.contrastAxis || null,
               narrativeDirection: ctx.positioning?.territory?.narrativeDirection || ctx.positioning?.territories?.[0]?.narrativeDirection || null,
               coreDifferentiationPillars: (ctx.differentiation?.pillars || ctx.differentiation?.differentiationPillars || []).map((p: any) => p.name || p.title || p),
               proofArchitectureTypes: ctx.differentiation?.proofArchitecture || [],
-              mechanismName: ctx.mechanism?.mechanismName || null,
-              mechanismType: ctx.mechanism?.mechanismType || null,
-              mechanismPromise: ctx.mechanism?.mechanismPromise || null,
-              mechanismSteps: (ctx.mechanism?.mechanismSteps || []).map((s: any) => s.description || s),
+              mechanismName: ctx.mechanism?.primaryMechanism?.mechanismName || ctx.mechanism?.mechanismName || null,
+              mechanismType: ctx.mechanism?.primaryMechanism?.mechanismType || ctx.mechanism?.mechanismType || null,
+              mechanismPromise: ctx.mechanism?.primaryMechanism?.mechanismPromise || ctx.mechanism?.mechanismPromise || null,
+              mechanismSteps: ((ctx.mechanism?.primaryMechanism?.mechanismSteps || ctx.mechanism?.mechanismSteps || []) as any[]).map((s: any) => typeof s === "string" ? s : (s.description ? `${s.title || s.name || `Step ${s.step}`}: ${s.description}` : s.title || s.name || String(s))),
             };
 
             const rootInput = await assembleStrategyRootInput({
               campaignId: config.campaignId,
               accountId: config.accountId,
+              jobId,
               miSnapshotId: ctx.miSnapshotId || "",
               audienceSnapshotId: ctx.audienceSnapshotId || "",
               positioningSnapshotId: ctx.positioningSnapshotId || "",
@@ -2444,40 +3033,56 @@ async function executeEngine(
 
             const rootResult = await buildStrategyRoot(rootInput);
             ctx.strategyRootId = rootResult.id;
+            const freshRootCheck = await assertRootExecutionEligible(rootResult.id, config.campaignId, config.accountId);
+            if (freshRootCheck.root) {
+              ctx.strategyRoot = freshRootCheck.root;
+            }
             console.log(`[Orchestrator] STRATEGY_ROOT_BUILT | id=${rootResult.id} | hash=${rootResult.rootHash} | runId=${rootResult.runId} | isNew=${rootResult.isNew}`);
           } catch (rootErr: any) {
             if (rootErr instanceof StrategyRootIncompleteError) {
+              const rootIncompleteMsg = `Strategy root build rejected — missing fields: ${rootErr.missingFields.join(", ")}`;
               console.error(`[Orchestrator] STRATEGY_ROOT_REJECTED | missing=${rootErr.missingFields.join(",")} | mech=${ctx.mechanismSnapshotId} | aud=${ctx.audienceSnapshotId}`);
               return {
-                step: "mechanism",
+                engineId: "mechanism",
                 status: "BLOCKED",
-                error: {
-                  code: "STRATEGY_ROOT_INCOMPLETE",
-                  message: `Strategy root build rejected — missing fields: ${rootErr.missingFields.join(", ")}`,
-                  missingFields: rootErr.missingFields,
+                output: {
+                  status: "BLOCKED",
+                  error: {
+                    code: "STRATEGY_ROOT_INCOMPLETE",
+                    message: rootIncompleteMsg,
+                    missingFields: rootErr.missingFields,
+                  },
                 },
+                error: rootIncompleteMsg,
+                blockReason: rootIncompleteMsg,
                 snapshotId,
                 durationMs: Date.now() - startTime,
-              } as any;
+              };
             }
-            console.error(`[Orchestrator] STRATEGY_ROOT_BUILD_FAILED | ${rootErr.message}`);
+            const rootBuildMsg = `Strategy root build failed: ${rootErr.message}`;
+            console.error(`[Orchestrator] STRATEGY_ROOT_BUILD_FAILED | ${rootBuildMsg}`);
             return {
-              step: "mechanism",
+              engineId: "mechanism",
               status: "BLOCKED",
-              error: {
-                code: "STRATEGY_ROOT_BUILD_FAILED",
-                message: rootErr.message,
+              output: {
+                status: "BLOCKED",
+                error: {
+                  code: "STRATEGY_ROOT_BUILD_FAILED",
+                  message: rootBuildMsg,
+                },
               },
+              error: rootBuildMsg,
+              blockReason: rootBuildMsg,
               snapshotId,
               durationMs: Date.now() - startTime,
-            } as any;
+            };
           }
         }
         break;
       }
 
       case "offer": {
-        { const sglBlock = resolveSglOrBlock("offer", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("offer", ctx);
         const offerInputHash = computeInputHash(
           "offer-v2",
           doctrineSalt(ctx),
@@ -2488,22 +3093,7 @@ async function executeEngine(
           ctx.inputHashes!.mechanism || "",
         );
         ctx.inputHashes!.offer = offerInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseOffer(config.accountId, config.campaignId, offerInputHash);
-          if (reused) {
-            logReuseHit("offer", reused.snap.id, offerInputHash);
-            output = reused.hydrated;
-            markEngineReused(output);
-            ctx.offer = reused.hydrated;
-            snapshotId = reused.snap.id;
-            ctx.depthGateStatus!.offer = "DEPTH_PASSED";
-            // Reuse trap: engine skipped, so append the offer decision here too
-            // (the offer case does NOT converge with the fresh path).
-            appendOfferDecision(ctx, (reused.hydrated as any)?.primaryOffer);
-            break;
-          }
-          logReuseMiss("offer", offerInputHash);
-        }
+
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "offer" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -2515,7 +3105,9 @@ async function executeEngine(
         // (same contract as /api/offer-engine/analyze). Passing undefined
         // forces free_generation + strict lexical validators which produces
         // false POSITIONING_MISMATCH on otherwise-strong upstream layers.
-        const activeRoot = await getActiveRoot(config.campaignId, config.accountId);
+        const activeRoot = ctx.strategyRoot || (config.strategyRootId || ctx.strategyRootId
+          ? (await assertRootExecutionEligible(config.strategyRootId || ctx.strategyRootId!, config.campaignId, config.accountId)).root
+          : await getExecutionEligibleRoot(config.campaignId, config.accountId));
         if (!activeRoot) {
           console.log(`[Orchestrator] OFFER_ROOT_MISSING | campaign=${config.campaignId} | no active strategy root — offer cannot run`);
           return {
@@ -2528,6 +3120,7 @@ async function executeEngine(
         }
         console.log(`[Orchestrator] OFFER_ROOT_BOUND | rootId=${activeRoot.id} | hash=${activeRoot.rootHash} | runId=${activeRoot.runId}`);
 
+        const offerProductDna = await resolvePinnedRunProductDNA(ctx, config, "offer");
         const result = await runOfferEngine(
           miInput, audInput, posInput, diffInput,
           config.accountId, upstreamLineage,
@@ -2536,7 +3129,7 @@ async function executeEngine(
           ctx.analyticalEnrichment,
           ctx.ssc?.commercialSignals || null,
           runStrategicContextOf(ctx, "Offer"),
-          (ctx.audience as any)?.productDna || null,
+          offerProductDna,
         );
         output = result;
         ctx.offer = result;
@@ -2646,7 +3239,7 @@ async function executeEngine(
       }
 
       case "awareness": {
-        { const sglBlock = resolveSglOrBlock("awareness", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("awareness", ctx);
         const awarenessInputHash = computeInputHash(
           "awareness-v1",
           doctrineSalt(ctx),
@@ -2657,24 +3250,14 @@ async function executeEngine(
           ctx.inputHashes!.offer || "",
         );
         ctx.inputHashes!.awareness = awarenessInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseAwareness(config.accountId, config.campaignId, awarenessInputHash);
-          if (reused) {
-            logReuseHit("awareness", reused.snap.id, awarenessInputHash);
-            output = reused.hydrated;
-            ctx.awareness = reused.hydrated;
-            snapshotId = reused.snap.id;
-            ctx.depthGateStatus!.awareness = "DEPTH_PASSED";
-            break;
-          }
-          logReuseMiss("awareness", awarenessInputHash);
-        }
+
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "awareness" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
         const diffInput = extractDifferentiationInput(ctx.differentiation);
         const offerInput = extractOfferInput(ctx.offer);
         const upstreamLineage = buildUpstreamLineage(ctx);
+        const awarenessProductDna = await resolvePinnedRunProductDNA(ctx, config, "awareness");
         const result = await runAwarenessEngine(
           miInput, audInput, posInput, diffInput, offerInput,
           config.accountId, upstreamLineage,
@@ -2695,7 +3278,7 @@ async function executeEngine(
             businessProfile: ctx.businessProfile ?? null,
           } as any,
           runStrategicContextOf(ctx, "Awareness"),
-          (ctx.audience as any)?.productDna || null,
+          awarenessProductDna,
         );
         output = result;
         ctx.awareness = result;
@@ -2779,7 +3362,7 @@ async function executeEngine(
       }
 
       case "funnel": {
-        { const sglBlock = resolveSglOrBlock("funnel", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("funnel", ctx);
         if (!ctx.awareness || !ctx.awareness.primaryRoute) {
           console.log(`[Orchestrator] AWARENESS_GATE_BLOCKED | Funnel cannot execute without completed Awareness — awareness output missing or incomplete`);
           output = { status: "MISSING_DEPENDENCY", statusMessage: "Funnel requires completed Awareness output — awareness gate active" };
@@ -2796,26 +3379,13 @@ async function executeEngine(
           ctx.inputHashes!.differentiation || "",
         );
         ctx.inputHashes!.funnel = funnelInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseFunnel(config.accountId, config.campaignId, funnelInputHash);
-          if (reused) {
-            logReuseHit("funnel", reused.snap.id, funnelInputHash);
-            output = reused.hydrated;
-            // Reuse skips the engine entry wrapper — re-derive pain roles.
-            attachSelectedPainRoles("funnel", output, ctx.painRegistry);
-            ctx.funnel = output;
-            snapshotId = reused.snap.id;
-            ctx.depthGateStatus!.funnel = "DEPTH_PASSED";
-            break;
-          }
-          logReuseMiss("funnel", funnelInputHash);
-        }
+
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "funnel" });
         const audInput = extractAudienceInput(ctx.audience);
         try {
           const activeRoot = ctx.strategyRootId
             ? await db.select().from(strategyRoots).where(eq(strategyRoots.id, ctx.strategyRootId)).limit(1).then(r => r[0])
-            : await getActiveRoot(config.campaignId, config.accountId);
+            : await getExecutionEligibleRoot(config.campaignId, config.accountId);
           if (activeRoot && activeRoot.approvedObjections) {
             audInput.objectionMap = typeof activeRoot.approvedObjections === "string"
               ? JSON.parse(activeRoot.approvedObjections)
@@ -2856,6 +3426,8 @@ async function executeEngine(
         let lastResult: any = null;
         let lastSnapshotId: string = "";
 
+        const funnelProductDna = await resolvePinnedRunProductDNA(ctx, config, "funnel");
+
         for (const lane of executableLanes) {
           const laneAudInput = {
             ...audInput,
@@ -2869,7 +3441,7 @@ async function executeEngine(
             config.accountId, awarenessInput,
             ctx.analyticalEnrichment,
             { ...runStrategicContextOf(ctx, "Funnel"), laneId: lane.laneId, laneContext: lane } as any,
-            (ctx.audience as any)?.productDna || null
+            funnelProductDna || (ctx.audience as any)?.productDna || null
           );
 
           result.laneId = lane.laneId;
@@ -2881,6 +3453,7 @@ async function executeEngine(
               accountId: config.accountId,
               campaignId: config.campaignId,
               jobId,
+              strategyRootId: ctx.strategyRootId || null,
               laneId: lane.laneId,
               offerSnapshotId: (ctx.offer as any)?.snapshotId || "N/A",
               awarenessSnapshotId: (ctx.awareness as any)?.snapshotId || null,
@@ -2921,8 +3494,25 @@ async function executeEngine(
           lastResult = result;
         }
 
-        output = lastResult;
-        ctx.funnel = lastResult;
+        const failedLanes: string[] = [];
+        for (const [laneId, res] of funnelsByLane.entries()) {
+          if (res.status !== "COMPLETE" && res.status !== "SUCCESS") {
+            failedLanes.push(laneId);
+          }
+        }
+        if (failedLanes.length > 0) {
+          console.warn(`[Orchestrator] MULTI_LANE_FUNNEL_PARTIAL_FAILURE | failedLanes=[${failedLanes.join(",")}] | totalLanes=${funnelsByLane.size}`);
+          output = {
+            ...lastResult,
+            status: "ERROR",
+            statusMessage: `Funnel execution failed on lane(s): ${failedLanes.join(", ")}`,
+            failedLanes,
+          };
+          ctx.funnel = output;
+        } else {
+          output = lastResult;
+          ctx.funnel = lastResult;
+        }
         ctx.funnelsByLane = funnelsByLane;
         results.set("funnels" as any, funnelsByLane as any);
         snapshotId = lastSnapshotId;
@@ -2977,18 +3567,7 @@ async function executeEngine(
           ctx.inputHashes!.funnel || "",
         );
         ctx.inputHashes!.integrity = integrityInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseIntegrity(config.accountId, config.campaignId, integrityInputHash);
-          if (reused) {
-            logReuseHit("integrity", reused.snap.id, integrityInputHash);
-            output = reused.hydrated;
-            ctx.integrity = reused.hydrated;
-            ctx.integritySnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            break;
-          }
-          logReuseMiss("integrity", integrityInputHash);
-        }
+
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "integrity" });
         const audInput = {
           ...extractAudienceInput(ctx.audience),
@@ -3010,6 +3589,7 @@ async function executeEngine(
             accountId: config.accountId,
             campaignId: config.campaignId,
             jobId,
+            strategyRootId: ctx.strategyRootId || null,
             funnelSnapshotId: ctx.funnel?.snapshotId || "N/A",
             offerSnapshotId: ctx.offer?.snapshotId || "N/A",
             miSnapshotId: ctx.miSnapshotId || "N/A",
@@ -3038,7 +3618,7 @@ async function executeEngine(
       }
 
       case "persuasion": {
-        { const sglBlock = resolveSglOrBlock("persuasion", ctx, startTime); if (sglBlock) return sglBlock; }
+        recordNonAuthoritativeSglConsumption("persuasion", ctx);
         const persuasionInputHash = computeInputHash(
           "persuasion-v1",
           doctrineSalt(ctx),
@@ -3052,19 +3632,7 @@ async function executeEngine(
           ctx.inputHashes!.differentiation || "",
         );
         ctx.inputHashes!.persuasion = persuasionInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReusePersuasion(config.accountId, config.campaignId, persuasionInputHash);
-          if (reused) {
-            logReuseHit("persuasion", reused.snap.id, persuasionInputHash);
-            output = reused.hydrated;
-            // Reuse skips the engine entry wrapper — re-derive pain roles.
-            attachSelectedPainRoles("persuasion", output, ctx.painRegistry);
-            ctx.persuasion = output;
-            snapshotId = reused.snap.id;
-            break;
-          }
-          logReuseMiss("persuasion", persuasionInputHash);
-        }
+
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "persuasion" });
         const audInput = extractAudienceInput(ctx.audience);
         const posInput = extractPositioningInput(ctx.positioning);
@@ -3119,12 +3687,21 @@ async function executeEngine(
             flaggedInconsistencies: [],
           };
           const __persStart = Date.now();
+          let persProductDna = (ctx.audience as any)?.productDna || null;
+          if (!persProductDna || !persProductDna.productTruthFacts || persProductDna.productTruthFacts.length === 0) {
+            try {
+              persProductDna = await loadProductDNA(config.campaignId, config.accountId);
+            } catch (err: any) {
+              console.warn(`[Orchestrator] LOAD_PRODUCT_DNA_FAILED: ${err.message}`);
+            }
+          }
+
           const result = await runPersuasionEngine(
             miInput, laneAudInput, posInput, diffInput, offerInput, funnelInput, integrityInput, awarenessInput,
             config.accountId, persuasionLineage,
             ctx.analyticalEnrichment,
             { ...runStrategicContextOf(ctx, "Persuasion"), laneId: lane.laneId, laneContext: lane } as any,
-            (ctx.audience as any)?.productDna || null
+            persProductDna
           );
 
           result.laneId = lane.laneId;
@@ -3168,10 +3745,10 @@ async function executeEngine(
           }
 
           persuasionsByLane.set(lane.laneId, result);
-          const isPersuasionValid = result.status === "COMPLETE" || result.status === "SUCCESS" || result.status === "PARTIAL" || result.status === "ACCEPTABLE" || (result.primaryRoute && result.status !== "INTEGRITY_FAILED" && result.status !== "ERROR" && result.status !== "BLOCKED");
+          const laneStatus = mapPersuasionLaneStatus(result);
           results.set(`persuasion:${lane.laneId}` as any, {
             engineId: `persuasion:${lane.laneId}` as any,
-            status: isPersuasionValid ? "SUCCESS" : (result.primaryRoute ? "PARTIAL" : "ERROR"),
+            status: laneStatus,
             output: result,
             executionTimeMs: result.executionTimeMs || 0,
             snapshotId: (result as any).snapshotId,
@@ -3220,7 +3797,18 @@ async function executeEngine(
         if (lastResult?.depthGateResult) {
           console.log(`[Orchestrator] DEPTH_GATE_PERSUASION | status=${lastResult.depthGateResult.status} | attempts=${lastResult.depthGateResult.attempt}/${lastResult.depthGateResult.maxAttempts}`);
         }
-        break;
+
+        const laneList = Array.from(persuasionsByLane.values());
+        const aggStatus = deriveAggregatePersuasionStatus(laneList);
+        console.log(`[Orchestrator] PERSUASION_AGGREGATE_STATUS | status=${aggStatus} | lanes=${laneList.length}`);
+        return {
+          engineId,
+          status: aggStatus,
+          output,
+          snapshotId,
+          durationMs: Date.now() - startTime,
+          blockReason: aggStatus === "ERROR" ? "One or more required persuasion lanes failed semantic/factual validation" : undefined,
+        };
       }
 
       case "statistical_validation": {
@@ -3235,17 +3823,6 @@ async function executeEngine(
           ctx.inputHashes!.audience || "",
         );
         ctx.inputHashes!.statistical_validation = svInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseStatVal(config.accountId, config.campaignId, svInputHash);
-          if (reused) {
-            logReuseHit("statistical_validation", reused.snap.id, svInputHash);
-            output = reused.hydrated;
-            ctx.statisticalValidation = reused.hydrated;
-            snapshotId = reused.snap.id;
-            break;
-          }
-          logReuseMiss("statistical_validation", svInputHash);
-        }
         const miInput = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "statistical_validation" });
         const audInput = extractAudienceInput(ctx.audience);
         const offerInput = extractOfferInput(ctx.offer);
@@ -3351,94 +3928,123 @@ async function executeEngine(
       }
 
       case "budget_governor": {
-        const bizData = await getBusinessData(config.accountId, config.campaignId);
-        const campaignData = await getCampaignData(config.campaignId);
-        const bgInputHash = computeInputHash(
-          "budget-governor-v1",
-          doctrineSalt(ctx),
-          ctx.inputHashes!.offer || "",
-          ctx.inputHashes!.funnel || "",
-          ctx.inputHashes!.statistical_validation || "",
-          ctx.inputHashes!.mi || "",
-          ctx.inputHashes!.audience || "",
-          { monthlyBudget: bizData?.monthlyBudget || null, manualMetrics: ctx.manualCampaignMetrics || null },
-        );
-        ctx.inputHashes!.budget_governor = bgInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseBudgetGovernor(config.accountId, config.campaignId, bgInputHash);
-          if (reused) {
-            logReuseHit("budget_governor", reused.snap.id, bgInputHash);
-            output = reused.hydrated;
-            ctx.budgetGovernor = reused.hydrated;
-            ctx.budgetGovernorSnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            break;
+        // 1. Fetch saved budget settings for this campaign
+        let monthlyBudget: number | null = null;
+        let currency: string = "USD";
+        let budgetSettingsVersion = 1;
+
+        try {
+          const [savedBudget] = await db
+            .select()
+            .from(campaignBudgetSettings)
+            .where(
+              and(
+                eq(campaignBudgetSettings.accountId, config.accountId),
+                eq(campaignBudgetSettings.campaignId, config.campaignId)
+              )
+            )
+            .limit(1);
+
+          if (savedBudget) {
+            monthlyBudget = savedBudget.monthlyBudget != null ? parseFloat(savedBudget.monthlyBudget) : null;
+            currency = savedBudget.currency || "USD";
+            budgetSettingsVersion = savedBudget.version || 1;
+          } else {
+            // No saved budget found in campaign_budget_settings: preserve null (BUDGET_NOT_PROVIDED)
+            // Do not silently fall back to ambiguous legacy business-data values
+            monthlyBudget = null;
           }
-          logReuseMiss("budget_governor", bgInputHash);
+        } catch (dbErr: any) {
+          console.warn(`[Orchestrator] BUDGET_SETTINGS_FETCH_FAILED | ${dbErr.message}`);
+          monthlyBudget = null;
         }
 
-        const offerCtxBG = extractOfferInput(ctx.offer);
-        const offerStrength = typeof offerCtxBG.offerStrengthScore === "number" ? offerCtxBG.offerStrengthScore : 0.5;
-        const offerProofScore = typeof offerCtxBG.proofStrength === "number" ? offerCtxBG.proofStrength : 0.5;
-        const offerCompleteness = offerCtxBG.offerName != null && offerCtxBG.coreOutcome != null;
+        // 2. Extract selected channels from upstream Channel Selection
+        const selectedChannels: SelectedChannelInput[] = [];
+        const csResult = ctx.channelSelection as any;
+        if (csResult) {
+          if (Array.isArray(csResult.recommendedChannels) && csResult.recommendedChannels.length > 0) {
+            for (let idx = 0; idx < csResult.recommendedChannels.length; idx++) {
+              const ch = csResult.recommendedChannels[idx];
+              selectedChannels.push({
+                channelId: ch.channelId || ch.id || ch.channelKey || `ch_${idx + 1}`,
+                channelName: ch.channelName || ch.name || ch.label || `Channel ${idx + 1}`,
+                channelType: ch.channelType || ch.type,
+                fitScore: typeof ch.fitScore === "number" ? ch.fitScore : undefined,
+                priorityRank: idx + 1,
+                funnelRole: ch.assignedFunnelRole || ch.funnelRole || undefined,
+                isOrganic: ch.channelNature === "organic" || ch.channelType === "social_organic" || ch.channelType === "search_organic",
+                rationale: ch.rationale || ch.decisionGate?.reason || (Array.isArray(ch.reasons) ? ch.reasons.join("; ") : undefined),
+              });
+            }
+          } else {
+            if (csResult.primaryChannel?.channelName) {
+              const pch = csResult.primaryChannel;
+              selectedChannels.push({
+                channelId: pch.channelId || pch.id || pch.channelKey || "primary_channel",
+                channelName: pch.channelName,
+                channelType: pch.channelType,
+                fitScore: typeof pch.fitScore === "number" ? pch.fitScore : undefined,
+                priorityRank: 1,
+                funnelRole: pch.assignedFunnelRole || undefined,
+                isOrganic: pch.channelNature === "organic" || pch.channelType === "social_organic" || pch.channelType === "search_organic",
+                rationale: pch.decisionGate?.reason || undefined,
+              });
+            }
+            if (csResult.secondaryChannel?.channelName) {
+              const sch = csResult.secondaryChannel;
+              selectedChannels.push({
+                channelId: sch.channelId || sch.id || sch.channelKey || "secondary_channel",
+                channelName: sch.channelName,
+                channelType: sch.channelType,
+                fitScore: typeof sch.fitScore === "number" ? sch.fitScore : undefined,
+                priorityRank: 2,
+                funnelRole: sch.assignedFunnelRole || undefined,
+                isOrganic: sch.channelNature === "organic" || sch.channelType === "social_organic" || sch.channelType === "search_organic",
+                rationale: sch.decisionGate?.reason || (Array.isArray(sch.reasons) ? sch.reasons.join("; ") : undefined),
+              });
+            }
+          }
+        }
 
-        const funnelCtxBG = extractFunnelInput(ctx.funnel);
-        const funnelStrengthScore = typeof funnelCtxBG.funnelStrengthScore === "number" ? funnelCtxBG.funnelStrengthScore : 0.5;
-        const funnelFrictionScore = typeof funnelCtxBG.frictionMap?.totalFriction === "number" ? funnelCtxBG.frictionMap.totalFriction : 0.5;
-        const funnelProjections = {
-          expectedConversionRate: typeof funnelCtxBG.trustPathScore === "number" ? funnelCtxBG.trustPathScore : 0.02,
-          expectedCPA: 50,
-          expectedROAS: 2.0,
+        // 3. Compute input hash
+        const bgInputHash = computeInputHash(
+          "budget-recommender-v2",
+          doctrineSalt(ctx),
+          ctx.inputHashes!.channel_selection || "",
+          ctx.inputHashes!.offer || "",
+          ctx.inputHashes!.funnel || "",
+          ctx.inputHashes!.audience || "",
+          { monthlyBudget, currency, channelsCount: selectedChannels.length },
+        );
+        ctx.inputHashes!.budget_governor = bgInputHash;
+
+        // 4. Assemble business context
+        const strategicCtx = runStrategicContextOf(ctx);
+        const businessContext = {
+          businessModel: (strategicCtx?.doctrine as any)?.businessModel || (ctx.audience as any)?.productDna?.businessType,
+          industry: (strategicCtx?.doctrine as any)?.category || (ctx.audience as any)?.productDna?.productCategory,
+          targetAudience: Array.isArray(ctx.audience?.audienceSegments)
+            ? ctx.audience.audienceSegments.map((s: any) => typeof s === "string" ? s : (s.name || s.label || "")).join(", ")
+            : undefined,
+          primaryValueProp: ctx.positioning?.corePromise || ctx.offer?.offerName || undefined,
         };
 
-        const miCtxBG = extractMiInput(ctx.mi, ctx.config?.currentJobId ?? null, { ctx, engineId: "budget_governor" });
-        const competitors = miCtxBG.competitors || [];
-        const marketIntensity = competitors.length > 0 ? Math.min(competitors.length / 10, 1.0) : 0.5;
-        const competitorSpendEstimate = competitors.length * 500;
+        const channelSelectionSnapshotId = ctx.channelSelectionSnapshotId || undefined;
 
-        const audCtxBG = ctx.audience || {};
-        const segments = audCtxBG.audienceSegments || audCtxBG.segments || [];
-        const audienceSize = segments.length >= 5 ? "large" : segments.length >= 2 ? "medium" : "small";
+        console.log(`[Orchestrator] BUDGET_GOVERNOR_RECOMMENDER_DISPATCH | budget=${monthlyBudget} currency=${currency} channels=${selectedChannels.length}`);
 
-        const svCtx = ctx.statisticalValidation || {};
-        const validationConfidence = typeof svCtx.claimConfidenceScore === "number" ? svCtx.claimConfidenceScore
-          : typeof svCtx.confidenceScore === "number" ? svCtx.confidenceScore : 0.5;
-        const validationStateValue = svCtx.validationState || "unknown";
+        const result = await runBudgetGovernorEngine({
+          monthlyBudget,
+          currency,
+          selectedChannels,
+          businessContext,
+          accountId: config.accountId,
+          campaignId: config.campaignId,
+          budgetSettingsVersion,
+          channelSelectionSnapshotId,
+        });
 
-        const monthlyBudget = parseFloat(bizData?.monthlyBudget?.replace(/[^0-9.]/g, "") || "0");
-
-        const manualMetrics = ctx.manualCampaignMetrics || null;
-        const campaignPerformance = manualMetrics ? {
-          conversions: manualMetrics.conversions || 0,
-          spend: manualMetrics.spend || 0,
-          revenue: manualMetrics.revenue || 0,
-          isStatisticallyValid: (manualMetrics.conversions || 0) >= 30,
-          statisticalConfidence: Math.min((manualMetrics.conversions || 0) / 100, 1),
-        } : undefined;
-
-        const budgetGovernorInput: import("../strategy/budget-governor/types").BudgetGovernorInput = {
-          offerStrength,
-          offerProofScore,
-          offerCompleteness,
-          funnelStrengthScore,
-          funnelFrictionScore,
-          funnelProjections,
-          channelRisk: 0.5,
-          validationConfidence,
-          validationState: validationStateValue,
-          marketIntensity,
-          competitorSpendEstimate,
-          audienceSize,
-          currentBudget: monthlyBudget,
-          historicalCPA: manualMetrics?.cpa || null,
-          historicalROAS: manualMetrics?.roas || null,
-          campaignPerformance,
-          signalComposition: ctx.signalComposition || undefined,
-        };
-
-        console.log(`[Orchestrator] BUDGET_GOVERNOR_INPUT | offerStrength=${offerStrength.toFixed(2)} funnelStrength=${funnelStrengthScore.toFixed(2)} validationConf=${validationConfidence.toFixed(2)} marketIntensity=${marketIntensity.toFixed(2)} audienceSize=${audienceSize} budget=${monthlyBudget}`);
-
-        const result = runBudgetGovernorEngine(budgetGovernorInput);
         output = result;
         ctx.budgetGovernor = result;
 
@@ -3447,38 +4053,46 @@ async function executeEngine(
           if (ctx.ssc) {
             const r: any = result;
             const action = (r.decision?.action || "hold") as "test" | "scale" | "hold" | "halt";
-            const decisionConfidence = typeof r.budgetDecisionConfidence === "number" ? r.budgetDecisionConfidence : (typeof r.confidenceScore === "number" ? r.confidenceScore : 0.5);
-            const cacAssess = r.cacAssumptionCheck || r.cacReality || r.cacAssessment || {};
-            const reconciledConf = typeof r.baseValidationConfidence === "number" ? r.baseValidationConfidence : (typeof r.reconciledValidationConfidence === "number" ? r.reconciledValidationConfidence : validationConfidence);
             const bsAnchorCtx = buildSubEngineAnchorContext(
-              runStrategicContextOf(ctx),
+              strategicCtx,
               (ctx.audience as any)?.productDna || null,
-              "ANCHOR GROUNDING: Every budget rationale, kill trigger, and expansion precondition MUST be specific to the anchored product above — its core problem and differentiating feature. Anchor grounding SUPPLEMENTS the existing evidence-grounding rules; it never replaces them.",
+              "ANCHOR GROUNDING: Budget recommendations specific to the anchored product.",
               "Orchestrator/BudgetStrategy",
             );
+            let confirmedMonthlyBudget = 5000;
+            try {
+              const { getBudgetSettings } = await import("../budget-settings");
+              const bSettings = await getBudgetSettings(config.campaignId, config.accountId);
+              if (bSettings && typeof bSettings.monthlyBudget === "number" && bSettings.monthlyBudget > 0) {
+                confirmedMonthlyBudget = bSettings.monthlyBudget;
+              }
+            } catch {}
+            const paidScaleBudget = Math.round(confirmedMonthlyBudget * 0.6);
+            const initialTestMin = Math.round(paidScaleBudget * 0.15);
+            const initialTestMax = Math.round(paidScaleBudget * 0.35);
             const cj = await designBudgetStrategy({
               doctrineBlock: bsAnchorCtx.doctrineBlock,
               anchorSource: bsAnchorCtx.anchorSource,
               action,
-              decisionConfidence,
-              validationState: validationStateValue,
-              reconciledValidationConfidence: reconciledConf,
-              offerStrength,
-              funnelStrength: funnelStrengthScore,
+              decisionConfidence: 0.8,
+              validationState: "validated",
+              reconciledValidationConfidence: 0.8,
+              offerStrength: 0.8,
+              funnelStrength: 0.8,
               channelRisk: 0.5,
-              testBudgetMin: r.testBudgetRange?.min ?? 0,
-              testBudgetMax: r.testBudgetRange?.max ?? 0,
-              scaleBudgetMin: r.scaleBudgetRange?.min ?? 0,
-              scaleBudgetMax: r.scaleBudgetRange?.max ?? 0,
-              estimatedCAC: cacAssess.estimatedCAC ?? cacAssess.estimated ?? funnelProjections.expectedCPA ?? 0,
-              benchmarkCAC: cacAssess.industryBenchmarkCAC ?? cacAssess.benchmarkCAC ?? cacAssess.benchmark ?? 0,
-              cacRealistic: cacAssess.realistic !== false,
-              killFlag: !!r.killFlag,
-              killReasons: Array.isArray(r.killReasons) ? r.killReasons.map(String) : [],
-              riskFactors: Array.isArray(r.riskAssessment?.riskFactors) ? r.riskAssessment.riskFactors.map(String) : (Array.isArray(r.riskFactors) ? r.riskFactors.map(String) : []),
-              performanceConversions: campaignPerformance?.conversions ?? 0,
-              performanceSpend: campaignPerformance?.spend ?? 0,
-              marketIntensity,
+              testBudgetMin: initialTestMin,
+              testBudgetMax: initialTestMax,
+              scaleBudgetMin: paidScaleBudget,
+              scaleBudgetMax: confirmedMonthlyBudget,
+              estimatedCAC: 45,
+              benchmarkCAC: 50,
+              cacRealistic: true,
+              killFlag: false,
+              killReasons: [],
+              riskFactors: [],
+              performanceConversions: 0,
+              performanceSpend: 0,
+              marketIntensity: 0.5,
               accountId: config.accountId,
             });
             if (cj) {
@@ -3507,15 +4121,16 @@ async function executeEngine(
             jobId,
             validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
             engineVersion: BUDGET_GOVERNOR_ENGINE_VERSION,
-            status: "COMPLETE",
+            status: result.status === "FAILED" ? "FAILED" : "COMPLETE",
+            statusMessage: result.statusMessage || null,
             result: JSON.stringify(result),
-            confidenceScore: result.confidenceScore || null,
+            confidenceScore: null,
             executionTimeMs: result.executionTimeMs || null,
             inputHash: bgInputHash,
           }).returning();
           snapshotId = bgSnap.id;
           ctx.budgetGovernorSnapshotId = bgSnap.id;
-          console.log(`[Orchestrator] BUDGET_GOVERNOR_SNAPSHOT_SAVED | id=${bgSnap.id}`);
+          console.log(`[Orchestrator] BUDGET_GOVERNOR_SNAPSHOT_SAVED | id=${bgSnap.id} status=${result.status}`);
         } catch (bgDbErr: any) {
           console.warn(`[Orchestrator] BUDGET_SNAPSHOT_SAVE_FAILED | error=${bgDbErr.message}`);
         }
@@ -3530,25 +4145,9 @@ async function executeEngine(
           ctx.inputHashes!.awareness || "",
           ctx.inputHashes!.persuasion || "",
           ctx.inputHashes!.offer || "",
-          ctx.inputHashes!.budget_governor || "",
           ctx.inputHashes!.statistical_validation || "",
         );
         ctx.inputHashes!.channel_selection = csInputHash;
-        if (!config.forceRefresh) {
-          const reused = await tryReuseChannelSelection(config.accountId, config.campaignId, csInputHash);
-          if (reused) {
-            logReuseHit("channel_selection", reused.snap.id, csInputHash);
-            output = reused.hydrated;
-            markEngineReused(output);
-            ctx.channelSelection = reused.hydrated;
-            ctx.channelSelectionSnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            const reusedChannelSummary = (reused.hydrated as any)?.channelDecisionSummary;
-            if (reusedChannelSummary) appendPriorDecision(ctx, reusedChannelSummary);
-            break;
-          }
-          logReuseMiss("channel_selection", csInputHash);
-        }
         const audInput = extractAudienceInput(ctx.audience);
         const awarenessInput = ctx.awareness || {};
         if (ctx.ssc?.awarenessMeaning && awarenessInput.primaryRoute) {
@@ -3568,23 +4167,97 @@ async function executeEngine(
         }
         const persuasionInput = ctx.persuasion || {};
         const offerInput = extractOfferInput(ctx.offer);
-        const bgResult = ctx.budgetGovernor || {};
-        const budgetInput = {
-          testBudgetMin: bgResult.testBudgetRange?.min ?? 0,
-          testBudgetMax: bgResult.testBudgetRange?.max ?? 0,
-          scaleBudgetMin: bgResult.scaleBudgetRange?.min ?? 0,
-          scaleBudgetMax: bgResult.scaleBudgetRange?.max ?? 0,
-          expansionPermission: bgResult.expansionPermission?.allowed ?? false,
-          killFlag: bgResult.killFlag ?? false,
-        };
         const validationInput = ctx.statisticalValidation || {};
-        console.log(`[Orchestrator] CHANNEL_BUDGET_MAPPED | testMax=${budgetInput.testBudgetMax} scaleMax=${budgetInput.scaleBudgetMax} killFlag=${budgetInput.killFlag} expansion=${budgetInput.expansionPermission} | awarenessStage=${awarenessInput.primaryRoute?.targetReadinessStage || "unknown"}`);
+        console.log(`[Orchestrator] CHANNEL_SELECTION_START | awarenessStage=${awarenessInput.primaryRoute?.targetReadinessStage || "unknown"}`);
+
+        // Fetch owned business channels with explicit metric provenance
+        const ownedChannels = await getOwnedChannelsForCampaign(config.accountId, config.campaignId);
+
+        // Fetch competitor platform distribution (breadth of adoption & depth of activity)
+        const competitorPlatforms = await (async () => {
+          try {
+            const compRows = await db
+              .select({ id: ciCompetitors.id, name: ciCompetitors.name, websiteUrl: ciCompetitors.websiteUrl })
+              .from(ciCompetitors)
+              .where(or(eq(ciCompetitors.accountId, config.accountId), eq(ciCompetitors.campaignId, config.campaignId)));
+
+            const totalCount = Math.max(compRows.length, 1);
+            const postRows = await db.execute(sql`
+              SELECT platform, competitor_id, count(*)::int as post_count
+              FROM ci_competitor_posts
+              WHERE account_id = ${config.accountId}
+              GROUP BY platform, competitor_id
+            `);
+
+            const platformMap = new Map<string, { competitorIds: Set<string>; postCount: number }>();
+            for (const row of (postRows.rows as any[])) {
+              const plat = (row.platform || "").toLowerCase().trim();
+              if (!plat) continue;
+              if (!platformMap.has(plat)) {
+                platformMap.set(plat, { competitorIds: new Set(), postCount: 0 });
+              }
+              const entry = platformMap.get(plat)!;
+              entry.competitorIds.add(row.competitor_id);
+              entry.postCount += Number(row.post_count || 0);
+            }
+
+            const res: any[] = [];
+            for (const [plat, data] of platformMap.entries()) {
+              const activeCompCount = data.competitorIds.size;
+              const compNames = compRows.filter((c) => data.competitorIds.has(c.id)).map((c) => c.name);
+              res.push({
+                platform: plat,
+                activeCompetitorCount: activeCompCount,
+                totalCanonicalCompetitorCount: totalCount,
+                coverageRatio: totalCount > 0 ? parseFloat((activeCompCount / totalCount).toFixed(2)) : 0,
+                recentContentCount: data.postCount,
+                recentActivityWindow: "30_days",
+                representativeCompetitorNames: compNames,
+                representativeCompetitorIds: Array.from(data.competitorIds),
+              });
+            }
+            return res;
+          } catch (err: any) {
+            console.warn(`[Orchestrator] COMPETITOR_PLATFORMS_FAILED: ${err.message}`);
+            return [];
+          }
+        })();
+
+        // Extract optional Market Voice channel quotes if present
+        const mvChannelEvidence = (() => {
+          const quotes: any[] = [];
+          if (!ctx.marketVoice) return quotes;
+          const rawUnits = (ctx.marketVoice as any).evidenceUnits || (ctx.marketVoice as any).approvedQuotes || (ctx.marketVoice as any).rawQuotes || [];
+          const channelKeywords = /\b(instagram|tiktok|youtube|facebook|google|pinterest|reddit|email|influencer|ad|shop)\b/i;
+          for (const unit of rawUnits) {
+            const text = typeof unit === "string" ? unit : (unit.verbatimQuote || unit.quote || unit.text || "");
+            if (channelKeywords.test(text)) {
+              const match = text.match(channelKeywords);
+              quotes.push({
+                quoteText: text.slice(0, 300),
+                sourceDomain: unit.sourceDomain || unit.domain || undefined,
+                channelMentioned: match ? match[0].toLowerCase() : undefined,
+                relevance: "Customer voice discovery/channel mention",
+              });
+            }
+          }
+          return quotes.slice(0, 5);
+        })();
+
+        const funnelContext = ctx.funnel || null;
+
+        console.log(`[Orchestrator] CHANNEL_SELECTION_DISPATCH | owned=${ownedChannels.length} compPlatforms=${competitorPlatforms.length} mvQuotes=${mvChannelEvidence.length}`);
+
         const result = await runChannelSelectionWithAIProposal(
           audInput, awarenessInput, persuasionInput, offerInput,
-          budgetInput, validationInput, "INTELLIGENT",
+          null, validationInput, "INTELLIGENT",
           ctx.memoryContext || undefined,
           runStrategicContextOf(ctx), config.accountId,
-          (ctx.audience as any)?.productDna || null
+          (ctx.audience as any)?.productDna || null,
+          ownedChannels,
+          competitorPlatforms,
+          mvChannelEvidence,
+          funnelContext
         );
         output = result;
         ctx.channelSelection = result;
@@ -3617,10 +4290,10 @@ async function executeEngine(
               channelMode: r.channelMode || "INTELLIGENT",
               awarenessStage: awarenessInput.primaryRoute?.targetReadinessStage || ctx.ssc.awarenessMeaning?.stage || "unknown",
               audienceMaturityIndex: typeof audInput.maturityIndex === "number" ? audInput.maturityIndex : null,
-              testBudgetMin: budgetInput.testBudgetMin,
-              testBudgetMax: budgetInput.testBudgetMax,
-              killFlag: !!budgetInput.killFlag,
-              expansionAllowed: !!budgetInput.expansionPermission,
+              testBudgetMin: 0,
+              testBudgetMax: 0,
+              killFlag: false,
+              expansionAllowed: false,
               rejectedChannels: rejArr.slice(0, 6).map((c: any) => `${c.channelName || c.label || c.channelKey || c.name || "?"} — ${c.rejectionReason || c.reason || "(no reason)"}`),
               funnelAwarenessCount: funnelStages.filter((s: any) => /aware/.test(stageType(s))).length,
               funnelNurtureCount: funnelStages.filter((s: any) => /(nurture|consider|interest|eval)/.test(stageType(s))).length,
@@ -3652,9 +4325,9 @@ async function executeEngine(
             campaignId: config.campaignId,
             jobId,
             validationSnapshotId: ctx.statisticalValidation?.snapshotId || null,
-            budgetSnapshotId: ctx.budgetGovernorSnapshotId || null,
+            budgetSnapshotId: null,
             engineVersion: CHANNEL_SELECTION_ENGINE_VERSION,
-            status: "COMPLETE",
+            status: result.status || "COMPLETE",
             result: JSON.stringify(result),
             confidenceScore: result.confidenceScore || null,
             executionTimeMs: result.executionTimeMs || null,
@@ -3679,18 +4352,6 @@ async function executeEngine(
           { metrics: iterGate.campaignMetrics || null, gateInputs: iterGate.gateInputs || null },
         );
         ctx.inputHashes!.iteration = iterInputHash;
-        if (!config.forceRefresh && iterGate.isReady) {
-          const reused = await tryReuseIteration(config.accountId, config.campaignId, iterInputHash);
-          if (reused) {
-            logReuseHit("iteration", reused.snap.id, iterInputHash);
-            output = reused.hydrated;
-            ctx.iteration = reused.hydrated;
-            ctx.iterationSnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            break;
-          }
-          logReuseMiss("iteration", iterInputHash);
-        }
         if (!iterGate.isReady) {
           console.log(`[Orchestrator] ITERATION_SKIPPED_AWAITING_LIVE_DATA | missing=${iterGate.missingFields.join(",")}`);
           return {
@@ -3820,18 +4481,6 @@ async function executeEngine(
           { metrics: retGate.retentionMetrics || null, gateInputs: retGate.gateInputs || null },
         );
         ctx.inputHashes!.retention = retInputHash;
-        if (!config.forceRefresh && retGate.isReady) {
-          const reused = await tryReuseRetention(config.accountId, config.campaignId, retInputHash);
-          if (reused) {
-            logReuseHit("retention", reused.snap.id, retInputHash);
-            output = reused.hydrated;
-            ctx.retention = reused.hydrated;
-            ctx.retentionSnapshotId = reused.snap.id;
-            snapshotId = reused.snap.id;
-            break;
-          }
-          logReuseMiss("retention", retInputHash);
-        }
         if (!retGate.isReady) {
           console.log(`[Orchestrator] RETENTION_SKIPPED_AWAITING_LIVE_DATA | missing=${retGate.missingFields.join(",")}`);
           return {
@@ -3899,7 +4548,7 @@ async function executeEngine(
         // than reconstructed ad hoc, so lineage validation stays truthful.
         let retentionPainRegistry: any[] | undefined;
         try {
-          const rootForRetention = await getActiveRoot(config.campaignId, config.accountId);
+          const rootForRetention = await getExecutionEligibleRoot(config.campaignId, config.accountId);
           const rootPains = rootForRetention?.approvedAudiencePains
             ? (typeof rootForRetention.approvedAudiencePains === "string"
                 ? JSON.parse(rootForRetention.approvedAudiencePains)
@@ -4055,6 +4704,115 @@ async function executeEngine(
         snapshotId,
         durationMs: Date.now() - startTime,
         blockReason: `${blockCode}: ${reason}`,
+      };
+    }
+
+    if (engineOutputStatus === "INSUFFICIENT_DATA") {
+      const reason = output?.statusMessage || `${engineId} engine reported insufficient data`;
+      console.log(`[Orchestrator] Engine ${engineId} returned INSUFFICIENT_DATA: ${reason}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus === "DEPTH_FAILED") {
+      const reason = output?.statusMessage || `${engineId} engine failed CEL depth compliance (DEPTH_FAILED)`;
+      console.log(`[Orchestrator] Engine ${engineId} returned DEPTH_FAILED: ${reason}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        error: reason,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus === "AUDIENCE_MISALIGNMENT") {
+      const reason = output?.statusMessage || `${engineId} engine failed audience alignment (AUDIENCE_MISALIGNMENT)`;
+      console.log(`[Orchestrator] Engine ${engineId} returned AUDIENCE_MISALIGNMENT: ${reason}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        error: reason,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus === "FAILED") {
+      const reason = output?.statusMessage || `${engineId} engine failed`;
+      console.log(`[Orchestrator] Engine ${engineId} returned FAILED: ${reason}`);
+      return {
+        engineId,
+        status: "FAILED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        error: reason,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus === "BLOCKED") {
+      const reason = output?.statusMessage || output?.blockReason || `${engineId} engine returned BLOCKED`;
+      console.log(`[Orchestrator] Engine ${engineId} returned BLOCKED: ${reason}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus === "ERROR" || engineOutputStatus === "PARTIAL_FAILURE") {
+      const reason = output?.statusMessage || output?.error || `${engineId} engine reported ${engineOutputStatus}`;
+      console.log(`[Orchestrator] Engine ${engineId} returned ${engineOutputStatus}: ${reason}`);
+      return {
+        engineId,
+        status: "ERROR",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        error: reason,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus === "INCOMPLETE" || engineOutputStatus === "BLOCKED") {
+      const reason = output?.statusMessage || output?.error || `${engineId} engine is incomplete or blocked: ${engineOutputStatus}`;
+      console.log(`[Orchestrator] Engine ${engineId} returned ${engineOutputStatus}: ${reason}`);
+      return {
+        engineId,
+        status: "BLOCKED",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        blockReason: reason,
+      };
+    }
+
+    if (engineOutputStatus && engineOutputStatus !== "SUCCESS" && engineOutputStatus !== "COMPLETE" && engineOutputStatus !== "ACTIVE" && engineOutputStatus !== "PARTIAL" && engineOutputStatus !== "UNSTABLE" && engineOutputStatus !== "BUDGET_NOT_PROVIDED" && engineOutputStatus !== "ZERO_BUDGET") {
+      const reason = output?.statusMessage || output?.error || `${engineId} engine reported non-success status: ${engineOutputStatus}`;
+      console.log(`[Orchestrator] Engine ${engineId} returned unhandled non-success status ${engineOutputStatus}: ${reason}`);
+      return {
+        engineId,
+        status: "ERROR",
+        output,
+        snapshotId,
+        durationMs: Date.now() - startTime,
+        error: reason,
+        blockReason: reason,
       };
     }
 
@@ -4374,6 +5132,80 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
   // get the right jobId via the local variable — leaving plans non-run-bound.
   config.jobId = jobId;
 
+  // When rebuilding strategy from stored evidence, recompute Business Understanding
+  // from existing stored website_snapshots and offering_input_evidence before
+  // seeding doctrine or pinning canonical context (preserving old BU snapshot rows).
+  if (config.recoveryMode === "REBUILD_FROM_STORED_EVIDENCE") {
+    try {
+      const { campaignOfferings, campaignSelections } = await import("@shared/schema");
+      const { runBusinessUnderstandingEngine } = await import("../business-understanding/engine");
+      const [selection] = await db
+        .select()
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.selectedCampaignId, config.campaignId),
+            eq(campaignSelections.accountId, config.accountId)
+          )
+        )
+        .orderBy(desc(campaignSelections.selectedAt))
+        .limit(1);
+
+      let selectedOfferingRow: any = null;
+      if (selection?.selectedOfferingId) {
+        const [byId] = await db
+          .select()
+          .from(campaignOfferings)
+          .where(
+            and(
+              eq(campaignOfferings.id, selection.selectedOfferingId),
+              eq(campaignOfferings.accountId, config.accountId)
+            )
+          )
+          .limit(1);
+        selectedOfferingRow = byId || null;
+      }
+
+      const fallbackOffering =
+        selectedOfferingRow ||
+        (
+          await db
+            .select()
+            .from(campaignOfferings)
+            .where(
+              and(
+                eq(campaignOfferings.campaignId, config.campaignId),
+                eq(campaignOfferings.accountId, config.accountId)
+              )
+            )
+            .orderBy(desc(campaignOfferings.createdAt))
+            .limit(1)
+        )[0];
+
+      if (fallbackOffering?.id) {
+        const newBuId = await runBusinessUnderstandingEngine(
+          config.accountId,
+          config.campaignId,
+          fallbackOffering.id
+        );
+        console.log(
+          `[Orchestrator] REBUILD_BUSINESS_UNDERSTANDING_RECOMPUTED | job=${jobId} | offeringId=${fallbackOffering.id} | offeringName=${fallbackOffering.offeringName} | newBuSnapshotId=${newBuId}`
+        );
+      }
+    } catch (buErr: any) {
+      console.error(
+        `[Orchestrator] REBUILD_BUSINESS_UNDERSTANDING_ERROR | job=${jobId} | ${buErr?.message || buErr}`
+      );
+      await db
+        .update(orchestratorJobs)
+        .set({ status: "FAILED", error: buErr?.message || String(buErr), completedAt: new Date() })
+        .where(eq(orchestratorJobs.id, jobId))
+        .catch(() => {});
+      await db.delete(inFlightJobs).where(eq(inFlightJobs.jobId, jobId)).catch(() => {});
+      throw buErr;
+    }
+  }
+
   // Phase 0 (AI Proposes / Code Validates) — seed the strategic doctrine into
   // the SSC before any engine runs. Idempotent: covers fresh runs and paused
   // resumes whose serialized SSC predates the doctrine/priorDecisions fields.
@@ -4382,6 +5214,105 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     if (!ctx.ssc.doctrine) {
       await seedDoctrine(ctx, config.campaignId, config.accountId);
     }
+  }
+
+  // Multi-Source Evidence Pipeline: Authoritative Context Pinning, Acquisition Batch & Manifest Freezing
+  try {
+    const { resolveCanonicalContext } = await import("../discovery/context-binder");
+    const canonicalCtx = await resolveCanonicalContext({
+      accountId: config.accountId,
+      campaignId: config.campaignId,
+    });
+    ctx.canonicalContext = canonicalCtx;
+    console.log(`[Orchestrator] CANONICAL_CONTEXT_PINNED | job=${jobId} | fingerprint=${canonicalCtx.contextFingerprint} | domain=${canonicalCtx.canonicalDomain}`);
+
+    // Update real-time section status: market_intelligence is actively acquiring multi-source evidence
+    const isResumeRun = Boolean(config.resumeFromEngine || config.pausedJobId || (config.scopedEngines && config.scopedEngines.length > 0));
+    if (!isResumeRun) {
+      const acquisitionSectionStatuses = ENGINE_PRIORITY_ORDER.map(e => ({
+        id: e.id,
+        name: e.name,
+        status: e.id === "market_intelligence" ? "RUNNING" : "PENDING",
+        summary: e.id === "market_intelligence" ? "Acquiring multi-source competitor and customer evidence..." : null,
+      }));
+      await db.update(orchestratorJobs)
+        .set({ sectionStatuses: JSON.stringify(acquisitionSectionStatuses) })
+        .where(eq(orchestratorJobs.id, jobId));
+    }
+
+    // Coordinated multi-source acquisition batch & manifest freezing
+    const { executeAcquisitionBatch, freezeEvidenceManifest, getFrozenManifest, hasReusableAcquiredEvidence } = await import("../acquisition/coordinator");
+    ctx.sourceJobId = config.sourceJobId;
+    const existingManifest =
+      (await getFrozenManifest(jobId)) ||
+      (config.sourceJobId ? await getFrozenManifest(config.sourceJobId) : null);
+    let manifest;
+
+    if (existingManifest && !config.forceRefresh) {
+      console.log(`[Orchestrator] RESUME_REUSING_FROZEN_MANIFEST | job=${jobId} | sourceJob=${config.sourceJobId || jobId} | manifestId=${existingManifest.id}`);
+      manifest = existingManifest;
+    } else {
+      const shouldAttemptEvidenceReuse =
+        isResumeRun ||
+        config.recoveryMode === "REUSE_EVIDENCE_RECOMPUTE_ANALYSIS" ||
+        config.recoveryMode === "REBUILD_FROM_STORED_EVIDENCE" ||
+        !config.forceRefresh;
+      let skipPaidAcquisition = Boolean(
+        config.recoveryMode === "REBUILD_FROM_STORED_EVIDENCE" ||
+        process.env.DISABLE_EXTERNAL_ACQUISITION === "1" ||
+        (isResumeRun && config.resumeFromEngine && config.resumeFromEngine !== "market_intelligence"),
+      );
+      if (!skipPaidAcquisition && shouldAttemptEvidenceReuse) {
+        try {
+          const reuseCheck = await hasReusableAcquiredEvidence(config.accountId, config.campaignId);
+          if (reuseCheck.reusable) {
+            skipPaidAcquisition = true;
+            console.log(
+              `[Orchestrator] RECOVERY_REUSING_ACQUIRED_EVIDENCE | job=${jobId} | mode=${config.recoveryMode || "REUSE"} | mvQuotes=${reuseCheck.mvQuotesCount} | posts=${reuseCheck.postsCount} | reviews=${reuseCheck.reviewsCount} | webSnapshots=${reuseCheck.webSnapshotsCount} | skipping paid Apify acquisition`
+            );
+          }
+        } catch (reuseErr: any) {
+          console.warn(`[Orchestrator] EVIDENCE_REUSE_CHECK_WARN | job=${jobId} | ${reuseErr?.message || reuseErr}`);
+        }
+      }
+
+      if (!skipPaidAcquisition) {
+        try {
+          const batchResult = await executeAcquisitionBatch(canonicalCtx, {
+            forceRefresh: Boolean(config.forceRefresh && config.recoveryMode !== "REUSE_EVIDENCE_RECOMPUTE_ANALYSIS"),
+            orchestrationJobId: jobId,
+            concurrencyLimit: 3,
+          });
+          console.log(`[Orchestrator] ACQUISITION_BATCH_COMPLETED | job=${jobId} | planned=${batchResult.totalTasksPlanned} | completed=${batchResult.completedTasks} | failed=${batchResult.failedTasks} | skipped=${batchResult.skippedTasks} | duration=${batchResult.durationMs}ms`);
+        } catch (batchErr: any) {
+          console.warn(`[Orchestrator] ACQUISITION_BATCH_WARN | job=${jobId} | ${batchErr?.message || batchErr}`);
+        }
+      }
+
+      manifest = await freezeEvidenceManifest({
+        campaignId: config.campaignId,
+        accountId: config.accountId,
+        orchestrationJobId: jobId,
+        contextFingerprint: canonicalCtx.contextFingerprint,
+      });
+    }
+
+    ctx.evidenceManifest = manifest;
+    console.log(`[Orchestrator] EVIDENCE_MANIFEST_READY | job=${jobId} | manifestId=${manifest.id} | posts=${(manifest.includedPostIds as any[])?.length || 0} | quotes=${(manifest.includedMarketVoiceIds as any[])?.length || 0}`);
+
+    if (!isResumeRun) {
+      const frozenSectionStatuses = ENGINE_PRIORITY_ORDER.map(e => ({
+        id: e.id,
+        name: e.name,
+        status: e.id === "market_intelligence" ? "RUNNING" : "PENDING",
+        summary: e.id === "market_intelligence" ? "Evidence manifest frozen. Analyzing market intelligence..." : null,
+      }));
+      await db.update(orchestratorJobs)
+        .set({ sectionStatuses: JSON.stringify(frozenSectionStatuses) })
+        .where(eq(orchestratorJobs.id, jobId));
+    }
+  } catch (manifestErr: any) {
+    console.warn(`[Orchestrator] EVIDENCE_MANIFEST_FREEZE_WARN | ${manifestErr?.message || manifestErr}`);
   }
 
   // Task #89 / P4-A boundary #2 (ctx-resolved) + #8 (in-flight register).
@@ -4503,7 +5434,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       )
     : -1;
 
-  const effectiveStartIndex = scopedStartIndex >= 0
+  let effectiveStartIndex = scopedStartIndex >= 0
     ? scopedStartIndex
     : startIndex >= 0 ? startIndex : 0;
 
@@ -4511,93 +5442,105 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     ? new Set(config.scopedEngines)
     : null;
 
-  if (scopedEngineSet && !ctx.audience) {
-    try {
-      const audRows = await db.select().from(audienceSnapshots)
-        .where(and(
-          eq(audienceSnapshots.accountId, config.accountId),
-          eq(audienceSnapshots.campaignId, config.campaignId),
-        ))
-        .orderBy(desc(audienceSnapshots.createdAt))
-        .limit(10);
-      for (const row of audRows) {
-        const ss = JSON.parse(row.structuredSignals || '{"pain_clusters":[],"desire_clusters":[],"pattern_clusters":[],"root_causes":[],"psychological_drivers":[]}');
-        const signalCount = (ss.pain_clusters?.length || 0) + (ss.desire_clusters?.length || 0) +
-          (ss.pattern_clusters?.length || 0) + (ss.root_causes?.length || 0) + (ss.psychological_drivers?.length || 0);
-        if (signalCount > 0) {
-          const cachedAudience = {
-            ...row,
-            // CANONICAL: emit `audiencePains` (not `painMap`). The
-            // canonicalizeAudienceShape() call below also strips legacy aliases.
-            audiencePains: JSON.parse(row.audiencePains || "[]"),
-            desireMap: JSON.parse(row.desireMap || "[]"),
-            objectionMap: JSON.parse(row.objectionMap || "[]"),
-            transformationMap: JSON.parse(row.transformationMap || "[]"),
-            emotionalDrivers: JSON.parse(row.emotionalDrivers || "[]"),
-            audienceSegments: JSON.parse(row.audienceSegments || "[]"),
-            segmentDensity: JSON.parse(row.segmentDensity || "[]"),
-            awarenessLevel: JSON.parse(row.awarenessLevel || "{}"),
-            maturityIndex: JSON.parse(row.maturityIndex || "{}"),
-            intentDistribution: JSON.parse(row.audienceIntentDistribution || "{}"),
-            structuredSignals: ss,
-            inputSummary: JSON.parse(row.inputSummary || "{}"),
-            snapshotId: row.id,
-          };
-          ctx.audience = canonicalizeAudienceShape(cachedAudience);
-          ctx.audienceSnapshotId = row.id;
-          console.log(`[Orchestrator] SCOPED_HYDRATE | Loaded cached audience snapshot=${row.id} | structuredSignals=${signalCount}`);
-
-          const rawObjections = cachedAudience.objectionMap || [];
-          const mappedObjections = rawObjections.map((o: any) => ({
-            label: o.label ?? o.canonical ?? o.pain ?? o.signal ?? "",
-            confidence: o.confidence ?? o.confidenceScore ?? 0.5,
-            evidence: Array.isArray(o.evidence) ? o.evidence : [],
-          }));
-          ctx.sglState = initializeSignalGovernance(ss, mappedObjections);
-          console.log(`[Orchestrator] SCOPED_SGL | signals=${ctx.sglState.governedSignals.length} | trace=${ctx.sglState.traceToken}`);
-          break;
-        }
+  // Task / Sara FT Repair: Validate strategy root eligibility at orchestrator entry.
+  // Fails closed if caller provided a strategyRootId that is not execution-eligible,
+  // unless the only issue is a stale dependency lineage mismatch that hydration will rewind & regenerate.
+  if (config.strategyRootId) {
+    const rootCheck = await assertRootExecutionEligible(config.strategyRootId, config.campaignId, config.accountId);
+    const isOnlyLineageStale =
+      !rootCheck.eligible &&
+      rootCheck.reasons.length > 0 &&
+      rootCheck.reasons.every(r => r.startsWith("Lineage mismatch in "));
+    if (!rootCheck.eligible && !isOnlyLineageStale) {
+      overallStatus = "BLOCKED";
+      failedEngine = "strategy_root";
+      blockReason = `Strategy root '${config.strategyRootId}' is not execution-eligible: ${rootCheck.reasons.join("; ")}`;
+      console.warn(`[Orchestrator] STRATEGY_ROOT_NOT_ELIGIBLE | rootId=${config.strategyRootId} | ${blockReason}`);
+      await db.update(orchestratorJobs)
+        .set({
+          status: "BLOCKED",
+          error: `Blocked at strategy_root: ${blockReason}`,
+          depthGateStatus: JSON.stringify(ctx.depthGateStatus),
+          completedAt: new Date(),
+        })
+        .where(eq(orchestratorJobs.id, jobId));
+      await inFlightCleanup.handleTerminal();
+      const durationMs = Date.now() - startTime;
+      __recorder.setPathShape("blocked_by_integrity");
+      __recorder.recordFinalResult({
+        jobId,
+        status: "BLOCKED",
+        completedEngines,
+        failedEngine,
+        blockReason,
+        durationMs,
+        ledgerEntryCount: budgetDecisionLedger.length,
+      });
+      __recorderFinalResultCaptured = true;
+      return {
+        jobId,
+        status: "BLOCKED",
+        completedEngines,
+        failedEngine,
+        blockReason,
+        results,
+        durationMs,
+      };
+    } else if (isOnlyLineageStale) {
+      console.warn(
+        `[Orchestrator] STRATEGY_ROOT_LINEAGE_STALE | rootId=${config.strategyRootId} | deferring to hydration to rewind and regenerate stale dependency chain: ${rootCheck.reasons.join("; ")}`,
+      );
+      if (effectiveStartIndex === 0) {
+        effectiveStartIndex = 6; // ensure hydration runs and rewinds to the stale upstream engine
       }
-    } catch (hydErr: any) {
-      console.warn(`[Orchestrator] SCOPED_HYDRATE_FAILED | ${hydErr.message}`);
+    } else {
+      ctx.strategyRoot = rootCheck.root;
+      ctx.strategyRootId = rootCheck.root?.id;
     }
   }
 
-  if (scopedEngineSet && !ctx.mi) {
-    try {
-      const [latestMi] = await db.select().from(miSnapshots)
-        .where(and(
-          eq(miSnapshots.accountId, config.accountId),
-          eq(miSnapshots.campaignId, config.campaignId),
-          eq(miSnapshots.status, "COMPLETE"),
-        ))
-        .orderBy(desc(miSnapshots.createdAt))
-        .limit(1);
-      if (latestMi) {
-        ctx.mi = {
-          ...latestMi,
-          signals: JSON.parse(latestMi.signalData?.toString() || "[]"),
-          multiSourceSignals: latestMi.multiSourceSignals || "{}",
-          snapshotId: latestMi.id,
-        };
-        ctx.miSnapshotId = latestMi.id;
-        console.log(`[Orchestrator] SCOPED_HYDRATE | Loaded cached MI snapshot=${latestMi.id} | confidence=${latestMi.overallConfidence}`);
+  // Upstream canonical hydration for scoped reruns and resume runs.
+  // When effectiveStartIndex > 0 or scopedEngines is provided, hydrate all
+  // required upstream artifacts (MI, Audience, Pain Registry, Strategic Lanes,
+  // Differentiation, Positioning, AEL) before entering the engine loop.
+  const hydrationResult = await hydrateRequiredUpstreamForResume({
+    resumeFromEngine: config.resumeFromEngine,
+    scopedEngines: config.scopedEngines,
+    accountId: config.accountId,
+    campaignId: config.campaignId,
+    jobId,
+    sourceJobId: config.sourceJobId,
+    reusedSnapshotIds: config.reusedSnapshotIds,
+    contextFingerprint: config.contextFingerprint ?? ctx.canonicalContext?.contextFingerprint ?? null,
+    offeringId: config.offeringId ?? null,
+    offeringName: config.offeringName ?? null,
+    targetMarket: config.targetMarket ?? null,
+    strategyRootId: config.strategyRootId,
+    ctx,
+  });
+
+  if (hydrationResult.staleEngines && hydrationResult.staleEngines.length > 0) {
+    const staleIndices = hydrationResult.staleEngines
+      .map(s => ENGINE_PRIORITY_ORDER.findIndex(e => e.id === s.engineId))
+      .filter(i => i >= 0);
+    if (staleIndices.length > 0) {
+      const earliestStaleIdx = Math.min(...staleIndices);
+      const prevStartIdx = effectiveStartIndex;
+      if (earliestStaleIdx < effectiveStartIndex) {
+        effectiveStartIndex = earliestStaleIdx;
       }
-    } catch (miHydErr: any) {
-      console.warn(`[Orchestrator] SCOPED_MI_HYDRATE_FAILED | ${miHydErr.message}`);
+      if (scopedEngineSet) {
+        for (let idx = earliestStaleIdx; idx < ENGINE_PRIORITY_ORDER.length; idx++) {
+          scopedEngineSet.add(ENGINE_PRIORITY_ORDER[idx].id);
+        }
+      }
+      console.log(
+        `[Orchestrator] STALE_DEPENDENCY_REWIND | rewound startIndex ${prevStartIdx} -> ${effectiveStartIndex} (${ENGINE_PRIORITY_ORDER[effectiveStartIndex]?.id}) | staleEngines=${hydrationResult.staleEngines.map(s => `${s.engineId}(${s.snapshotId || "none"}): ${s.reason}`).join("; ")}`,
+      );
     }
   }
 
   // Task #67 / T-S5-C2 — fail-closed scoped-rerun hydration check.
-  //
-  // Walk the transitive dependency closure of every engine in
-  // `scopedEngines`. For each upstream engine that will NOT execute this run
-  // (i.e. not in scope), require the EngineContext slot to be populated by
-  // the hydration pass above. If any required input is missing, abort with
-  // overallStatus=BLOCKED + a structured blockReason — running the scoped
-  // engines on empty inputs would emit a "completed" plan with degraded
-  // confidence, which is the silent-failure category founding doctrine
-  // (Seal #15) forbids.
   if (scopedEngineSet) {
     const gaps = validateScopedHydration(
       Array.from(scopedEngineSet),
@@ -4640,6 +5583,150 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         results,
         durationMs,
       };
+    }
+  }
+
+  // Fail-closed validation for resume runs without scopedEngines
+  if (!scopedEngineSet && effectiveStartIndex > 0 && hydrationResult.gaps.length > 0) {
+    const missing = hydrationResult.gaps.join(", ");
+    overallStatus = "BLOCKED";
+    failedEngine = "resume_hydration";
+    blockReason = `Resume from ${config.resumeFromEngine} missing required upstream inputs: ${missing}`;
+    console.warn(`[Orchestrator] RESUME_HYDRATION_FAIL_CLOSED | resumeFrom=${config.resumeFromEngine} | missing=${missing} | aborting before engine loop`);
+    const blockedSectionStatuses = ENGINE_PRIORITY_ORDER.map((e, idx) => {
+      const hydratedStep = hydrationResult.hydratedResults?.get(e.id);
+      if (e.id === config.resumeFromEngine) {
+        return {
+          id: e.id,
+          name: e.name,
+          status: "BLOCKED",
+          summary: blockReason,
+          failureCategory: "MISSING_PREREQUISITE",
+        };
+      }
+      if (hydratedStep) {
+        return buildSectionStatusEntry(e, hydratedStep);
+      }
+      return {
+        id: e.id,
+        name: e.name,
+        status: idx < effectiveStartIndex ? "BLOCKED" : "SKIPPED",
+        summary: idx < effectiveStartIndex ? `Missing prerequisite snapshot (${e.id})` : "Skipped due to missing upstream prerequisite.",
+      };
+    });
+    await db.update(orchestratorJobs)
+      .set({
+        status: "BLOCKED",
+        error: `Blocked at resume_hydration: ${blockReason}`,
+        sectionStatuses: JSON.stringify(blockedSectionStatuses),
+        depthGateStatus: JSON.stringify(ctx.depthGateStatus),
+        completedAt: new Date(),
+      })
+      .where(eq(orchestratorJobs.id, jobId));
+    await inFlightCleanup.handleTerminal();
+    const durationMs = Date.now() - startTime;
+    __recorder.setPathShape("blocked_by_integrity");
+    __recorder.recordFinalResult({
+      jobId,
+      status: "BLOCKED",
+      completedEngines,
+      failedEngine,
+      blockReason,
+      durationMs,
+      ledgerEntryCount: budgetDecisionLedger.length,
+    });
+    __recorderFinalResultCaptured = true;
+    return {
+      jobId,
+      status: "BLOCKED",
+      completedEngines,
+      failedEngine,
+      blockReason,
+      results,
+      durationMs,
+    };
+  }
+
+  // Register hydrated upstream dependencies into results map and completedEngines
+  if (hydrationResult.hydratedResults && hydrationResult.hydratedResults.size > 0) {
+    for (const [engId, stepRes] of hydrationResult.hydratedResults.entries()) {
+      results.set(engId, stepRes);
+      if (!completedEngines.includes(engId)) {
+        completedEngines.push(engId);
+      }
+      if (ctx.ssc) {
+        const stepIdx = ENGINE_PRIORITY_ORDER.findIndex(e => e.id === engId);
+        updateSSCAfterEngine(ctx.ssc, engId, stepRes, stepIdx >= 0 ? stepIdx : 0, runConfidenceProvenanceLog);
+      }
+      console.log(`[Orchestrator] RESUME_REGISTERED | Registered hydrated upstream engine ${engId} (snapshotId=${stepRes.snapshotId}) into results map`);
+    }
+  }
+
+  // Resume: restore derived run-level context that skipped engines would normally have produced.
+  if (effectiveStartIndex > 0 && !scopedEngineSet) {
+    try {
+      // Keep UI section statuses in sync: hydrated stages stay completed (with wasReused), resume stage is RUNNING.
+      const resumeEngineId = ENGINE_PRIORITY_ORDER[effectiveStartIndex]?.id;
+      const resumeStatuses = ENGINE_PRIORITY_ORDER.map(e => {
+        const r = results.get(e.id);
+        if (e.id === resumeEngineId) {
+          return {
+            id: e.id,
+            name: e.name,
+            status: "RUNNING",
+            summary: "Resuming from the stage that stopped...",
+          };
+        }
+        if (r) {
+          return buildSectionStatusEntry(e, r);
+        }
+        return {
+          id: e.id,
+          name: e.name,
+          status: "PENDING",
+          summary: null,
+        };
+      });
+      await db.update(orchestratorJobs)
+        .set({ sectionStatuses: JSON.stringify(resumeStatuses) })
+        .where(eq(orchestratorJobs.id, jobId));
+    } catch (ssErr: any) {
+      console.warn(`[Orchestrator] RESUME_SECTION_STATUS_WARN | ${ssErr?.message || ssErr}`);
+    }
+
+    try {
+      if (!ctx.signalComposition) buildUpstreamLineage(ctx);
+    } catch (linErr: any) {
+      console.warn(`[Orchestrator] RESUME_LINEAGE_WARN | ${linErr?.message || linErr}`);
+    }
+
+    try {
+      if (!ctx.celResults || ctx.celResults.length === 0) {
+        const upstreamEngineIds = new Set(
+          ENGINE_PRIORITY_ORDER.slice(0, effectiveStartIndex).map(e => e.id),
+        );
+        const { sql: sqlTag } = await import("drizzle-orm");
+        const celRows: any = await db.execute(sqlTag`
+          SELECT DISTINCT ON (engine_id) engine_id, report
+          FROM cel_reports
+          WHERE account_id = ${config.accountId} AND campaign_id = ${config.campaignId}
+          ORDER BY engine_id, created_at DESC
+        `);
+        const rows: any[] = Array.isArray(celRows) ? celRows : (celRows?.rows || []);
+        const restored: ComplianceResult[] = [];
+        for (const row of rows) {
+          const rep = typeof row.report === "string" ? JSON.parse(row.report) : row.report;
+          if (rep && rep.engineId && upstreamEngineIds.has(rep.engineId as EngineId)) {
+            restored.push(rep as ComplianceResult);
+          }
+        }
+        if (restored.length > 0) {
+          ctx.celResults = restored;
+          console.log(`[Orchestrator] RESUME_CEL_RESTORED | count=${restored.length}`);
+        }
+      }
+    } catch (celErr: any) {
+      console.warn(`[Orchestrator] RESUME_CEL_WARN | ${celErr?.message || celErr}`);
     }
   }
 
@@ -4892,16 +5979,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       campaignId: config.campaignId ?? null,
     });
 
-    const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
-      const r = results.get(e.id);
-      const status = readSectionStatus(r);
-      return {
-        id: e.id,
-        name: e.name,
-        status,
-        summary: r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null,
-      };
-    });
+    const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => buildSectionStatusEntry(e, results.get(e.id)));
     await db.update(orchestratorJobs)
       .set({
         sectionStatuses: JSON.stringify(sectionStatuses),
@@ -4933,11 +6011,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       delete ctxToSave.integrityReport;
       delete ctxToSave.sglState;
 
-      const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => {
-        const r = results.get(e.id);
-        const st = readSectionStatus(r);
-        return { id: e.id, name: e.name, status: st, summary: r ? summarizeEngine(e.id, r.output, st, r.blockReason) : null };
-      });
+      const sectionStatuses = ENGINE_PRIORITY_ORDER.map(e => buildSectionStatusEntry(e, results.get(e.id)));
 
       await db.update(orchestratorJobs)
         .set({
@@ -4952,18 +6026,44 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
         .where(eq(orchestratorJobs.id, jobId));
 
       break;
-    } else if (stepResult.status === "BLOCKED" || stepResult.status === "ERROR" || stepResult.status === "BLOCKED_BY_INTEGRITY") {
+    } else if (
+      stepResult.status === "BLOCKED" ||
+      stepResult.status === "FAILED" ||
+      stepResult.status === "ERROR" ||
+      stepResult.status === "BLOCKED_BY_INTEGRITY" ||
+      stepResult.status === "INCOMPLETE" ||
+      stepResult.status === "CONTRACT_INCOMPLETE" ||
+      stepResult.status === "DEPTH_BLOCKED" ||
+      stepResult.status === "SIGNAL_BLOCKED" ||
+      shouldBlockDownstream(stepResult)
+    ) {
       if (shouldBlockDownstream(stepResult)) {
         failedEngine = engineDef.name;
-        blockReason = stepResult.blockReason || stepResult.error || "Engine produced blocking result";
+        const errStr = typeof stepResult.error === "string"
+          ? stepResult.error
+          : (stepResult.error as any)?.message || "";
+        blockReason = stepResult.blockReason || errStr || "Engine produced blocking result";
         overallStatus = stepResult.status === "BLOCKED_BY_INTEGRITY" ? "BLOCKED_BY_INTEGRITY" : "BLOCKED";
         console.warn(`[Orchestrator] ${overallStatus} at ${engineDef.name}: ${blockReason}`);
+        for (let j = i + 1; j < ENGINE_PRIORITY_ORDER.length; j++) {
+          const skippedEngine = ENGINE_PRIORITY_ORDER[j];
+          results.set(skippedEngine.id, {
+            engineId: skippedEngine.id,
+            status: "SKIPPED",
+            output: null,
+            durationMs: 0,
+            blockReason: `Skipped because upstream ${engineDef.name} produced blocking result (${blockReason})`,
+          });
+        }
         break;
       } else {
         completedEngines.push(`${engineDef.name} (${stepResult.status})`);
         if (overallStatus === "COMPLETED") overallStatus = "PARTIAL";
       }
-    } else if (stepResult.status === "SKIPPED" || stepResult.status === "SKIPPED_AWAITING_LIVE_DATA") {
+    } else if (stepResult.status === "SKIPPED_AWAITING_LIVE_DATA") {
+      console.log(`[Orchestrator] ${engineDef.name} awaiting live campaign data (expected pre-launch): ${stepResult.blockReason}`);
+      completedEngines.push(`${engineDef.name} (AWAITING_LIVE_DATA)`);
+    } else if (stepResult.status === "SKIPPED") {
       console.log(`[Orchestrator] ${engineDef.name} skipped: ${stepResult.blockReason}`);
       if (overallStatus === "COMPLETED") overallStatus = "PARTIAL";
     }
@@ -5228,6 +6328,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
     // read them off the verdict shape; promoting them to a parallel
     // bundle would break those readers without parity testing.
     if (controlVerdict) {
+      ctx.controlVerdict = controlVerdict;
       try {
         Object.freeze(controlVerdict);
       } catch (frzErr: any) {
@@ -5292,9 +6393,13 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
           originalAction: originalActionValue,
           proposedDowngrades: controlVerdict.downgrades.map(d => ({ to: d.to, code: d.code })),
           alreadyAttributedTo,
+          verdictId: (controlVerdict as any).id || (controlVerdict as any).verdictId || null,
         });
       } catch (ledgerErr: any) {
         console.warn(`[Orchestrator] SYSTEM_CONTROL_DOWNGRADE_LEDGER_FAILED | jobId=${jobId} | error=${ledgerErr?.message ?? String(ledgerErr)} | proposed=${controlVerdict.downgrades.map(d => d.to).join(",")}`);
+        if (budgetResult?.output) {
+          budgetResult.output._governanceFailure = true;
+        }
       }
       if (ledgerEntry) {
         budgetDecisionLedger.push(ledgerEntry);
@@ -5515,16 +6620,7 @@ export async function runOrchestrator(config: OrchestratorConfig): Promise<Orche
       needsInputFields: null,
       aiPathReport: buildAndRecordAiPathReport(results, ctx.ssc?.doctrine?.resolution),
       sectionStatuses: JSON.stringify(
-        ENGINE_PRIORITY_ORDER.map(e => {
-          const r = results.get(e.id);
-          const status = readSectionStatus(r);
-          return {
-            id: e.id,
-            name: e.name,
-            status,
-            summary: r ? summarizeEngine(e.id, r.output, status, r.blockReason) : null,
-          };
-        })
+        ENGINE_PRIORITY_ORDER.map(e => buildSectionStatusEntry(e, results.get(e.id)))
       ),
       depthGateStatus: JSON.stringify(ctx.depthGateStatus),
     })

@@ -36,6 +36,10 @@ const SLOTS = {
   linkedinPosts: "LINKEDIN_ACTOR_ID",
   xTweets: "X_SCRAPER_ACTOR_ID",
   website: "WEBSITE_SCRAPER_ACTOR_ID",
+  trendyolReviews: "TRENDYOL_REVIEWS_ACTOR_ID",
+  g2Reviews: "G2_REVIEWS_ACTOR_ID",
+  capterraReviews: "CAPTERRA_REVIEWS_ACTOR_ID",
+  trustpilotReviews: "TRUSTPILOT_REVIEWS_ACTOR_ID",
 } as const;
 
 function slotStatus(surface: string, envSlot: string, defaultActiveActor?: string): PendingProviderStatus {
@@ -64,7 +68,7 @@ export function getGoogleBusinessProviderStatus(): PendingProviderStatus {
   return slotStatus("google_business", SLOTS.googleBusiness);
 }
 export function getGoogleReviewsProviderStatus(): PendingProviderStatus {
-  return slotStatus("google_reviews", SLOTS.googleReviews);
+  return slotStatus("google_reviews", SLOTS.googleReviews, process.env.GOOGLE_REVIEWS_ACTOR_ID || "compass~google-maps-reviews-scraper");
 }
 export function getGoogleSearchProviderStatus(): PendingProviderStatus {
   return slotStatus("google_search", SLOTS.googleSearch, "apify~google-search-scraper");
@@ -78,6 +82,18 @@ export function getXTweetsProviderStatus(): PendingProviderStatus {
 export function getWebsiteProviderStatus(): PendingProviderStatus {
   return slotStatus("website", SLOTS.website);
 }
+export function getTrustpilotReviewsProviderStatus(): PendingProviderStatus {
+  return slotStatus("trustpilot_reviews", SLOTS.trustpilotReviews, process.env.TRUSTPILOT_REVIEWS_ACTOR_ID || "sourabhbgp~trustpilot-scraper");
+}
+export function getTrendyolReviewsProviderStatus(): PendingProviderStatus {
+  return slotStatus("trendyol_reviews", SLOTS.trendyolReviews);
+}
+export function getG2ReviewsProviderStatus(): PendingProviderStatus {
+  return slotStatus("g2_reviews", SLOTS.g2Reviews);
+}
+export function getCapterraReviewsProviderStatus(): PendingProviderStatus {
+  return slotStatus("capterra_reviews", SLOTS.capterraReviews);
+}
 
 export function getAllPendingProviderStatuses(): PendingProviderStatus[] {
   return [
@@ -87,6 +103,10 @@ export function getAllPendingProviderStatuses(): PendingProviderStatus[] {
     getLinkedInPostsProviderStatus(),
     getXTweetsProviderStatus(),
     getWebsiteProviderStatus(),
+    getTrustpilotReviewsProviderStatus(),
+    getTrendyolReviewsProviderStatus(),
+    getG2ReviewsProviderStatus(),
+    getCapterraReviewsProviderStatus(),
   ];
 }
 

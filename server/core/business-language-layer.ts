@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { z } from "zod";
 import { generateWithRepair } from "../shared/llm-reliability/reliability-runner";
+import { evaluateClaimSemanticEntailment } from "../shared/claim-entailment";
 
 export interface EvidenceItem {
   source: string;
@@ -190,6 +191,13 @@ export const BusinessRepresentationSchema = z.object({
     targetAudience: z.string().min(1),
     growthObjective: z.string().min(1),
     rationale: z.string().min(1),
+    proposalStatus: z.string().optional(),
+    epistemicStatus: z.string().optional(),
+    epistemicLabel: z.string().optional(),
+    verificationStatus: z.string().optional(),
+    positioningOutcomeType: z.string().optional(),
+    comparisonStatus: z.string().optional(),
+    comparedCompetitorCount: z.number().optional(),
   }),
   monthlyObjective: z.object({
     objective: z.string().min(1),
@@ -243,7 +251,9 @@ export const BusinessRepresentationSchema = z.object({
       }),
       messageSequence: z.array(z.object({
         step: z.string(),
+        stepKey: z.string().optional(),
         stepLabel: z.string(),
+        messageFocus: z.string().optional(),
         rationale: z.string(),
       })),
       objections: z.array(z.object({
@@ -251,6 +261,14 @@ export const BusinessRepresentationSchema = z.object({
         objection: z.string(),
         response: z.string(),
         requiredProof: z.string(),
+        proofStatus: z.string().optional(),
+        proposalStatus: z.string().optional(),
+        supportingFactId: z.string().optional(),
+        evidenceIds: z.array(z.string()).optional(),
+        subjectScope: z.string().optional(),
+        competitorNames: z.array(z.string()).optional(),
+        competitorIds: z.array(z.string()).optional(),
+        aelGrounding: z.record(z.any()).optional(),
         funnelStageId: z.string().optional(),
       })),
       trustStrategy: z.object({
@@ -292,7 +310,9 @@ export const BusinessRepresentationSchema = z.object({
     }),
     messageSequence: z.array(z.object({
       step: z.string(),
+      stepKey: z.string().optional(),
       stepLabel: z.string(),
+      messageFocus: z.string().optional(),
       rationale: z.string(),
     })),
     objections: z.array(z.object({
@@ -300,6 +320,14 @@ export const BusinessRepresentationSchema = z.object({
       objection: z.string(),
       response: z.string(),
       requiredProof: z.string(),
+      proofStatus: z.string().optional(),
+      proposalStatus: z.string().optional(),
+      supportingFactId: z.string().optional(),
+      evidenceIds: z.array(z.string()).optional(),
+      subjectScope: z.string().optional(),
+      competitorNames: z.array(z.string()).optional(),
+      competitorIds: z.array(z.string()).optional(),
+      aelGrounding: z.record(z.any()).optional(),
       funnelStageId: z.string().optional(),
     })),
     trustStrategy: z.object({
@@ -315,14 +343,67 @@ export const BusinessRepresentationSchema = z.object({
 
 export type BusinessRepresentation = z.infer<typeof BusinessRepresentationSchema>;
 
+export function sanitizeUnsupportedAbsolutes(text: string): string {
+  if (!text || typeof text !== "string") return "";
+  // Formatting-only cleanup; semantic accuracy is enforced by LLM generation + judge + repair against verifiedProductFacts
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export async function translateStrategyPlanToBusinessLanguage(
   plan: any,
-  accountId: string
+  accountId: string,
+  verifiedProductFacts?: string[]
 ): Promise<BusinessRepresentation> {
   const { aiChat } = await import("../ai-client");
 
+  const summaryProposalStatus =
+    plan.strategicSummary?.proposalStatus ||
+    plan.positioning?.proposalStatus ||
+    plan.positioning?.epistemicStatus ||
+    "STRATEGIC_HYPOTHESIS";
+  const summaryEpistemicStatus =
+    plan.strategicSummary?.epistemicStatus ||
+    plan.positioning?.epistemicStatus ||
+    "STRATEGIC_HYPOTHESIS";
+  const summaryEpistemicLabel =
+    plan.strategicSummary?.epistemicLabel ||
+    plan.positioning?.epistemicLabel ||
+    undefined;
+  const summaryVerificationStatus =
+    plan.strategicSummary?.verificationStatus ||
+    plan.positioning?.verificationStatus ||
+    "PROPOSED";
+  const summaryPositioningOutcomeType =
+    plan.strategicSummary?.positioningOutcomeType ||
+    plan.positioning?.positioningOutcomeType ||
+    undefined;
+  const summaryComparisonStatus =
+    plan.strategicSummary?.comparisonStatus ||
+    plan.positioning?.comparisonStatus ||
+    undefined;
+  const summaryComparedCompetitorCount =
+    typeof plan.strategicSummary?.comparedCompetitorCount === "number"
+      ? plan.strategicSummary.comparedCompetitorCount
+      : typeof plan.positioning?.comparedCompetitorCount === "number"
+        ? plan.positioning.comparedCompetitorCount
+        : undefined;
+
+  const resolvedVerifiedFacts: string[] = Array.isArray(verifiedProductFacts)
+    ? verifiedProductFacts.filter((f): f is string => typeof f === "string" && f.trim().length > 0)
+    : [];
+
   const distilledInput = {
-    strategicSummary: plan.strategicSummary || {},
+    strategicSummary: {
+      ...(plan.strategicSummary || {}),
+      proposalStatus: summaryProposalStatus,
+      epistemicStatus: summaryEpistemicStatus,
+      ...(summaryEpistemicLabel ? { epistemicLabel: summaryEpistemicLabel } : {}),
+      verificationStatus: summaryVerificationStatus,
+      ...(summaryPositioningOutcomeType ? { positioningOutcomeType: summaryPositioningOutcomeType } : {}),
+      ...(summaryComparisonStatus ? { comparisonStatus: summaryComparisonStatus } : {}),
+      ...(summaryComparedCompetitorCount !== undefined ? { comparedCompetitorCount: summaryComparedCompetitorCount } : {}),
+    },
+    ...(resolvedVerifiedFacts.length > 0 ? { verifiedProductFacts: resolvedVerifiedFacts } : {}),
     monthlyObjective: plan.monthlyObjective || {},
     contentDistribution: {
       rationale: plan.contentDistribution?.rationale || "",
@@ -342,6 +423,33 @@ export async function translateStrategyPlanToBusinessLanguage(
     buyerConversionJourneys: plan.buyerConversionJourneys || undefined,
     buyerConversionJourney: plan.buyerConversionJourney || undefined,
     persuasionStrategy: plan.persuasionStrategy || undefined,
+  };
+
+  const attachStructuredMetadata = (parsed: BusinessRepresentation): BusinessRepresentation => {
+    parsed.strategicSummary = {
+      ...parsed.strategicSummary,
+      strategy: sanitizeUnsupportedAbsolutes(parsed.strategicSummary?.strategy || ""),
+      targetAudience: sanitizeUnsupportedAbsolutes(parsed.strategicSummary?.targetAudience || ""),
+      growthObjective: sanitizeUnsupportedAbsolutes(parsed.strategicSummary?.growthObjective || ""),
+      rationale: sanitizeUnsupportedAbsolutes(parsed.strategicSummary?.rationale || ""),
+      proposalStatus: summaryProposalStatus,
+      epistemicStatus: summaryEpistemicStatus,
+      ...(summaryEpistemicLabel ? { epistemicLabel: summaryEpistemicLabel } : {}),
+      verificationStatus: summaryVerificationStatus,
+      ...(summaryPositioningOutcomeType ? { positioningOutcomeType: summaryPositioningOutcomeType } : {}),
+      ...(summaryComparisonStatus ? { comparisonStatus: summaryComparisonStatus } : {}),
+      ...(summaryComparedCompetitorCount !== undefined ? { comparedCompetitorCount: summaryComparedCompetitorCount } : {}),
+    };
+    if (parsed.monthlyObjective?.objective) {
+      parsed.monthlyObjective.objective = sanitizeUnsupportedAbsolutes(parsed.monthlyObjective.objective);
+    }
+    if (parsed.contentDistribution?.rationale) {
+      parsed.contentDistribution.rationale = sanitizeUnsupportedAbsolutes(parsed.contentDistribution.rationale);
+    }
+    if (distilledInput.buyerConversionJourneys) parsed.buyerConversionJourneys = distilledInput.buyerConversionJourneys;
+    if (distilledInput.buyerConversionJourney) parsed.buyerConversionJourney = distilledInput.buyerConversionJourney;
+    if (distilledInput.persuasionStrategy) parsed.persuasionStrategy = distilledInput.persuasionStrategy;
+    return parsed;
   };
 
   try {
@@ -368,16 +476,21 @@ Your output must trace the approved strategy EXACTLY.
 
 STRICT CONSTITUTIONAL RULES:
 1. DECISION & TRADEOFF PRESERVATION: You must NEVER flatten concrete strategic decisions into generic platitudes (e.g. "lead with batch consistency and sourcing reliability for clinics rather than consumer therapeutic claims" must NOT become "build trust with clinics"). Preserve all explicit tradeoffs and "what NOT to do" boundaries.
-2. MULTI-LANE SEPARATION: Keep distinct customer segments and strategic lanes separate. Do not smush B2B clinic procurement, wellness practitioners, and wholesale buyers into a single generic paragraph.
-3. NO INVENTED CAPABILITIES: Do NOT invent unvalidated features, SLAs, or technical integrations (e.g. "real-time API tracking", "guaranteed zero stockouts") unless explicitly present in the input. If a proof gap or capability gap is noted, preserve it honestly.
-4. CLEAN JARGON WITHOUT LOSING MEANING: Clean up technical engine terminology into clear business outcomes without losing the underlying commercial logic.
-5. You must output a JSON object matching this schema exactly:
+2. MULTI-LANE SEPARATION: Keep distinct customer segments and strategic lanes separate. Do not smush distinct buyer segments into a single generic paragraph.
+3. NO INVENTED CAPABILITIES OR UNSUPPORTED ABSOLUTES: Do NOT invent unvalidated features, SLAs, prices, preview durations, or technical integrations unless explicitly present in the input. Never use unsupported absolutes such as "never generic", "ensures authenticity", or "permanent access".
+4. PAYMENT-TRIGGER & COMPETITOR ATTRIBUTION FIDELITY: Preserve exact documented payment triggers (e.g., if a user creates a trial song for free and pays when gifting, state that exact trigger — NEVER rewrite it into "customers pay only when satisfied" or unqualified "risk-free"). Attribute customer complaints as customer-reported perceptions on named competitors, and NEVER assert unverified competitor internal production workflows ("mass-produced automated prompt workflows", "template-bound services") or market-wide "blind-purchase ... isolated audio tracks" claims.
+5. PRESERVE PROPOSAL & EPISTEMIC STATUS: Distinguish verified product capabilities from proposed strategic hypotheses or operational changes requiring confirmation. Do NOT turn a strategic proposal into a proven commercial superiority claim.
+6. CLEAN JARGON WITHOUT LOSING MEANING: Clean up technical engine terminology into clear business outcomes without losing the underlying commercial logic.
+7. You must output a JSON object matching this schema exactly:
 {
   "strategicSummary": {
     "strategy": "The overarching strategic positioning choice, core diagnosis, and competitive decision",
     "targetAudience": "Clear breakdown of each distinct active audience lane, their specific problem, and commercial impact",
     "growthObjective": "Specific conversion model and commercial objective",
-    "rationale": "Why this strategic path was chosen, why it beats current alternatives, and the explicit tradeoffs (what NOT to do)"
+    "rationale": "Why this strategic path was chosen, why it beats current alternatives, and the explicit tradeoffs (what NOT to do)",
+    "proposalStatus": "${summaryProposalStatus}",
+    "epistemicStatus": "${summaryEpistemicStatus}",
+    "verificationStatus": "${summaryVerificationStatus}"
   },
   "monthlyObjective": { "objective": "..." },
   "contentDistribution": {
@@ -399,10 +512,7 @@ STRICT CONSTITUTIONAL RULES:
 
         const text = response.choices?.[0]?.message?.content ?? "{}";
         const parsed = JSON.parse(text) as BusinessRepresentation;
-        if (input.buyerConversionJourneys) parsed.buyerConversionJourneys = input.buyerConversionJourneys;
-        if (input.buyerConversionJourney) parsed.buyerConversionJourney = input.buyerConversionJourney;
-        if (input.persuasionStrategy) parsed.persuasionStrategy = input.persuasionStrategy;
-        return parsed;
+        return attachStructuredMetadata(parsed);
       },
 
       judge: async (input, candidate) => {
@@ -447,6 +557,29 @@ STRICT CONSTITUTIONAL RULES:
           }
         }
 
+        if (/\b(never\s+generic|ensures?\s+(?:emotional\s+)?authenticity|permanent\s+(?:downloadable\s+|cloud\s+)?(?:mp3\s+)?access|lifetime\s+(?:cloud\s+)?(?:hosting|storage|access))\b/i.test(combined)) {
+          return {
+            valid: false,
+            failureClass: "UNSUPPORTED_ABSOLUTE_CLAIM",
+            rejections: [
+              `BLL output contains unsupported absolute ("never generic", "ensures authenticity", or "permanent/lifetime access").`,
+            ],
+          };
+        }
+
+        if (resolvedVerifiedFacts.length > 0) {
+          const entailment = evaluateClaimSemanticEntailment(combined, resolvedVerifiedFacts);
+          if (!entailment.entailed) {
+            return {
+              valid: false,
+              failureClass: "UNSUPPORTED_CAPABILITY_OR_OUTCOME_CLAIM",
+              rejections: entailment.violations.map(
+                (v) => `BLL output asserts unentailed property (${v}) not supported by verifiedProductFacts.`
+              ),
+            };
+          }
+        }
+
         return { valid: true };
       },
 
@@ -464,7 +597,7 @@ STRICT CONSTITUTIONAL RULES:
               content: `You are a Senior Strategic Copywriter. Fix the JSON strategy plan translation.
 Output a strict JSON object matching the requested schema:
 {
-  "strategicSummary": { "strategy": "...", "targetAudience": "...", "growthObjective": "...", "rationale": "..." },
+  "strategicSummary": { "strategy": "...", "targetAudience": "...", "growthObjective": "...", "rationale": "...", "proposalStatus": "${summaryProposalStatus}", "epistemicStatus": "${summaryEpistemicStatus}", "verificationStatus": "${summaryVerificationStatus}" },
   "monthlyObjective": { "objective": "..." },
   "contentDistribution": {
     "rationale": "...",
@@ -486,39 +619,39 @@ Errors to fix: ${rejections.join(", ")}`,
 
         const text = response.choices?.[0]?.message?.content ?? "{}";
         const parsed = JSON.parse(text) as BusinessRepresentation;
-        if (input.buyerConversionJourneys) parsed.buyerConversionJourneys = input.buyerConversionJourneys;
-        if (input.buyerConversionJourney) parsed.buyerConversionJourney = input.buyerConversionJourney;
-        if (input.persuasionStrategy) parsed.persuasionStrategy = input.persuasionStrategy;
-        return parsed;
+        return attachStructuredMetadata(parsed);
       },
     });
 
-    return result;
+    return attachStructuredMetadata(result);
   } catch (err: any) {
     console.warn(
       `[BusinessLanguageLayer] LLM translation unavailable (${err.message}). Using structured canonical business representation fallback.`
     );
-    return {
+    return attachStructuredMetadata({
       strategicSummary: {
-        strategy: distilledInput.strategicSummary.strategy,
-        targetAudience: distilledInput.strategicSummary.targetAudience,
-        growthObjective: distilledInput.strategicSummary.growthObjective,
-        rationale: distilledInput.strategicSummary.rationale,
+        strategy: distilledInput.strategicSummary.strategy || "",
+        targetAudience: distilledInput.strategicSummary.targetAudience || "",
+        growthObjective: distilledInput.strategicSummary.growthObjective || "",
+        rationale: distilledInput.strategicSummary.rationale || "",
+        proposalStatus: summaryProposalStatus,
+        epistemicStatus: summaryEpistemicStatus,
+        verificationStatus: summaryVerificationStatus,
       },
       monthlyObjective: {
-        objective: distilledInput.monthlyObjective.objective,
+        objective: distilledInput.monthlyObjective.objective || "",
       },
       contentDistribution: {
-        rationale: distilledInput.contentDistribution.rationale,
-        contentPillars: distilledInput.contentDistribution.contentPillars,
+        rationale: distilledInput.contentDistribution.rationale || "",
+        contentPillars: distilledInput.contentDistribution.contentPillars || [],
       },
       executionBlueprintDnaLink: {
-        contentPillarToDna: distilledInput.executionBlueprintDnaLink.contentPillarToDna,
-        weeklyDnaApplication: distilledInput.executionBlueprintDnaLink.weeklyDnaApplication,
+        contentPillarToDna: distilledInput.executionBlueprintDnaLink.contentPillarToDna || [],
+        weeklyDnaApplication: distilledInput.executionBlueprintDnaLink.weeklyDnaApplication || "",
       },
       buyerConversionJourneys: (distilledInput as any).buyerConversionJourneys,
       buyerConversionJourney: distilledInput.buyerConversionJourney,
       persuasionStrategy: distilledInput.persuasionStrategy,
-    };
+    });
   }
 }

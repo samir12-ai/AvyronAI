@@ -458,6 +458,13 @@ export function clusterSemanticSignals(
 export function computeCompetitorSignals(competitor: CompetitorInput): CompetitorSignalResult {
   const posts = (competitor.posts || []).slice(0, MI_COST_LIMITS.MAX_POSTS_PER_COMPETITOR);
   const comments = (competitor.comments || []).slice(0, MI_COST_LIMITS.MAX_COMMENTS_PER_COMPETITOR);
+  const reviews: any[] = Array.isArray((competitor as any).reviews) ? (competitor as any).reviews : [];
+  const cu = competitor.competitorUnderstanding || null;
+  const cuCapabilities: any[] = Array.isArray(cu?.capabilities) ? cu.capabilities : [];
+  const cuOffers: any[] = Array.isArray(cu?.offers) ? cu.offers : [];
+  const cuPositioning: any[] = Array.isArray(cu?.positioning) ? cu.positioning : [];
+  const cuProof: any[] = Array.isArray(cu?.proof) ? cu.proof : [];
+  const cuFactCount = cuCapabilities.length + cuOffers.length + cuPositioning.length + cuProof.length;
 
   const signals: SignalData = {
     postingFrequencyTrend: computePostingFrequencyTrend(posts),
@@ -473,7 +480,44 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
 
   const semanticSignals = extractSemanticSignals(posts);
 
+  // Incorporate competitor-authored website understanding signals into commercial analysis
+  // while explicitly preserving their competitor-authored sourceType (never customer testimony).
+  if (cuFactCount > 0) {
+    for (const pos of cuPositioning.slice(0, 3)) {
+      const stmt = String(pos?.statement || pos?.primaryPromise || "").trim();
+      if (stmt.length >= 10) {
+        semanticSignals.push({
+          category: "authority_positioning",
+          snippet: `[COMPETITOR_UNDERSTANDING] ${stmt.slice(0, 180)}`,
+          strength: 0.65,
+        });
+      }
+    }
+    for (const cap of cuCapabilities.slice(0, 3)) {
+      const stmt = String(cap?.statement || cap?.capability || "").trim();
+      if (stmt.length >= 10) {
+        semanticSignals.push({
+          category: "strategic_claim",
+          snippet: `[COMPETITOR_UNDERSTANDING] ${stmt.slice(0, 180)}`,
+          strength: 0.6,
+        });
+      }
+    }
+    for (const pr of cuProof.slice(0, 2)) {
+      const stmt = String(pr?.statement || "").trim();
+      if (stmt.length >= 10) {
+        semanticSignals.push({
+          category: "transformation_statement",
+          snippet: `[COMPETITOR_UNDERSTANDING] ${stmt.slice(0, 180)}`,
+          strength: 0.6,
+        });
+      }
+    }
+  }
+
   const postCommentCounts = posts.reduce((s, p) => s + (p.comments || 0), 0);
+  const hasWebsitePricing = cuOffers.some((o: any) => Boolean(o?.pricing || o?.offerStatement));
+  const hasWebsiteCta = cuOffers.some((o: any) => Boolean(o?.cta));
 
   const missingFields: string[] = [];
   if (posts.length === 0) {
@@ -482,25 +526,29 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
     missingFields.push("posts (sparse data)");
   }
   if (!competitor.contentTypeRatio) missingFields.push("contentTypeRatio");
-  if (!competitor.ctaPatterns) missingFields.push("ctaPatterns");
-  if (!competitor.profileLink) missingFields.push("profileLink (bio/CTA detection)");
-  if (!competitor.pricingHints) missingFields.push("pricingHints");
+  if (!competitor.ctaPatterns && !hasWebsiteCta) missingFields.push("ctaPatterns");
+  if (!competitor.pricingHints && !hasWebsitePricing) missingFields.push("pricingHints");
 
-  const hasCommentSignal = comments.length > 0 || postCommentCounts > 0;
+  const hasCommentSignal = comments.length > 0 || postCommentCounts > 0 || reviews.length > 0;
 
   const totalExpectedFields = 9;
   const availableFields = totalExpectedFields - [
-    posts.length === 0,
+    posts.length === 0 && cuFactCount === 0,
     !hasCommentSignal,
-    !competitor.engagementRatio && posts.length === 0,
-    !competitor.ctaPatterns,
-    !competitor.profileLink,
+    !competitor.engagementRatio && posts.length === 0 && cuFactCount === 0,
+    !competitor.ctaPatterns && !hasWebsiteCta,
+    false,
   ].filter(Boolean).length;
 
   const signalCoverageScore = Math.round((availableFields / totalExpectedFields) * 100) / 100;
   const sourceReliabilityScore = 0.75;
 
-  const sampleSize = posts.length + (comments.length > 0 ? Math.max(comments.length, postCommentCounts) : 0);
+  const websiteEvidenceSample = cuFactCount > 0 ? Math.min(cuFactCount, 5) : 0;
+  const sampleSize =
+    posts.length +
+    (comments.length > 0 ? Math.max(comments.length, postCommentCounts) : 0) +
+    reviews.length +
+    websiteEvidenceSample;
   const now = Date.now();
   const postTimestamps = posts.map(p => new Date(p.timestamp).getTime()).filter(t => !isNaN(t));
   const oldestPost = postTimestamps.length > 0 ? Math.min(...postTimestamps) : now;
@@ -511,7 +559,7 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
 
   const rawAuthorityWeight = computeCompetitorAuthorityWeight(signals, sampleSize, signalCoverageScore);
   const lifecycle = classifyCompetitorLifecycle(signals, sampleSize, signalCoverageScore);
-  const lowSample = posts.length === 0;
+  const lowSample = posts.length === 0 && cuFactCount === 0 && reviews.length === 0;
   const authorityWeight = rawAuthorityWeight;
 
   return {
@@ -534,8 +582,10 @@ export function computeCompetitorSignals(competitor: CompetitorInput): Competito
 }
 
 export function computeAllSignals(competitors: CompetitorInput[]): CompetitorSignalResult[] {
-  const capped = competitors.slice(0, MI_COST_LIMITS.MAX_COMPETITORS);
-  const results = capped.map(computeCompetitorSignals);
+  // Deterministic ordering by competitor ID ensures coverage and signals are independent of DB row order.
+  // Never truncate selected competitors at 12; analyze all selected competitors with their available evidence.
+  const ordered = [...competitors].sort((a, b) => String(a.id || "").localeCompare(String(b.id || "")));
+  const results = ordered.map(computeCompetitorSignals);
 
   if (results.length > 0) {
     const totalSamples = results.reduce((s, r) => s + r.sampleSize, 0);

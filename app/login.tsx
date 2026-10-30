@@ -78,8 +78,14 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
   }, []);
 
   const validateEmail = (val: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+    const trimmed = (val || '').trim();
+    if (!trimmed) return false;
+    if (trimmed.includes('@')) {
+      return /^[^\s@]+@[^\s@]+(\.[^\s@]+)?$/.test(trimmed);
+    }
+    return trimmed.length >= 2;
   };
+
 
   const handleSubmit = async () => {
     if (isLoading) return;
@@ -87,7 +93,7 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
     setError('');
     setInfoMessage('');
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
       setError('Please enter your email address.');
       return;
@@ -99,16 +105,16 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
     }
 
     if (!password) {
-      setError('Password is required.');
-      return;
-    }
-
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError('Please enter your password.');
       return;
     }
 
     if (mode === 'signup') {
+      if (password.length < 6) {
+        setError('Password must be at least 6 characters.');
+        return;
+      }
+
       if (confirmPassword && password !== confirmPassword) {
         setError('Passwords do not match.');
         return;
@@ -295,7 +301,10 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
                         <TextInput
                           style={styles.textInput}
                           value={name}
-                          onChangeText={setName}
+                          onChangeText={(val) => {
+                            setName(val);
+                            if (error) setError('');
+                          }}
                           placeholder="Enter your full name"
                           placeholderTextColor="#475569"
                           autoCapitalize="words"
@@ -326,8 +335,11 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
                       <TextInput
                         style={styles.textInput}
                         value={email}
-                        onChangeText={setEmail}
-                        placeholder="Enter your email"
+                        onChangeText={(val) => {
+                          setEmail(val);
+                          if (error) setError('');
+                        }}
+                        placeholder="Enter your email address"
                         placeholderTextColor="#475569"
                         keyboardType="email-address"
                         autoCapitalize="none"
@@ -359,7 +371,10 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
                       <TextInput
                         style={[styles.textInput, { flex: 1 }]}
                         value={password}
-                        onChangeText={setPassword}
+                        onChangeText={(val) => {
+                          setPassword(val);
+                          if (error) setError('');
+                        }}
                         placeholder={mode === 'signup' ? 'Create a secure password (6+ chars)' : 'Enter your password'}
                         placeholderTextColor="#475569"
                         secureTextEntry={!showPassword}
@@ -500,14 +515,6 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
                     </Text>
                   </Pressable>
                 </View>
-
-                {/* Minimal Trust Indicator */}
-                <View style={styles.trustFooter}>
-                  <Ionicons name="shield-checkmark-outline" size={13} color="#475569" style={{ marginRight: 6 }} />
-                  <Text style={styles.trustFooterText}>
-                    Enterprise-grade encryption · SOC 2 & GDPR compliant architecture
-                  </Text>
-                </View>
               </Animated.View>
             </ScrollView>
           </KeyboardAvoidingView>
@@ -542,11 +549,11 @@ export default function LoginScreen({ initialMode = 'login' }: LoginScreenProps)
                 <View style={styles.pillarsGrid}>
                   <View style={styles.pillarItem}>
                     <View style={styles.pillarIconBox}>
-                      <Ionicons name="shield-checkmark" size={16} color="#A78BFA" />
+                      <Ionicons name="git-merge-outline" size={16} color="#A78BFA" />
                     </View>
                     <View style={styles.pillarTextBox}>
-                      <Text style={styles.pillarTitle}>Enterprise Security</Text>
-                      <Text style={styles.pillarDetail}>SOC 2 Type II compliant & GDPR ready</Text>
+                      <Text style={styles.pillarTitle}>Unified Architecture</Text>
+                      <Text style={styles.pillarDetail}>Continuous alignment from signals to execution</Text>
                     </View>
                   </View>
 

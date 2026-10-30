@@ -33,7 +33,8 @@ import { evaluateQ1 } from "./policy/dna-working";
 import { evaluateQ2 } from "./policy/market-shift";
 import { interpretQ1Maturity } from "./policy/q1-maturity";
 import { withCampaignLock } from "./concurrency";
-import { insertBossRun, newBossRunId, updateBossRun } from "./store";
+import { updateBossRun, insertBossRun, newBossRunId } from "./store";
+import { syncCampaignAdaptiveReasoning } from "../adaptive/case-coordinator";
 import { evaluateWindowState, autoCloseExpiredWindow } from "../pipeline/eval-windows";
 import { evaluateRhythmCompliance } from "../pipeline/lanes/user/rhythm-compliance";
 import { applyEvaluationHierarchy } from "./eval-hierarchy";
@@ -641,6 +642,16 @@ export async function runBoss(input: BossRunInput): Promise<BossRunResult> {
       aiPathReport: JSON.stringify(aiPathEnvelope),
       finishedAt,
     });
+
+    // Route qualified Watchtower & Performance signals into reasoning_cases and adaptive_decisions idempotently
+    try {
+      await syncCampaignAdaptiveReasoning({
+        accountId: input.accountId,
+        campaignId: input.campaignId,
+      });
+    } catch (syncErr) {
+      console.warn(`[Boss] syncCampaignAdaptiveReasoning non-fatal error: ${(syncErr as Error).message}`);
+    }
 
     return {
       bossRunId,

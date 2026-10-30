@@ -96,7 +96,7 @@ function normalizeStringArray(input: unknown): string[] {
   if (!Array.isArray(input)) return [];
   const cleaned = input
     .filter((x): x is string => typeof x === "string")
-    .map((x) => x.trim().toLowerCase())
+    .map((x) => x.trim().replace(/^#+([a-z0-9_.-]+)$/i, "$1").toLowerCase())
     .filter((x) => x.length > 0);
   return Array.from(new Set(cleaned)).sort();
 }
@@ -104,14 +104,17 @@ function normalizeStringArray(input: unknown): string[] {
 function detectChange(baselinePayloadJson: string, currentPayload: Record<string, unknown>): { dimension: ChangeEventContract["change_dimension"]; severity: ChangeEventContract["severity"]; evidence: string[] } | null {
   try {
     const base = JSON.parse(baselinePayloadJson) as Record<string, unknown>;
+    if (base.is_empty_or_failed || currentPayload.is_empty_or_failed) return null;
     const evidence: string[] = [];
     let dimension: ChangeEventContract["change_dimension"] = "other";
 
     const basePatterns = normalizeStringArray(base.patterns);
     const currPatterns = normalizeStringArray(currentPayload.patterns);
     const patternsChanged =
-      basePatterns.length !== currPatterns.length ||
-      basePatterns.some((v, i) => v !== currPatterns[i]);
+      basePatterns.length > 0 &&
+      currPatterns.length > 0 &&
+      (basePatterns.length !== currPatterns.length ||
+        basePatterns.some((v, i) => v !== currPatterns[i]));
     if (patternsChanged) {
       evidence.push(`patterns changed: ${JSON.stringify(basePatterns)} -> ${JSON.stringify(currPatterns)}`);
       dimension = "content";
@@ -119,7 +122,7 @@ function detectChange(baselinePayloadJson: string, currentPayload: Record<string
 
     const baseFreq = (base.frequency as number) ?? null;
     const currFreq = (currentPayload.frequency as number) ?? null;
-    if (baseFreq !== null && currFreq !== null && baseFreq !== currFreq) {
+    if (baseFreq !== null && currFreq !== null && baseFreq > 0 && currFreq > 0 && baseFreq !== currFreq) {
       evidence.push(`frequency: ${baseFreq} -> ${currFreq}`);
       dimension = dimension === "other" ? "frequency" : dimension;
     }

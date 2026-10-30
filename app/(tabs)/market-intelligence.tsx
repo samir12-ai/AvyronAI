@@ -27,7 +27,7 @@ export default function MarketIntelligenceScreen() {
     selectedCampaign?.selectedCampaignId ||
     selectedCampaignId ||
     shellController.activeWorkspace?.id ||
-    'campaign_1773576062201_6t0oxi';
+    '';
 
   // 1. Fetch Market Overview & Competitor Directory
   const {
@@ -40,8 +40,7 @@ export default function MarketIntelligenceScreen() {
   // Set default selected competitor if none selected
   useEffect(() => {
     if (!selectedCompetitorId && miBundle?.competitors && miBundle.competitors.length > 0) {
-      // Prefer HubSpot or first competitor
-      const defaultComp = miBundle.competitors.find(c => c.name.toLowerCase().includes('hubspot')) || miBundle.competitors[0];
+      const defaultComp = miBundle.competitors[0];
       setSelectedCompetitorId(defaultComp.competitorId);
     }
   }, [miBundle, selectedCompetitorId]);

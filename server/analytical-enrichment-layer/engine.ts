@@ -516,8 +516,11 @@ export function filterAELForStrategicUse(
     }
   }
 
+  const parsedLanes = Array.isArray(approvedLanes)
+    ? approvedLanes
+    : (typeof approvedLanes === "string" ? (() => { try { return JSON.parse(approvedLanes); } catch { return []; } })() : []);
   const laneSegmentIds = new Set<string>(
-    (approvedLanes || []).map((l: any) => l.segmentId || l.id).filter(Boolean)
+    (Array.isArray(parsedLanes) ? parsedLanes : []).map((l: any) => l?.segmentId || l?.id).filter(Boolean)
   );
 
   const resolveItemAuthority = (
@@ -605,7 +608,59 @@ export function filterAELForStrategicUse(
       }
     }
 
-    // 4. No explicit canonical ID authority link established -> fail closed as UNRESOLVED (0 downstream authority)
+    // 4. Lexical / semantic pain authority matching against canonicalPains when explicit IDs are absent
+    if (text && canonicalPains.length > 0) {
+      const stopWords = new Set(["that", "this", "with", "from", "have", "they", "their", "what", "when", "where", "which", "about", "because", "users", "buyers", "customers", "people", "often", "some", "many", "more", "less", "into", "over", "under"]);
+      const itemTokens = new Set(
+        text
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter((w) => w.length >= 4 && !stopWords.has(w))
+      );
+      if (itemTokens.size > 0) {
+        let bestCoreScore = 0;
+        const matchedCoreIds: string[] = [];
+        let bestSuppScore = 0;
+        const matchedSuppIds: string[] = [];
+        let bestExclScore = 0;
+        const matchedExclIds: string[] = [];
+
+        for (const cp of canonicalPains) {
+          const cpTokens = (cp.canonical || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, " ")
+            .split(/\s+/)
+            .filter((w) => w.length >= 4 && !stopWords.has(w));
+          if (cpTokens.length === 0) continue;
+          const overlap = cpTokens.filter((t) => itemTokens.has(t)).length;
+          if (overlap === 0) continue;
+          const score = overlap / Math.max(2, Math.min(cpTokens.length, 6));
+          if (corePainIds.has(cp.painId)) {
+            if (score > bestCoreScore) bestCoreScore = score;
+            if (overlap >= 1) matchedCoreIds.push(cp.painId);
+          } else if (supportingPainIds.has(cp.painId)) {
+            if (score > bestSuppScore) bestSuppScore = score;
+            if (overlap >= 1) matchedSuppIds.push(cp.painId);
+          } else if (excludedPainIds.has(cp.painId)) {
+            if (score > bestExclScore) bestExclScore = score;
+            if (overlap >= 1) matchedExclIds.push(cp.painId);
+          }
+        }
+
+        if (bestExclScore > 0 && bestExclScore >= bestCoreScore && bestExclScore >= bestSuppScore && matchedCoreIds.length === 0) {
+          return { status: "EXCLUDED", resolvedPainIds: matchedExclIds.slice(0, 3) };
+        }
+        if (matchedCoreIds.length > 0 && bestCoreScore >= bestSuppScore) {
+          return { status: "CORE", resolvedPainIds: matchedCoreIds.slice(0, 3) };
+        }
+        if (matchedSuppIds.length > 0) {
+          return { status: "SUPPORTING", resolvedPainIds: matchedSuppIds.slice(0, 3) };
+        }
+      }
+    }
+
+    // 5. No explicit or lexical canonical authority link established -> fail closed as UNRESOLVED (0 downstream authority)
     return { status: "UNRESOLVED", resolvedPainIds: [] };
   };
 

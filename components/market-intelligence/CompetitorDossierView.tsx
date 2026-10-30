@@ -62,6 +62,35 @@ export default function CompetitorDossierView({ dossier, onBackToList }: Props) 
         <Text style={styles.compNameTitle}>{identity.name}</Text>
         <Text style={styles.heroSummaryText}>{identity.oneLineSummary}</Text>
 
+        {identity.geographicLabel && (
+          <View style={[
+            styles.geoDossierBanner,
+            (identity.geographicStatus === 'LOCAL_MARKET' || identity.geographicStatus === 'DIRECT_LEBANON') && styles.geoBannerDirect,
+            (identity.geographicStatus === 'GLOBAL_RELEVANT' || identity.geographicStatus === 'REGIONAL_DELIVERS_TO_LEBANON') && styles.geoBannerRegional,
+            identity.geographicStatus === 'REFERENCE_BRAND' && styles.geoBannerRef,
+          ]}>
+            <Feather
+              name={(identity.geographicStatus === 'LOCAL_MARKET' || identity.geographicStatus === 'DIRECT_LEBANON') ? 'map-pin' : 'globe'}
+              size={13}
+              color={(identity.geographicStatus === 'LOCAL_MARKET' || identity.geographicStatus === 'DIRECT_LEBANON') ? '#34D399' : '#60A5FA'}
+              style={{ marginRight: 8, marginTop: 2 }}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[
+                styles.geoDossierTitle,
+                (identity.geographicStatus === 'LOCAL_MARKET' || identity.geographicStatus === 'DIRECT_LEBANON') && { color: '#34D399' },
+                (identity.geographicStatus === 'GLOBAL_RELEVANT' || identity.geographicStatus === 'REGIONAL_DELIVERS_TO_LEBANON') && { color: '#60A5FA' },
+                identity.geographicStatus === 'REFERENCE_BRAND' && { color: '#9CA3AF' },
+              ]}>
+                GEOGRAPHIC SCOPE: {identity.geographicLabel.toUpperCase()}
+              </Text>
+              {identity.geographicDetails ? (
+                <Text style={styles.geoDossierDetails}>{identity.geographicDetails}</Text>
+              ) : null}
+            </View>
+          </View>
+        )}
+
         <View style={styles.heroMetaRow}>
           <View style={styles.metaItem}>
             <Feather name="tag" size={13} color="#9CA3AF" style={{ marginRight: 4 }} />
@@ -234,20 +263,26 @@ export default function CompetitorDossierView({ dossier, onBackToList }: Props) 
         {/* 4-Step Playbook */}
         <View style={styles.playbookContainer}>
           <Text style={styles.subHeadLabel}>OBSERVED MARKETING PLAYBOOK</Text>
-          <View style={styles.playbookGrid}>
-            {howTheyMarket.playbook.map((step) => (
-              <View key={step.step} style={styles.playbookStepCard}>
-                <View style={styles.stepHeader}>
-                  <View style={styles.stepTag}>
-                    <Text style={styles.stepTagText}>{step.step}</Text>
+          {howTheyMarket.playbook && howTheyMarket.playbook.length > 0 ? (
+            <View style={styles.playbookGrid}>
+              {howTheyMarket.playbook.map((step) => (
+                <View key={step.step} style={styles.playbookStepCard}>
+                  <View style={styles.stepHeader}>
+                    <View style={styles.stepTag}>
+                      <Text style={styles.stepTagText}>{step.step}</Text>
+                    </View>
+                    <Text style={styles.stepTacticBadge}>{step.observedTactic}</Text>
                   </View>
-                  <Text style={styles.stepTacticBadge}>{step.observedTactic}</Text>
+                  <Text style={styles.stepCardTitle}>{step.label}</Text>
+                  <Text style={styles.stepCardDesc}>{step.description}</Text>
                 </View>
-                <Text style={styles.stepCardTitle}>{step.label}</Text>
-                <Text style={styles.stepCardDesc}>{step.description}</Text>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.noChangesText}>
+              No social marketing playbook established (no social posts collected for this competitor).
+            </Text>
+          )}
         </View>
       </View>
 
@@ -261,19 +296,23 @@ export default function CompetitorDossierView({ dossier, onBackToList }: Props) 
           Recurring strategic themes and narratives repeated consistently across public channels.
         </Text>
 
-        <View style={styles.recurringList}>
-          {recurringIdeas.map((idea, idx) => (
-            <View key={idx} style={styles.recurringCard}>
-              <View style={styles.recurringHeader}>
-                <Text style={styles.recurringIdeaText}>"{idea.idea}"</Text>
+        {recurringIdeas && recurringIdeas.length > 0 ? (
+          <View style={styles.recurringList}>
+            {recurringIdeas.map((idea, idx) => (
+              <View key={idx} style={styles.recurringCard}>
+                <View style={styles.recurringHeader}>
+                  <Text style={styles.recurringIdeaText}>"{idea.idea}"</Text>
+                </View>
+                <View style={styles.recurringMetaRow}>
+                  <Text style={styles.recurringMetaText}><Text style={{ fontWeight: '700' }}>Where it appears:</Text> {idea.observedIn}</Text>
+                  <Text style={styles.recurringMetaText}><Text style={{ fontWeight: '700' }}>Strategic Objective:</Text> {idea.likelyObjective}</Text>
+                </View>
               </View>
-              <View style={styles.recurringMetaRow}>
-                <Text style={styles.recurringMetaText}><Text style={{ fontWeight: '700' }}>Where it appears:</Text> {idea.observedIn}</Text>
-                <Text style={styles.recurringMetaText}><Text style={{ fontWeight: '700' }}>Strategic Objective:</Text> {idea.likelyObjective}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.noChangesText}>No recurring strategic ideas established from current evidence.</Text>
+        )}
       </View>
 
       {/* ── 8. OFFERS & PROOF STRATEGY ── */}
@@ -283,12 +322,29 @@ export default function CompetitorDossierView({ dossier, onBackToList }: Props) 
             <Feather name="shopping-bag" size={14} color="#F59E0B" style={{ marginRight: 6 }} />
             <Text style={styles.dualTitle}>OFFERS & CONVERSION MOTION</Text>
           </View>
-          {offersAndCommercialMotion.offers.map((off, idx) => (
-            <View key={idx} style={styles.miniCard}>
-              <Text style={styles.miniCardTitle}>{off.offerStatement}</Text>
-              <Text style={styles.miniCardDesc}>Entry: {off.freeEntry} | CTA: "{off.cta}"</Text>
+          {offersAndCommercialMotion.offers && offersAndCommercialMotion.offers.length > 0 ? (
+            offersAndCommercialMotion.offers.map((off, idx) => (
+              <View key={idx} style={styles.miniCard}>
+                <Text style={styles.miniCardTitle}>{off.offerStatement}</Text>
+                <Text style={styles.miniCardDesc}>Entry: {off.freeEntry} | CTA: "{off.cta}"</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.noChangesText}>No commercial promotion tiers established from reviewed evidence.</Text>
+          )}
+
+          {offersAndCommercialMotion.geographicAvailability && (
+            <View style={styles.geoOfferBox}>
+              <View style={styles.geoOfferHeader}>
+                <Feather name="map-pin" size={11} color="#10B981" style={{ marginRight: 4 }} />
+                <Text style={styles.geoOfferHeaderTitle}>LEBANON APPLICABILITY</Text>
+              </View>
+              <Text style={styles.geoOfferText}>{offersAndCommercialMotion.geographicAvailability}</Text>
+              {offersAndCommercialMotion.knownDeliveredCost && (
+                <Text style={styles.geoOfferCostText}>Delivered Cost: {offersAndCommercialMotion.knownDeliveredCost}</Text>
+              )}
             </View>
-          ))}
+          )}
         </View>
 
         <View style={styles.dualCol}>
@@ -296,14 +352,18 @@ export default function CompetitorDossierView({ dossier, onBackToList }: Props) 
             <Feather name="award" size={14} color="#10B981" style={{ marginRight: 6 }} />
             <Text style={styles.dualTitle}>HOW THEY BUILD TRUST (PROOF)</Text>
           </View>
-          {proofStrategy.proofItems.map((pr, idx) => (
-            <View key={idx} style={styles.miniCard}>
-              <View style={styles.proofTagWrap}>
-                <Text style={styles.proofTag}>{pr.typeLabel}</Text>
+          {proofStrategy.proofItems && proofStrategy.proofItems.length > 0 ? (
+            proofStrategy.proofItems.map((pr, idx) => (
+              <View key={idx} style={styles.miniCard}>
+                <View style={styles.proofTagWrap}>
+                  <Text style={styles.proofTag}>{pr.typeLabel}</Text>
+                </View>
+                <Text style={styles.miniCardTitle}>{pr.statement}</Text>
               </View>
-              <Text style={styles.miniCardTitle}>{pr.statement}</Text>
-            </View>
-          ))}
+            ))
+          ) : (
+            <Text style={styles.noChangesText}>No customer testimonials or third-party proof established from current evidence.</Text>
+          )}
         </View>
       </View>
 
@@ -1196,5 +1256,69 @@ const styles = StyleSheet.create({
   evContext: {
     fontSize: 11,
     color: '#9CA3AF',
+  },
+  geoDossierBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#1E2535',
+    borderWidth: 1,
+    borderColor: '#374151',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  geoBannerDirect: {
+    backgroundColor: '#10B98115',
+    borderColor: '#10B98140',
+  },
+  geoBannerRegional: {
+    backgroundColor: '#3B82F615',
+    borderColor: '#3B82F640',
+  },
+  geoBannerRef: {
+    backgroundColor: '#6B728015',
+    borderColor: '#6B728040',
+  },
+  geoDossierTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  geoDossierDetails: {
+    fontSize: 12,
+    color: '#D1D5DB',
+    lineHeight: 16,
+  },
+  geoOfferBox: {
+    backgroundColor: '#11161F',
+    borderRadius: 6,
+    padding: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#1E2535',
+  },
+  geoOfferHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  geoOfferHeaderTitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#10B981',
+    letterSpacing: 0.5,
+  },
+  geoOfferText: {
+    fontSize: 12,
+    color: '#E5E7EB',
+    lineHeight: 16,
+    marginBottom: 4,
+  },
+  geoOfferCostText: {
+    fontSize: 11,
+    color: '#F59E0B',
+    lineHeight: 15,
+    fontStyle: 'italic',
   },
 });

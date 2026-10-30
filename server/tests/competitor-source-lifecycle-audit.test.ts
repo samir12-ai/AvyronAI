@@ -289,7 +289,6 @@ describe("Avyron Competitor Source Lifecycle & Settings Audit (25-Point Suite)",
   // 17. Watchtower preserves source semantics
   it("17. Watchtower retains distinct source semantics across website, social, and search channels", () => {
     const availability = computeSourceAvailability({
-      profileLink: "https://instagram.com/acme",
       websiteUrl: "https://acme.com",
       websiteEnrichmentStatus: "COMPLETE",
       postsCollected: 30,

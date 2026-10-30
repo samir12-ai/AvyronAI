@@ -18,7 +18,9 @@
 import { aiChat } from "../ai-client";
 import { createHash } from "crypto";
 import { computeCalibratedConfidenceV2, type ConfidenceBreakdownV2 } from "./engine";
-import type { CustomerEvidenceUnit } from "../competitive-intelligence/evidence-routing";
+import type { CustomerEvidenceUnit, EvidenceContributor } from "../competitive-intelligence/evidence-routing";
+import type { CompetitorStrategicRole, CustomerEvidencePool } from "@shared/schema";
+import type { SemanticEvidenceScope, MarketTransferability } from "@shared/contracts/market-voice";
 
 export interface CanonicalCompetitor {
   id: string;
@@ -26,6 +28,7 @@ export interface CanonicalCompetitor {
   cleanKey: string;
   websiteUrl: string | null;
   platform: string | null;
+  strategicRole?: CompetitorStrategicRole;
 }
 
 export interface CanonicalCompetitorMap {
@@ -45,6 +48,11 @@ export interface DeduplicatedEvidenceUnit {
   rawOccurrenceCount: number;
   likesCount: number;
   originalIds: string[];
+  strategicRole?: CompetitorStrategicRole;
+  evidencePool?: CustomerEvidencePool;
+  semanticScope?: SemanticEvidenceScope;
+  transferability?: MarketTransferability;
+  contributors?: EvidenceContributor[];
 }
 
 export type AudienceSignalType = 
@@ -129,6 +137,8 @@ export interface JudgeIssue {
   problemType: 
     | "UNGROUNDED_EVIDENCE"
     | "OVERSTATED_WORDING"
+    | "OVER_GENERALIZED"
+    | "SEMANTIC_DRIFT"
     | "WRONG_CATEGORY"
     | "UNSUPPORTED_ATTRIBUTE"
     | "PRAISE_AS_PAIN"
@@ -183,6 +193,11 @@ export interface ExtractedSemanticClaim {
   meaning: string;
   evidenceSpan?: string;
   confidence: number;
+  semanticScope?: SemanticEvidenceScope;
+  transferability?: MarketTransferability;
+  scopeRationale?: string;
+  rowSemanticScope?: SemanticEvidenceScope;
+  rowTransferability?: MarketTransferability;
 }
 
 export interface TerminalEvidenceClassification {
@@ -199,6 +214,11 @@ export interface TerminalEvidenceClassification {
   rawEvidenceId?: string;
   accountId?: string;
   campaignId?: string;
+  strategicRole?: CompetitorStrategicRole;
+  evidencePool?: CustomerEvidencePool;
+  semanticScope?: SemanticEvidenceScope;
+  transferability?: MarketTransferability;
+  contributors?: EvidenceContributor[];
 }
 
 export interface CategoryAccounting {
@@ -226,6 +246,11 @@ export interface ClaimCoverageManifestItem {
   evidenceUnitId: string;
   claimKind: SemanticClaimKind;
   meaning: string;
+  semanticScope?: SemanticEvidenceScope;
+  transferability?: MarketTransferability;
+  scopeRationale?: string;
+  rowSemanticScope?: SemanticEvidenceScope;
+  rowTransferability?: MarketTransferability;
   status: ClaimDispositionStatus;
   themeId?: string;
   representedByThemeId?: string;
@@ -276,6 +301,11 @@ export interface SemanticClaim {
   claimText: string;
   meaning: string;
   confidence: number;
+  semanticScope?: SemanticEvidenceScope;
+  transferability?: MarketTransferability;
+  scopeRationale?: string;
+  rowSemanticScope?: SemanticEvidenceScope;
+  rowTransferability?: MarketTransferability;
   reasonerVersion: string;
   judgeVerdict?: "APPROVED" | "REJECTED" | "INSUFFICIENT_EVIDENCE";
   judgeReason?: string;
@@ -334,6 +364,11 @@ export interface SemanticExtractionResult {
   draft?: AudienceIntelligenceDraft;
   judgeResult?: JudgeVerdictResult;
   repairedSignalIds?: string[];
+  normalBatchesSucceeded?: number;
+  parentBatchesSplit?: number;
+  childBatchesCreated?: number;
+  recoveredBatches?: number;
+  totalBatchesCount?: number;
   claims: TerminalEvidenceClassification[];
 }
 
@@ -462,8 +497,19 @@ export function deduplicateFromCanonicalCustomerVoice(
   compMap: CanonicalCompetitorMap
 ): DeduplicatedEvidenceUnit[] {
   const map = new Map<string, DeduplicatedEvidenceUnit>();
+  const POOL_PRIORITY: Record<string, number> = {
+    PRIMARY_MARKET_VOICE: 3,
+    SUPPORTING_SOCIAL_CUSTOMER_VOICE: 2,
+    BENCHMARK_CONTEXT: 1,
+    UNRESOLVED_EXCLUDED: 0,
+  };
 
   for (const u of units) {
+    // Fail closed: unresolved competitors are excluded from Audience reasoning
+    if (u.evidencePool === "UNRESOLVED_EXCLUDED" || u.strategicRole === "UNRESOLVED") {
+      continue;
+    }
+
     const text = u.text?.trim();
     if (!text || text.length < 2) continue;
 
@@ -477,10 +523,47 @@ export function deduplicateFromCanonicalCustomerVoice(
       existing.rawOccurrenceCount += 1;
       existing.likesCount += u.likesCount || 0;
       existing.originalIds.push(u.evidenceId);
+
+      // Maintain contributors lineage
+      if (u.contributors && u.contributors.length > 0) {
+        existing.contributors = existing.contributors || [];
+        existing.contributors.push(...u.contributors);
+      } else {
+        existing.contributors = existing.contributors || [];
+        existing.contributors.push({
+          evidenceId: u.evidenceId,
+          competitorId: u.competitorId,
+          competitorName: u.competitorName,
+          platform: u.platform || "web",
+          strategicRole: u.strategicRole,
+          evidencePool: u.evidencePool,
+        });
+      }
+
+      // Prioritize pool: keep highest-priority pool provenance
+      const currentPriority = POOL_PRIORITY[existing.evidencePool || "BENCHMARK_CONTEXT"] || 0;
+      const incomingPriority = POOL_PRIORITY[u.evidencePool || "BENCHMARK_CONTEXT"] || 0;
+      if (incomingPriority > currentPriority) {
+        existing.evidencePool = u.evidencePool;
+        existing.strategicRole = u.strategicRole;
+        existing.canonicalCompetitorId = canonicalCompId;
+        existing.canonicalBrandName = canonicalName;
+      }
     } else {
       let srcType: "comment" | "review" | "market_voice" = "comment";
       if (u.origin === "COMPETITOR_REVIEW") srcType = "review";
       else if (u.origin === "MARKET_VOICE") srcType = "market_voice";
+
+      const contributors: EvidenceContributor[] = u.contributors && u.contributors.length > 0
+        ? [...u.contributors]
+        : [{
+            evidenceId: u.evidenceId,
+            competitorId: u.competitorId,
+            competitorName: u.competitorName,
+            platform: u.platform || "web",
+            strategicRole: u.strategicRole,
+            evidencePool: u.evidencePool,
+          }];
 
       map.set(fingerprint, {
         id: `ev_unit_${fingerprint}`,
@@ -492,6 +575,9 @@ export function deduplicateFromCanonicalCustomerVoice(
         rawOccurrenceCount: 1,
         likesCount: u.likesCount || 0,
         originalIds: [u.evidenceId],
+        strategicRole: u.strategicRole,
+        evidencePool: u.evidencePool,
+        contributors,
       });
     }
   }
@@ -569,11 +655,11 @@ BUSINESS CONTEXT:
 - Target Market: ${businessContext.market}
 
 TASK:
-You MUST classify EVERY SINGLE missing evidence unit below into EXACTLY ONE terminal primary form, and extract all distinct semantic claims.
+You MUST classify EVERY SINGLE missing evidence unit below into EXACTLY ONE terminal primary form, and extract all distinct semantic claims with their claim-level semanticScope and transferability.
 You MUST produce exactly ${missingUnits.length} items in the JSON array (1:1 correspondence for all ${missingUnits.length} units).
 
 MISSING EVIDENCE UNITS (${missingUnits.length} TOTAL):
-${missingUnits.map((u, i) => `[Unit ${i + 1}] ID: ${u.id} | Competitor: ${u.canonicalBrandName} | Platform: ${u.platform}
+${missingUnits.map((u, i) => `[Unit ${i + 1}] ID: ${u.id} | Competitor: ${u.canonicalBrandName} | Platform: ${u.platform} | RowScope: ${u.semanticScope || "UNKNOWN"}
 "${u.text}"`).join("\n\n")}
 
 OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
@@ -586,6 +672,9 @@ OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
       {
         "claimKind": "friction_problem" | "unmet_need" | "desired_outcome" | "barrier_hesitation" | "factual_query" | "service_complaint" | "positive_experience" | "neutral_fact",
         "meaning": "Clear objective interpretation of this specific claim",
+        "semanticScope": "CATEGORY_RECURRING" | "MARKET_TRANSFERABLE" | "SINGLE_BRAND_SPECIFIC" | "INCIDENT_SPECIFIC" | "INSUFFICIENT_SCOPE",
+        "transferability": "SAME_MARKET" | "ADJACENT_TRANSFERABLE_MARKET" | "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH" | "GEOGRAPHY_SPECIFIC_OPERATIONAL" | "IRRELEVANT_GEOGRAPHY",
+        "scopeRationale": "Brief rationale for this claim's scope",
         "confidence": 0.85
       }
     ],
@@ -602,6 +691,8 @@ OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
     ],
     temperature: 0.1,
     max_tokens: 3000,
+    endpoint: "semantic-reasoner-repair",
+    forceProvider: "openai",
   });
 
   const rawContent = res.choices[0]?.message?.content || "[]";
@@ -611,6 +702,9 @@ OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
 
   const unitMap = new Map(missingUnits.map(u => [u.id, u]));
   const repaired: TerminalEvidenceClassification[] = [];
+
+  const VALID_SCOPES: SemanticEvidenceScope[] = ["CATEGORY_RECURRING", "MARKET_TRANSFERABLE", "SINGLE_BRAND_SPECIFIC", "INCIDENT_SPECIFIC", "INSUFFICIENT_SCOPE"];
+  const VALID_TRANSFERS: MarketTransferability[] = ["SAME_MARKET", "ADJACENT_TRANSFERABLE_MARKET", "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH", "GEOGRAPHY_SPECIFIC_OPERATIONAL", "IRRELEVANT_GEOGRAPHY"];
 
   for (const item of parsed) {
     if (!item.evidenceUnitId || !unitMap.has(item.evidenceUnitId)) continue;
@@ -625,12 +719,26 @@ OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
     if (rawClaims.length > 0) {
       rawClaims.forEach((rc: any, idx: number) => {
         if (rc && rc.meaning) {
+          const rawScope = String(rc.semanticScope || "").toUpperCase();
+          const rawTransfer = String(rc.transferability || "").toUpperCase();
+          const claimScope: SemanticEvidenceScope = VALID_SCOPES.includes(rawScope as any)
+            ? (rawScope as SemanticEvidenceScope)
+            : (u.semanticScope || "CATEGORY_RECURRING");
+          const claimTransfer: MarketTransferability = VALID_TRANSFERS.includes(rawTransfer as any)
+            ? (rawTransfer as MarketTransferability)
+            : (u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH");
+
           semanticClaims.push({
             claimId: `clm_${u.id}_${idx + 1}`,
             claimKind: rc.claimKind || "neutral_fact",
             meaning: String(rc.meaning).trim(),
             evidenceSpan: rc.evidenceSpan ? String(rc.evidenceSpan).trim() : undefined,
             confidence: typeof rc.confidence === "number" ? Math.max(0, Math.min(1, rc.confidence)) : 0.8,
+            semanticScope: claimScope,
+            transferability: claimTransfer,
+            scopeRationale: rc.scopeRationale ? String(rc.scopeRationale).trim() : undefined,
+            rowSemanticScope: u.semanticScope,
+            rowTransferability: u.transferability,
           });
         }
       });
@@ -642,6 +750,10 @@ OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
         claimKind: primaryForm === "PAIN" || primaryForm === "COMPLAINT" ? "friction_problem" : (primaryForm === "DESIRE" ? "desired_outcome" : (primaryForm === "OBJECTION" ? "barrier_hesitation" : "neutral_fact")),
         meaning: (item.primaryClaim || item.claim || u.text).trim(),
         confidence: typeof item.confidence === "number" ? Math.max(0, Math.min(1, item.confidence)) : 0.75,
+        semanticScope: u.semanticScope || "CATEGORY_RECURRING",
+        transferability: u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH",
+        rowSemanticScope: u.semanticScope,
+        rowTransferability: u.transferability,
       });
     }
 
@@ -657,6 +769,11 @@ OUTPUT JSON FORMAT (JSON array of exactly ${missingUnits.length} items):
       platform: u.platform,
       rawText: u.text,
       rawEvidenceId: u.originalIds[0],
+      strategicRole: u.strategicRole,
+      evidencePool: u.evidencePool,
+      semanticScope: u.semanticScope,
+      transferability: u.transferability,
+      contributors: u.contributors,
     });
   }
 
@@ -677,29 +794,49 @@ BUSINESS CONTEXT:
 - Target Market: ${businessContext.market}
 
 TASK:
-Classify EVERY SINGLE evidence unit listed below into EXACTLY ONE terminal primary form, AND extract all distinct semantic claims contained within the quote.
+Classify EVERY SINGLE evidence unit listed below into EXACTLY ONE terminal primary form, AND extract all distinct semantic claims contained within the quote. For each semantic claim, classify its independent claim-level semanticScope and transferability.
 You MUST produce exactly ${batch.length} classifications in the output JSON array (1:1 correspondence for all ${batch.length} input units).
 
 PRIMARY COMMUNICATION FORMS:
-1. PAIN: Customer-expressed problem, unmet need, frustration, difficulty, or negative experience.
-2. DESIRE: An outcome, improvement, state, capability, or experience the customer wants or seeks.
+1. PAIN: Genuine customer-expressed problem, unmet need, frustration, difficulty, or negative experience.
+2. DESIRE: An outcome, improvement, state, capability, restock request, or experience the customer wants or seeks.
 3. OBJECTION: A barrier, uncertainty, hesitation, or resistance that may slow or prevent purchase.
-4. QUESTION: Customer seeking factual information without clear evidence of purchase resistance.
-5. PURCHASE_INTENT: Clear intent to acquire, order, or buy the offering.
+4. QUESTION: Customer seeking factual information (e.g. price, size, model measurements, color, availability). NOTE: Routine questions are QUESTION or PURCHASE_INTENT; they are NOT PAIN or COMPLAINT unless the customer explicitly expresses confusion, hidden pricing, or complaint.
+5. PURCHASE_INTENT: Clear intent to acquire, order, or buy the offering, or asking how to purchase.
 6. COMPLAINT: Negative report about an experienced outcome, service failure, delivery problem, or product defect.
 7. PRAISE: Positive sentiment, aesthetic appreciation, satisfaction, or general endorsement.
 8. IRRELEVANT: Spam, bot text, unrelated topic, or out of scope content.
 9. INSUFFICIENT_EVIDENCE: Ambiguous text, lone emojis, or uninterpretable fragments.
 
+CLAIM-LEVEL SEMANTIC SCOPE RULES:
+- CATEGORY_RECURRING: Category-wide customer experience, physical product reality, material attributes (e.g. fabric opacity, breathability, sizing cut, seam durability, heat retention), usability friction, or universal customer desire across the category.
+- MARKET_TRANSFERABLE: Specific experience that reveals generalizable category buying trade-offs or universal product physics applicable across brands.
+- SINGLE_BRAND_SPECIFIC: Feedback strictly tied to one specific company/retailer (e.g. one store's shipping delay, return policy fee/refund terms, customer service support dispute, or specific merchant checkout issue).
+- INCIDENT_SPECIFIC: One-off individual customer service complaint, courier delivery damage, or isolated glitch.
+- INSUFFICIENT_SCOPE: Too narrow or ambiguous to evaluate.
+
+CLAIM-LEVEL TRANSFERABILITY RULES:
+- SAME_MARKET: Directly tied to target geography.
+- ADJACENT_TRANSFERABLE_MARKET: Cultural/regional dynamics transferable to adjacent markets.
+- GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH: Universal physical, textile, or mechanical product truth regardless of geography.
+- GEOGRAPHY_SPECIFIC_OPERATIONAL: Local carrier/payment/customs operations.
+- IRRELEVANT_GEOGRAPHY: Completely irrelevant to category market.
+
+MIXED EVIDENCE INVARIANT:
+If a single customer quote contains mixed thoughts (e.g. single-store shipping/refund complaint AND product fabric/see-through complaint):
+- The shipping/refund claim MUST be classified as SINGLE_BRAND_SPECIFIC.
+- The fabric/see-through claim MUST be classified as CATEGORY_RECURRING or MARKET_TRANSFERABLE.
+- NEVER force both claims to share the same scope if their semantic realities differ.
+
 MULTI-MEANING EXTRACTION CONSTITUTIONAL RULES:
 - Do NOT stop after identifying the first obvious or surface meaning. Inspect the complete customer statement for ALL independently supported semantic meanings.
 - If a customer statement expresses multiple distinct thoughts (e.g. positive aesthetic reaction AND sizing/fit friction, or routine question AND purchase hesitation, or praise AND an unmet restock need, or complaint AND desired outcome), you MUST extract each independently grounded claim into the "semanticClaims" array.
-- Simple single-focus statements (e.g. "Beautiful ❤️" or "Price plz") should remain 1 claim.
+- Simple single-focus statements (e.g. "Beautiful ❤️" or "Price plz") should remain 1 claim (e.g. "Price plz" -> factual_query / neutral_fact, NOT friction_problem).
 - Compound or mixed statements MUST be separated into 2+ distinct claims.
 - Never invent unevidenced secondary claims. Every extracted claim must be strictly grounded in the quote text.
 
 INPUT EVIDENCE UNITS (${batch.length} TOTAL):
-${batch.map((u, i) => `[Unit ${i + 1}] ID: ${u.id} | Competitor: ${u.canonicalBrandName} | Platform: ${u.platform} | Type: ${u.sourceType}
+${batch.map((u, i) => `[Unit ${i + 1}] ID: ${u.id} | Competitor: ${u.canonicalBrandName} | Platform: ${u.platform} | Type: ${u.sourceType} | RowScope: ${u.semanticScope || "UNKNOWN"}
 "${u.text}"`).join("\n\n")}
 
 OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
@@ -712,6 +849,9 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
       {
         "claimKind": "friction_problem" | "unmet_need" | "desired_outcome" | "barrier_hesitation" | "factual_query" | "service_complaint" | "positive_experience" | "neutral_fact",
         "meaning": "Clear objective interpretation of this specific claim",
+        "semanticScope": "CATEGORY_RECURRING" | "MARKET_TRANSFERABLE" | "SINGLE_BRAND_SPECIFIC" | "INCIDENT_SPECIFIC" | "INSUFFICIENT_SCOPE",
+        "transferability": "SAME_MARKET" | "ADJACENT_TRANSFERABLE_MARKET" | "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH" | "GEOGRAPHY_SPECIFIC_OPERATIONAL" | "IRRELEVANT_GEOGRAPHY",
+        "scopeRationale": "Brief rationale for this claim's scope",
         "confidence": 0.85
       }
     ],
@@ -728,6 +868,8 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
     ],
     temperature: 0.1,
     max_tokens: 8000,
+    endpoint: "semantic-reasoner-batch",
+    forceProvider: "openai",
   });
 
   const rawContent = res.choices[0]?.message?.content || "[]";
@@ -739,6 +881,9 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
 
   const unitMap = new Map(batch.map(u => [u.id, u]));
   let classifications: TerminalEvidenceClassification[] = [];
+
+  const VALID_SCOPES: SemanticEvidenceScope[] = ["CATEGORY_RECURRING", "MARKET_TRANSFERABLE", "SINGLE_BRAND_SPECIFIC", "INCIDENT_SPECIFIC", "INSUFFICIENT_SCOPE"];
+  const VALID_TRANSFERS: MarketTransferability[] = ["SAME_MARKET", "ADJACENT_TRANSFERABLE_MARKET", "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH", "GEOGRAPHY_SPECIFIC_OPERATIONAL", "IRRELEVANT_GEOGRAPHY"];
 
   for (const item of parsed) {
     if (!item.evidenceUnitId || !unitMap.has(item.evidenceUnitId)) continue;
@@ -753,12 +898,26 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
     if (rawClaims.length > 0) {
       rawClaims.forEach((rc: any, idx: number) => {
         if (rc && rc.meaning) {
+          const rawScope = String(rc.semanticScope || "").toUpperCase();
+          const rawTransfer = String(rc.transferability || "").toUpperCase();
+          const claimScope: SemanticEvidenceScope = VALID_SCOPES.includes(rawScope as any)
+            ? (rawScope as SemanticEvidenceScope)
+            : (u.semanticScope || "CATEGORY_RECURRING");
+          const claimTransfer: MarketTransferability = VALID_TRANSFERS.includes(rawTransfer as any)
+            ? (rawTransfer as MarketTransferability)
+            : (u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH");
+
           semanticClaims.push({
             claimId: `clm_${u.id}_${idx + 1}`,
             claimKind: rc.claimKind || "neutral_fact",
             meaning: String(rc.meaning).trim(),
             evidenceSpan: rc.evidenceSpan ? String(rc.evidenceSpan).trim() : undefined,
             confidence: typeof rc.confidence === "number" ? Math.max(0, Math.min(1, rc.confidence)) : 0.8,
+            semanticScope: claimScope,
+            transferability: claimTransfer,
+            scopeRationale: rc.scopeRationale ? String(rc.scopeRationale).trim() : undefined,
+            rowSemanticScope: u.semanticScope,
+            rowTransferability: u.transferability,
           });
         }
       });
@@ -770,6 +929,10 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
         claimKind: primaryForm === "PAIN" || primaryForm === "COMPLAINT" ? "friction_problem" : (primaryForm === "DESIRE" ? "desired_outcome" : (primaryForm === "OBJECTION" ? "barrier_hesitation" : "neutral_fact")),
         meaning: (item.primaryClaim || item.claim || u.text).trim(),
         confidence: typeof item.confidence === "number" ? Math.max(0, Math.min(1, item.confidence)) : 0.75,
+        semanticScope: u.semanticScope || "CATEGORY_RECURRING",
+        transferability: u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH",
+        rowSemanticScope: u.semanticScope,
+        rowTransferability: u.transferability,
       });
     }
 
@@ -785,6 +948,11 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
       platform: u.platform,
       rawText: u.text,
       rawEvidenceId: u.originalIds[0],
+      strategicRole: u.strategicRole,
+      evidencePool: u.evidencePool,
+      semanticScope: u.semanticScope,
+      transferability: u.transferability,
+      contributors: u.contributors,
     });
   }
 
@@ -808,6 +976,131 @@ OUTPUT JSON FORMAT (JSON array of exactly ${batch.length} items):
   }
 
   return classifications;
+}
+
+export interface SplitRecoveryMetrics {
+  parentBatchesSplit: number;
+  childBatchesCreated: number;
+  recoveredBatches: number;
+}
+
+export function getChildLabels(currentLabel: string): { childLabelA: string; childLabelB: string } {
+  const batchMatch = currentLabel.match(/Batch\s+(\d+)(\/\d+)?/i);
+  if (batchMatch) {
+    const num = batchMatch[1];
+    return { childLabelA: `Child ${num}A`, childLabelB: `Child ${num}B` };
+  }
+  const childMatch = currentLabel.match(/Child\s+(.+)/i);
+  if (childMatch) {
+    const code = childMatch[1];
+    return { childLabelA: `Child ${code}1`, childLabelB: `Child ${code}2` };
+  }
+  return { childLabelA: `${currentLabel}A`, childLabelB: `${currentLabel}B` };
+}
+
+export function isRecoverableTechnicalError(err: any): boolean {
+  if (!err) return false;
+  const msg = String(err.message || "");
+  const code = String(err.code || "");
+  const name = String(err.name || "");
+  const status = typeof err.status === "number" ? err.status : 0;
+
+  // Explicit hard non-recoverable failures (Auth / Quota / Billing / Bad Request)
+  if (code === "AI_BUDGET_EXCEEDED" || code === "AI_QUOTA_EXCEEDED") return false;
+  if (status === 401 || status === 403 || /invalid api key|unauthorized|forbidden|billing|insufficient_quota|quota_exceeded/i.test(msg)) {
+    return false;
+  }
+
+  // Check for timeout or transient network/server failures
+  if (
+    code === "AI_TIMEOUT" ||
+    code === "ETIMEDOUT" ||
+    code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    code === "ENOTFOUND" ||
+    name === "APITimeoutError" ||
+    /timeout|timed out|fetch failed|network|econnreset|socket hang up|500|502|503|504|overloaded|rate limit/i.test(msg)
+  ) {
+    return true;
+  }
+
+  // Completeness validation failure or malformed JSON on oversized batch
+  if (/completeness validation failed|JSON parse failed|was not a valid JSON array/i.test(msg)) {
+    return true;
+  }
+
+  return false;
+}
+
+export async function classifyBatchWithAdaptiveSplitting(
+  units: DeduplicatedEvidenceUnit[],
+  businessContext: { heroProduct: string; businessName: string; market: string; category: string },
+  accountId: string,
+  campaignId: string | undefined,
+  batchLabel: string,
+  metrics: SplitRecoveryMetrics
+): Promise<TerminalEvidenceClassification[]> {
+  try {
+    const classifications = await classifyBatchEvidenceUnits(units, businessContext, accountId, campaignId);
+    return classifications;
+  } catch (err: any) {
+    if (!isRecoverableTechnicalError(err)) {
+      console.warn(`[AudienceReasoner] ${batchLabel} encountered hard non-recoverable error: ${err.message}. Failing fast.`);
+      throw err;
+    }
+
+    // Recoverable error: split if units.length > 1
+    if (units.length > 1) {
+      const mid = Math.floor(units.length / 2);
+      const childA = units.slice(0, mid);
+      const childB = units.slice(mid);
+
+      const { childLabelA, childLabelB } = getChildLabels(batchLabel);
+
+      console.warn(
+        `[AudienceReasoner] Parent ${batchLabel} timed out (${err.message}) -> splitting ${units.length} units into ${childA.length} + ${childB.length}`
+      );
+      metrics.parentBatchesSplit++;
+      metrics.childBatchesCreated += 2;
+
+      // Execute Child A
+      const resA = await classifyBatchWithAdaptiveSplitting(
+        childA,
+        businessContext,
+        accountId,
+        campaignId,
+        childLabelA,
+        metrics
+      );
+      console.log(`[AudienceReasoner] ${childLabelA} success`);
+
+      // Execute Child B
+      const resB = await classifyBatchWithAdaptiveSplitting(
+        childB,
+        businessContext,
+        accountId,
+        campaignId,
+        childLabelB,
+        metrics
+      );
+      console.log(`[AudienceReasoner] ${childLabelB} success`);
+
+      metrics.recoveredBatches++;
+      console.log(`[AudienceReasoner] Parent ${batchLabel} recovered`);
+      return [...resA, ...resB];
+    } else {
+      // Single unit that cannot be split: bounded retry
+      console.warn(`[AudienceReasoner] Single unit ${units[0]?.id || "unknown"} in ${batchLabel} failed (${err.message}). Retrying unit in 2s...`);
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const singleRes = await classifyBatchEvidenceUnits(units, businessContext, accountId, campaignId);
+        return singleRes;
+      } catch (retryErr: any) {
+        console.error(`[AudienceReasoner] Minimal unit ${units[0]?.id || "unknown"} in ${batchLabel} exhausted retry: ${retryErr.message}`);
+        throw retryErr;
+      }
+    }
+  }
 }
 
 export async function extractAudienceDraftFromBatch(
@@ -865,6 +1158,77 @@ function sanitizeJsonArray(raw: string): string {
   return clean;
 }
 
+export interface BoundedJsonRepairOptions<T> {
+  rawContent: string;
+  errorMessage: string;
+  expectedSchemaName: string;
+  schemaExample: string;
+  accountId: string;
+  endpoint?: string;
+  validator: (parsed: any) => { valid: boolean; data?: T; error?: string };
+  maxAttempts?: number;
+}
+
+export async function repairMalformedJsonWithLLM<T>(
+  options: BoundedJsonRepairOptions<T>
+): Promise<{ success: boolean; data?: T; error?: string; attempts: number }> {
+  const maxAttempts = options.maxAttempts ?? 2;
+  let currentRaw = options.rawContent;
+  let currentError = options.errorMessage;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    console.log(`[AudienceReasoner] BOUNDED_JSON_REPAIR | target=${options.expectedSchemaName} | attempt=${attempt}/${maxAttempts} | error="${currentError}"`);
+    try {
+      const res = await aiChat({
+        accountId: options.accountId,
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "You are a precise JSON repair assistant. Output ONLY the valid, corrected JSON. Do not add markdown commentary.",
+          },
+          {
+            role: "user",
+            content: `The following model output was intended to be valid JSON matching the schema for "${options.expectedSchemaName}", but failed with syntax/schema error: "${currentError}".
+
+INSTRUCTIONS:
+1. Fix JSON syntax errors (e.g. missing commas, unescaped quotes, unclosed brackets/braces).
+2. Ensure the output strictly conforms to the required schema.
+3. PRESERVE all original semantic claims, meanings, and evidence IDs exactly as provided.
+4. Do NOT invent new claims, evidence, or attributes.
+
+REQUIRED SCHEMA FORMAT:
+${options.schemaExample}
+
+MALFORMED CANDIDATE TO REPAIR:
+${currentRaw.slice(0, 8000)}`,
+          },
+        ],
+        temperature: 0.0,
+        max_tokens: 4000,
+        endpoint: options.endpoint || "semantic-reasoner-json-repair",
+        forceProvider: "openai",
+      });
+
+      const rawRepaired = res.choices[0]?.message?.content || "";
+      const cleanRepaired = sanitizeJson(rawRepaired);
+      const parsed = JSON.parse(cleanRepaired);
+      const validation = options.validator(parsed);
+      if (validation.valid && validation.data !== undefined) {
+        console.log(`[AudienceReasoner] BOUNDED_JSON_REPAIR_SUCCESS | target=${options.expectedSchemaName} | attempt=${attempt}`);
+        return { success: true, data: validation.data, attempts: attempt };
+      }
+      currentError = validation.error || "Schema validation failed on repaired JSON";
+      currentRaw = rawRepaired;
+    } catch (err: any) {
+      currentError = err.message || "Failed to parse repaired JSON";
+    }
+  }
+
+  console.warn(`[AudienceReasoner] BOUNDED_JSON_REPAIR_EXHAUSTED | target=${options.expectedSchemaName} | attempts=${maxAttempts} | finalError="${currentError}"`);
+  return { success: false, error: currentError, attempts: maxAttempts };
+}
+
 /**
  * SEMANTIC THEME INVENTORY GENERATOR (BOUNDED BATCHES + RECONCILIATION):
  * Discovers candidate Semantic Themes across bounded batches of semantic claims,
@@ -892,6 +1256,8 @@ export async function reconcileSemanticThemeInventoryWithLLM(
             claimId: cid,
             claimKind: matchingClaim.claimKind,
             meaning: matchingClaim.meaning,
+            semanticScope: matchingClaim.semanticScope,
+            transferability: matchingClaim.transferability,
             evidenceUnitId: u.evidenceUnitId,
             rawQuote: u.rawText,
             brand: u.canonicalBrandName,
@@ -920,7 +1286,7 @@ BUSINESS CONTEXT:
 
 CANDIDATE THEMES TO RECONCILE (${enrichedCandidates.length} TOTAL):
 ${enrichedCandidates.map((t, i) => {
-  const sampleClaims = t.claims.map(c => `  - [${c.claimId}] (${c.claimKind}) "${c.meaning}" (Quote: "${c.rawQuote}" | Brand: ${c.brand})`).join("\n");
+  const sampleClaims = t.claims.map(c => `  - [${c.claimId}] (${c.claimKind} | Scope: [${c.semanticScope || "CATEGORY_RECURRING"}]) "${c.meaning}" (Quote: "${c.rawQuote}" | Brand: ${c.brand})`).join("\n");
   return `[Candidate Theme ${i + 1}] ID: ${t.themeId}\nMeaning: "${t.canonicalMeaning}"\nDescription: ${t.description}\nEvidence Units: [${t.supportingEvidenceUnitIds.join(", ")}]\nSupporting Claims:\n${sampleClaims}`;
 }).join("\n\n")}
 
@@ -979,10 +1345,50 @@ OUTPUT JSON FORMAT (JSON object ONLY):
     ],
     temperature: 0.1,
     max_tokens: 6000,
+    forceProvider: "openai",
   });
 
-  const cleanJson = sanitizeJson(res.choices[0]?.message?.content || "{}");
-  const parsed = JSON.parse(cleanJson);
+  const validateReconcile = (obj: any): { valid: boolean; data?: any; error?: string } => {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+      return { valid: false, error: "Output must be a JSON object" };
+    }
+    if (!Array.isArray(obj.canonicalThemes)) {
+      return { valid: false, error: "canonicalThemes field must be an array" };
+    }
+    for (const t of obj.canonicalThemes) {
+      if (!t.canonicalMeaning || typeof t.canonicalMeaning !== "string") {
+        return { valid: false, error: "Every canonical theme must have a canonicalMeaning string" };
+      }
+    }
+    return { valid: true, data: obj };
+  };
+
+  const rawReconcile = res.choices[0]?.message?.content || "{}";
+  let parsed: any;
+  try {
+    const cleanJson = sanitizeJson(rawReconcile);
+    parsed = JSON.parse(cleanJson);
+    const val = validateReconcile(parsed);
+    if (!val.valid) {
+      throw new Error(val.error);
+    }
+  } catch (err: any) {
+    console.warn(`[AudienceReasoner] Theme reconciliation syntax/schema failure (${err.message}), entering bounded LLM repair.`);
+    const repairResult = await repairMalformedJsonWithLLM({
+      rawContent: rawReconcile,
+      errorMessage: err.message,
+      expectedSchemaName: "CandidateThemeReconciliationResult",
+      schemaExample: `{\n  "canonicalThemes": [\n    {\n      "themeId": "theme_1",\n      "canonicalMeaning": "...",\n      "description": "...",\n      "supportingClaimIds": ["clm_1"],\n      "supportingEvidenceUnitIds": ["ev_unit_1"],\n      "mergeRationale": "..."\n    }\n  ],\n  "candidateLineage": [\n    {\n      "candidateThemeId": "theme_cand_1",\n      "status": "MERGED_INTO_THEME",\n      "relationToCanonical": "SAME_TRUTH",\n      "canonicalThemeId": "theme_1",\n      "reason": "..."\n    }\n  ]\n}`,
+      accountId,
+      endpoint: "semantic-reasoner-reconciliation-repair",
+      validator: validateReconcile,
+    });
+
+    if (!repairResult.success || !repairResult.data) {
+      throw new Error(`Theme reconciliation JSON repair exhausted: ${repairResult.error}`);
+    }
+    parsed = repairResult.data;
+  }
 
   const rawCanonical = Array.isArray(parsed.canonicalThemes) ? parsed.canonicalThemes : [];
   const canonicalThemes: SemanticTheme[] = [];
@@ -1043,30 +1449,192 @@ OUTPUT JSON FORMAT (JSON object ONLY):
   };
 }
 
+/**
+ * SEMANTIC ATOMICITY AUDITOR FOR THEME INVENTORY:
+ * Validates that candidate themes preserve distinct customer problem vectors
+ * (failure modes, causal mechanisms, friction points, product requirements)
+ * without improper generic umbrella bundling or duplicate overlap.
+ */
+export interface ThemeAtomicityAuditReport {
+  verdict: "VALID" | "OVER_COLLAPSED" | "DUPLICATE_THEMES";
+  issues: string[];
+  repairFeedback?: string;
+}
+
+export async function auditThemeInventoryAtomicityWithLLM(
+  themes: SemanticTheme[],
+  units: TerminalEvidenceClassification[],
+  businessContext: { heroProduct: string; businessName: string; market: string; category: string },
+  accountId: string
+): Promise<ThemeAtomicityAuditReport> {
+  if (themes.length === 0 || units.length === 0) {
+    return { verdict: "VALID", issues: [] };
+  }
+
+  const substantiveUnits = units.filter(u =>
+    u.semanticClaims.some(c => (c.semanticScope || u.semanticScope) !== "INSUFFICIENT_SCOPE")
+  );
+
+  const prompt = `You are an expert market research auditor validating the SEMANTIC ATOMICITY of a Theme Inventory.
+
+BUSINESS CONTEXT:
+- Business: ${businessContext.businessName}
+- Offering / Hero Product: ${businessContext.heroProduct}
+- Category: ${businessContext.category}
+- Target Market: ${businessContext.market}
+
+CUSTOMER EVIDENCE UNITS (${substantiveUnits.length} UNITS):
+${substantiveUnits.map((u, i) => `[Unit ${i + 1}] ID: ${u.evidenceUnitId} | PrimaryForm: [${u.primaryForm}] | Brand: ${u.canonicalBrandName}
+Quote: "${u.rawText}"
+Claims:
+${u.semanticClaims.map(c => `  - [${c.claimId}] (${c.claimKind} | Scope: [${c.semanticScope || u.semanticScope || "CATEGORY_RECURRING"}]) "${c.meaning}"`).join("\n")}`).join("\n\n")}
+
+PROPOSED THEMES TO AUDIT (${themes.length} THEMES):
+${themes.map((t, i) => `[Theme ${i + 1}] ID: ${t.themeId} | Meaning: "${t.canonicalMeaning}"
+Description: ${t.description}
+Supporting Evidence IDs: [${t.supportingEvidenceUnitIds.join(", ")}]
+Supporting Claim IDs: [${t.supportingClaimIds.join(", ")}]`).join("\n\n")}
+
+SEMANTIC ATOMICITY CONTRACT:
+1. Two evidence-backed customer problem themes MUST remain separate when they differ materially in at least one of:
+   - customer friction or specific frustration point
+   - failure mode or mechanism of breakdown
+   - causal mechanism (why the problem happens)
+   - desired outcome or transformation
+   - buying objection or skepticism
+   - product requirement or specification needed
+   - remedy or intervention required
+2. OVER_COLLAPSED: Classify as OVER_COLLAPSED if any proposed theme is a compound theme bundling multiple distinct problem vectors (e.g. bundling product quality with return/refund policies, merging fabric composition/breathability with pricing, or combining sizing with customer service) OR if distinct substantive customer problem claims in the input units have been collapsed into generic umbrella themes.
+3. DUPLICATE_THEMES: Classify as DUPLICATE_THEMES if two or more themes represent the exact same underlying failure mode with no distinct product requirement or remedy.
+4. VALID: Classify as VALID if and only if every proposed theme represents a single, focused, distinct atomic customer truth vector without compound bundling or duplicate overlap.
+
+OUTPUT JSON FORMAT (JSON object ONLY):
+{
+  "verdict": "VALID" | "OVER_COLLAPSED" | "DUPLICATE_THEMES",
+  "issues": ["string explaining the issue"],
+  "repairFeedback": "Actionable instructions specifying which distinct customer problem vectors must be split or which duplicate themes must be merged"
+}`;
+
+  try {
+    const res = await aiChat({
+      accountId,
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are an expert market research auditor. Output valid JSON object only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.1,
+      max_tokens: 2000,
+      endpoint: "semantic-reasoner-theme-atomicity-audit",
+      forceProvider: "openai",
+    });
+
+    const parsed = JSON.parse(sanitizeJson(res.choices[0]?.message?.content || "{}"));
+    return {
+      verdict: parsed.verdict === "OVER_COLLAPSED" || parsed.verdict === "DUPLICATE_THEMES" ? parsed.verdict : "VALID",
+      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+      repairFeedback: typeof parsed.repairFeedback === "string" ? parsed.repairFeedback : undefined,
+    };
+  } catch (err: any) {
+    console.warn(`[AudienceReasoner] Theme atomicity audit error: ${err.message}; proceeding with generated themes.`);
+    return { verdict: "VALID", issues: [] };
+  }
+}
+
 export async function generateSemanticThemeInventoryWithLLM(
   classifiedUnits: TerminalEvidenceClassification[],
   businessContext: { heroProduct: string; businessName: string; market: string; category: string },
   accountId: string
-): Promise<{ themes: SemanticTheme[]; claimDispositions: ClaimCoverageManifestItem[] }> {
+): Promise<{ themes: SemanticTheme[]; claimDispositions: ClaimCoverageManifestItem[]; candidateThemes: SemanticTheme[]; candidateLineage: CandidateThemeLineage[] }> {
+  if (classifiedUnits.length === 0) {
+    return { themes: [], claimDispositions: [], candidateThemes: [], candidateLineage: [] };
+  }
+
+  // Authority rule: INSUFFICIENT_SCOPE claims must NOT participate in theme genesis
+  const allExtractedClaims = classifiedUnits.flatMap(u =>
+    u.semanticClaims.map(c => {
+      const effScope = c.semanticScope || u.semanticScope || "CATEGORY_RECURRING";
+      const effTransfer = c.transferability || u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH";
+      return {
+        ...c,
+        evidenceUnitId: u.evidenceUnitId,
+        canonicalBrandName: u.canonicalBrandName,
+        rawText: u.rawText,
+        platform: u.platform,
+        primaryForm: u.primaryForm,
+        evidencePool: u.evidencePool,
+        strategicRole: u.strategicRole,
+        semanticScope: effScope,
+        transferability: effTransfer,
+        rowSemanticScope: u.semanticScope,
+        rowTransferability: u.transferability,
+      };
+    })
+  );
+
+  const insufficientClaims = allExtractedClaims.filter(c => c.semanticScope === "INSUFFICIENT_SCOPE");
+  const substantiveClaims = allExtractedClaims.filter(c => c.semanticScope !== "INSUFFICIENT_SCOPE");
+
+  const initialDispositions: ClaimCoverageManifestItem[] = insufficientClaims.map(c => ({
+    claimId: c.claimId,
+    evidenceUnitId: c.evidenceUnitId,
+    claimKind: c.claimKind,
+    meaning: c.meaning,
+    semanticScope: c.semanticScope,
+    transferability: c.transferability,
+    scopeRationale: c.scopeRationale,
+    rowSemanticScope: c.rowSemanticScope,
+    rowTransferability: c.rowTransferability,
+    status: "INSUFFICIENT_SEMANTIC_SUPPORT" as ClaimDispositionStatus,
+    reason: "Excluded from canonical theme genesis due to claim-level INSUFFICIENT_SCOPE",
+  }));
+
+  if (substantiveClaims.length === 0) {
+    return { themes: [], claimDispositions: initialDispositions, candidateThemes: [], candidateLineage: [] };
+  }
+
   const unitMap = new Map(classifiedUnits.map(u => [u.evidenceUnitId, u]));
+  const substantiveUnits = classifiedUnits.filter(u =>
+    u.semanticClaims.some(c => (c.semanticScope || u.semanticScope) !== "INSUFFICIENT_SCOPE")
+  );
   const THEME_BATCH_SIZE = 80;
-  const candidateThemes: SemanticTheme[] = [];
-  const allDispositions: ClaimCoverageManifestItem[] = [];
+  const THEME_CONCURRENCY = 4;
 
-  for (let i = 0; i < classifiedUnits.length; i += THEME_BATCH_SIZE) {
-    const batchUnits = classifiedUnits.slice(i, i + THEME_BATCH_SIZE);
-    const batchClaims = batchUnits.flatMap(u => u.semanticClaims.map(c => ({
-      unitId: u.evidenceUnitId,
-      claimId: c.claimId,
-      claimKind: c.claimKind,
-      meaning: c.meaning,
-      brand: u.canonicalBrandName,
-      quote: u.rawText,
-      primaryForm: u.primaryForm,
-      platform: u.platform,
-    })));
+  const runThemeBatchGeneration = async (repairInstructions?: string): Promise<{ candidateThemes: SemanticTheme[]; allDispositions: ClaimCoverageManifestItem[] }> => {
+    const themeBatches: { batchUnits: TerminalEvidenceClassification[]; batchClaims: any[]; batchIndex: number }[] = [];
+    for (let i = 0; i < substantiveUnits.length; i += THEME_BATCH_SIZE) {
+      const batchUnits = substantiveUnits.slice(i, i + THEME_BATCH_SIZE);
+      const batchClaims = batchUnits.flatMap(u =>
+        u.semanticClaims
+          .filter(c => (c.semanticScope || u.semanticScope) !== "INSUFFICIENT_SCOPE")
+          .map(c => ({
+            unitId: u.evidenceUnitId,
+            claimId: c.claimId,
+            claimKind: c.claimKind,
+            meaning: c.meaning,
+            semanticScope: c.semanticScope || u.semanticScope || "CATEGORY_RECURRING",
+            transferability: c.transferability || u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH",
+            scopeRationale: c.scopeRationale,
+            rowSemanticScope: u.semanticScope,
+            rowTransferability: u.transferability,
+            brand: u.canonicalBrandName,
+            quote: u.rawText,
+            primaryForm: u.primaryForm,
+            platform: u.platform,
+          }))
+      );
+      themeBatches.push({ batchUnits, batchClaims, batchIndex: themeBatches.length });
+    }
 
-    const prompt = `You are an expert market research analyst conducting a Semantic Theme Inventory across customer voice evidence.
+    const batchResults: { themes: SemanticTheme[]; dispositions: ClaimCoverageManifestItem[] }[] = new Array(themeBatches.length);
+    let nextThemeBatchIdx = 0;
+
+    async function themeWorker() {
+      while (nextThemeBatchIdx < themeBatches.length) {
+        const currentIdx = nextThemeBatchIdx++;
+        const { batchUnits, batchClaims, batchIndex } = themeBatches[currentIdx];
+
+        const prompt = `You are an expert market research analyst conducting a Semantic Theme Inventory across customer voice evidence.
 BUSINESS CONTEXT:
 - Business: ${businessContext.businessName}
 - Offering / Hero Product: ${businessContext.heroProduct}
@@ -1075,22 +1643,56 @@ BUSINESS CONTEXT:
 
 CUSTOMER VOICE EVIDENCE BATCH (${batchUnits.length} UNITS, ${batchClaims.length} CLAIMS):
 ${batchUnits.map((u, idx) => {
-  const claimsStr = u.semanticClaims.map(c => `[${c.claimId}] (${c.claimKind}) ${c.meaning}`).join(" | ");
-  return `[Unit ${idx + 1}] ID: ${u.evidenceUnitId} | PrimaryForm: [${u.primaryForm}] | Brand: ${u.canonicalBrandName}\nQuote: "${u.rawText}"\nClaims: ${claimsStr}`;
+  const substantiveUnitClaims = u.semanticClaims.filter(c => (c.semanticScope || u.semanticScope) !== "INSUFFICIENT_SCOPE");
+  const rowScopeStr = u.semanticScope ? ` | RowScope: [${u.semanticScope}]` : "";
+  const claimsStr = substantiveUnitClaims.map(c =>
+    `[${c.claimId}] (${c.claimKind} | ClaimScope: [${c.semanticScope || u.semanticScope || "CATEGORY_RECURRING"}] | Transfer: [${c.transferability || u.transferability || "GLOBALLY_TRANSFERABLE_PRODUCT_TRUTH"}]) "${c.meaning}"`
+  ).join("\n    ");
+  return `[Unit ${idx + 1}] ID: ${u.evidenceUnitId} | PrimaryForm: [${u.primaryForm}] | Brand: ${u.canonicalBrandName}${rowScopeStr}
+  Quote: "${u.rawText}"
+  Claims:
+    ${claimsStr}`;
 }).join("\n\n")}
 
 TASK:
 1. Group customer voice evidence and semantic claims into coherent customer truth themes.
-   - Do NOT treat surface communication categories (QUESTION, DESIRE, COMPLAINT, PAIN, OBJECTION) as barriers.
-   - Multiple different surface forms expressing the same underlying customer problem, friction, hesitation, or desire belong in one unified theme.
-   - No fixed frequency or cross-brand requirements. A single strong evidence item can establish a valid customer truth.
+   - Authority resides strictly at the individual CLAIM level (ClaimScope), NOT row-level summary scope.
+   - A single customer quote may contain both single-brand operational claims and transferable product claims.
+   - CONSTITUTIONAL SEMANTIC ATOMICITY CONTRACT (ANTI-OVER-COLLAPSE):
+     * Two evidence-backed customer problem themes MUST remain separate when they differ materially in at least one of:
+       (a) customer friction or specific frustration point,
+       (b) failure mode or mechanism of breakdown,
+       (c) causal mechanism (why the problem happens),
+       (d) desired outcome or transformation,
+       (e) buying objection or skepticism,
+       (f) product requirement or specification needed,
+       (g) remedy or intervention required.
+     * Themes may be merged ONLY when they are genuinely semantic duplicates or different phrasings of the EXACT SAME underlying problem mechanism.
+     * FORBIDDEN OVER-COLLAPSE: DO NOT merge distinct physical, functional, operational, or emotional problem vectors into generic umbrella categories (e.g. do NOT merge fabric transparency/sheerness with thermal heat from layering, neckline fit, sizing proportion mismatches, or product quality with return/shipping policies into one generic umbrella). The category context may be shared, but the strategic problem vectors are separate customer truths.
+     * SINGLE ATOMIC FOCUS: Each theme must focus on ONE distinct customer truth, friction, or requirement. DO NOT create compound umbrella themes combining distinct vectors (e.g. do NOT combine product quality with return/refund issues, or fabric breathability with pricing).
+     * ANTI-OVER-SPLITTING: Every generated theme must be backed by explicit supporting evidence IDs, have a clear concise definition, and represent a meaningful customer truth. Do not create frivolous single-quote themes if quotes describe the exact same underlying mechanism.
+   - CONSTITUTIONAL CLAIM-LEVEL SEMANTIC SCOPE & THEME GENESIS RULES:
+     * CATEGORY_RECURRING claim: Broad category-level customer experience, problem, or desire. May freely originate category-wide canonical themes.
+     * MARKET_TRANSFERABLE claim: Specific experience revealing generalizable category buying trade-offs or universal product physics. May originate a canonical category theme.
+     * SINGLE_BRAND_SPECIFIC claim: Feedback strictly tied to one specific company/retailer. It MUST NOT independently originate a category-wide canonical theme unless corroborated by independent category evidence. It must be placed in isolatedTruthClaimIds (as ISOLATED_VALID_TRUTH) unless corroborated.
+     * INCIDENT_SPECIFIC claim: One-off individual customer service complaint or isolated transaction glitch. CANNOT independently establish a category-level theme; place in isolatedTruthClaimIds.
+     * INSUFFICIENT_SCOPE claim: Too narrow or ambiguous to originate a canonical theme.
+   - MIXED-EVIDENCE NON-CONTAMINATION INVARIANT:
+     * A SINGLE_BRAND_SPECIFIC claim in a unit CANNOT leak into or establish a category theme merely because another claim in the same unit is CATEGORY_RECURRING or MARKET_TRANSFERABLE.
+     * A CATEGORY_RECURRING or MARKET_TRANSFERABLE claim in a unit CANNOT be suppressed or blocked from theme genesis merely because another claim in the same unit is SINGLE_BRAND_SPECIFIC.
+   - CONSTITUTIONAL THEME FIDELITY RULES:
+     * Do NOT merge routine customer price/size questions ("Price please", "What size is this?") into operational failure themes like "difficulty finding pricing or sizes" unless evidence explicitly states difficulty or hidden pricing. Simple inquiries reflect interest or purchase intent.
+     * Restock requests ("Please restock medium", "Sold out :(") represent product availability demand / stockout friction, NOT "poor inventory transparency" or "operational fulfillment failure".
+     * Preserve distinct semantic realities: keep pricing inquiries, sizing inquiries, and stockout availability as separate, focused themes.
 2. Group all remaining claims in this batch into their terminal categories.
+
+${repairInstructions ? `\nCRITICAL TARGETED ATOMICITY REPAIR INSTRUCTIONS:\n${repairInstructions}\n` : ""}
 
 OUTPUT JSON FORMAT (JSON object ONLY):
 {
   "themes": [
     {
-      "themeId": "theme_b${Math.floor(i / THEME_BATCH_SIZE) + 1}_1",
+      "themeId": "theme_b${batchIndex + 1}_1",
       "canonicalMeaning": "Concise statement of the customer truth or problem in objective business language",
       "description": "Detailed explanation of what customers are experiencing or expressing",
       "supportingClaimIds": ["${batchClaims[0]?.claimId || "clm_1"}"],
@@ -1103,7 +1705,7 @@ OUTPUT JSON FORMAT (JSON object ONLY):
   "redundantClaimMappings": [
     {
       "claimId": "clm_id",
-      "representedByThemeId": "theme_b${Math.floor(i / THEME_BATCH_SIZE) + 1}_1",
+      "representedByThemeId": "theme_b${batchIndex + 1}_1",
       "redundantWithClaimId": "clm_other_id",
       "reason": "Brief explanation of redundancy"
     }
@@ -1112,115 +1714,214 @@ OUTPUT JSON FORMAT (JSON object ONLY):
   "noMeaningfulTruthClaimIds": []
 }`;
 
-    const res = await aiChat({
-      accountId,
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "You are an objective market research analyst. Output valid JSON object containing themes and categorized claim IDs only." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.1,
-      max_tokens: 4000,
-    });
+        const res = await aiChat({
+          accountId,
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: "You are an objective market research analyst. Output valid JSON object containing themes and categorized claim IDs only." },
+            { role: "user", content: prompt },
+          ],
+          temperature: 0.1,
+          max_tokens: 4000,
+          endpoint: "semantic-reasoner-theme-batch",
+          forceProvider: "openai",
+        });
 
-    const rawContent = res.choices[0]?.message?.content || "{}";
-    const cleanJson = sanitizeJson(rawContent);
-    const parsed = JSON.parse(cleanJson);
+        const rawContent = res.choices[0]?.message?.content || "{}";
+        let parsed: any;
+        const validateThemeBatch = (obj: any): { valid: boolean; data?: any; error?: string } => {
+          if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
+            return { valid: false, error: "Output must be a JSON object" };
+          }
+          if (!Array.isArray(obj.themes)) {
+            return { valid: false, error: "themes field must be an array" };
+          }
+          for (const t of obj.themes) {
+            if (!t.canonicalMeaning || typeof t.canonicalMeaning !== "string") {
+              return { valid: false, error: "Every theme must have a canonicalMeaning string" };
+            }
+            const evIds = Array.isArray(t.supportingEvidenceUnitIds) ? t.supportingEvidenceUnitIds : [];
+            const clmIds = Array.isArray(t.supportingClaimIds) ? t.supportingClaimIds : [];
+            if (evIds.length === 0 && clmIds.length === 0) {
+              return { valid: false, error: `Theme "${t.canonicalMeaning}" has no supporting evidence IDs or claim IDs` };
+            }
+          }
+          return { valid: true, data: obj };
+        };
 
-    const rawThemes = Array.isArray(parsed.themes) ? parsed.themes : [];
-    const batchThemes: SemanticTheme[] = [];
+        try {
+          const cleanJson = sanitizeJson(rawContent);
+          parsed = JSON.parse(cleanJson);
+          const val = validateThemeBatch(parsed);
+          if (!val.valid) {
+            throw new Error(val.error);
+          }
+        } catch (parseErr: any) {
+          console.warn(`[AudienceReasoner] Theme batch syntax/schema failure (${parseErr.message}), entering bounded LLM repair.`);
+          const repairResult = await repairMalformedJsonWithLLM({
+            rawContent,
+            errorMessage: parseErr.message,
+            expectedSchemaName: "SemanticThemeInventoryBatch",
+            schemaExample: `{\n  "themes": [\n    {\n      "themeId": "theme_b${batchIndex + 1}_1",\n      "canonicalMeaning": "...",\n      "description": "...",\n      "supportingClaimIds": ["${batchClaims[0]?.claimId || "clm_1"}"],\n      "supportingEvidenceUnitIds": ["${batchUnits[0]?.evidenceUnitId || "ev_1"}"],\n      "semanticRationale": "...",\n      "confidence": 0.85\n    }\n  ],\n  "isolatedTruthClaimIds": ["${batchClaims[1]?.claimId || "clm_2"}"],\n  "redundantClaimMappings": [\n    {\n      "claimId": "clm_id",\n      "representedByThemeId": "theme_b${batchIndex + 1}_1",\n      "redundantWithClaimId": "clm_other_id",\n      "reason": "..."\n    }\n  ],\n  "insufficientClaimIds": [],\n  "noMeaningfulTruthClaimIds": []\n}`,
+            accountId,
+            endpoint: "semantic-reasoner-theme-batch-repair",
+            validator: validateThemeBatch,
+          });
 
-    for (const t of rawThemes) {
-      if (!t.canonicalMeaning) continue;
-      const supportingEvidenceUnitIds = Array.isArray(t.supportingEvidenceUnitIds) ? t.supportingEvidenceUnitIds.filter((id: string) => unitMap.has(id)) : [];
-      const supportingClaimIds = Array.isArray(t.supportingClaimIds) ? t.supportingClaimIds : [];
-      if (supportingEvidenceUnitIds.length === 0 && supportingClaimIds.length === 0) continue;
-
-      const matchingUnits = supportingEvidenceUnitIds.map((id: string) => unitMap.get(id)!).filter(Boolean);
-      const competitorIds = Array.from(new Set(matchingUnits.map(u => u.canonicalCompetitorId)));
-      const platforms = Array.from(new Set(matchingUnits.map(u => u.platform)));
-      const claimKinds = Array.from(new Set(matchingUnits.flatMap(u => u.semanticClaims.map(c => c.claimKind))));
-
-      batchThemes.push({
-        themeId: t.themeId || `theme_${createHash("sha256").update(t.canonicalMeaning).digest("hex").slice(0, 10)}`,
-        canonicalMeaning: t.canonicalMeaning.trim(),
-        description: t.description || t.canonicalMeaning.trim(),
-        supportingClaimIds,
-        supportingEvidenceUnitIds,
-        claimKinds,
-        competitorIds,
-        platforms,
-        semanticRationale: t.semanticRationale || "Grounded customer truth theme",
-        confidence: typeof t.confidence === "number" ? Math.max(0, Math.min(1, t.confidence)) : 0.85,
-      });
-    }
-
-    candidateThemes.push(...batchThemes);
-
-    const isolatedSet = new Set(Array.isArray(parsed.isolatedTruthClaimIds) ? parsed.isolatedTruthClaimIds : []);
-    const insufficientSet = new Set(Array.isArray(parsed.insufficientClaimIds) ? parsed.insufficientClaimIds : []);
-    const noMeaningfulSet = new Set(Array.isArray(parsed.noMeaningfulTruthClaimIds) ? parsed.noMeaningfulTruthClaimIds : []);
-    const redundantMap = new Map<string, any>();
-    if (Array.isArray(parsed.redundantClaimMappings)) {
-      for (const r of parsed.redundantClaimMappings) {
-        if (r && r.claimId) redundantMap.set(r.claimId, r);
-      }
-    }
-
-    const batchDispositions: ClaimCoverageManifestItem[] = batchClaims.map(c => {
-      let status: ClaimDispositionStatus = "ISOLATED_VALID_TRUTH";
-      let themeId: string | undefined;
-      let representedByThemeId: string | undefined;
-      let redundantWithClaimId: string | undefined;
-      let reason: string | undefined;
-
-      const matchingTheme = batchThemes.find(t => t.supportingClaimIds.includes(c.claimId) || t.supportingEvidenceUnitIds.includes(c.unitId));
-      if (matchingTheme) {
-        status = "ASSIGNED_TO_THEME";
-        themeId = matchingTheme.themeId;
-        reason = `Assigned to theme: ${matchingTheme.canonicalMeaning}`;
-      } else if (redundantMap.has(c.claimId)) {
-        const red = redundantMap.get(c.claimId);
-        status = "SEMANTICALLY_REDUNDANT";
-        representedByThemeId = red.representedByThemeId;
-        redundantWithClaimId = red.redundantWithClaimId;
-        reason = red.reason || "Semantically redundant with existing claim/theme";
-      } else if (isolatedSet.has(c.claimId)) {
-        status = "ISOLATED_VALID_TRUTH";
-        reason = "Isolated grounded customer voice";
-      } else if (insufficientSet.has(c.claimId)) {
-        status = "INSUFFICIENT_SEMANTIC_SUPPORT";
-        reason = "Fragmentary evidence";
-      } else if (noMeaningfulSet.has(c.claimId)) {
-        status = "NO_MEANINGFUL_CUSTOMER_TRUTH";
-        reason = "Social compliment / aesthetic praise";
-      } else {
-        if (c.primaryForm === "PRAISE" || c.primaryForm === "IRRELEVANT") {
-          status = "NO_MEANINGFUL_CUSTOMER_TRUTH";
-          reason = "Social compliment / aesthetic praise";
-        } else if (c.primaryForm === "INSUFFICIENT_EVIDENCE") {
-          status = "INSUFFICIENT_SEMANTIC_SUPPORT";
-          reason = "Fragmentary customer voice";
-        } else {
-          status = "ISOLATED_VALID_TRUTH";
-          reason = "Stand-alone customer voice inquiry/statement";
+          if (!repairResult.success || !repairResult.data) {
+            throw new Error(`Theme batch JSON repair exhausted: ${repairResult.error}`);
+          }
+          parsed = repairResult.data;
         }
+
+        const rawThemes = Array.isArray(parsed.themes) ? parsed.themes : [];
+        const batchThemes: SemanticTheme[] = [];
+        const claimMap = new Map(batchClaims.map(c => [c.claimId, c]));
+
+        for (const t of rawThemes) {
+          if (!t.canonicalMeaning) continue;
+          const supportingEvidenceUnitIds = Array.isArray(t.supportingEvidenceUnitIds) ? t.supportingEvidenceUnitIds.filter((id: string) => unitMap.has(id)) : [];
+          const supportingClaimIds = Array.isArray(t.supportingClaimIds) ? t.supportingClaimIds.filter((cid: string) => claimMap.has(cid)) : [];
+          if (supportingEvidenceUnitIds.length === 0 && supportingClaimIds.length === 0) continue;
+
+          // Verify that the theme is not supported ONLY by single-brand specific or incident-specific claims without category corroboration
+          const supportingClaims = supportingClaimIds.map(cid => claimMap.get(cid)!).filter(Boolean);
+          const hasSubstantiveCategoryClaim = supportingClaims.some(c => c.semanticScope === "CATEGORY_RECURRING" || c.semanticScope === "MARKET_TRANSFERABLE");
+          const uniqueBrands = new Set(supportingClaims.map(c => c.brand));
+
+          if (!hasSubstantiveCategoryClaim && uniqueBrands.size <= 1 && supportingClaims.every(c => c.semanticScope === "SINGLE_BRAND_SPECIFIC" || c.semanticScope === "INCIDENT_SPECIFIC")) {
+            // Reject single-brand operational theme from category theme status
+            continue;
+          }
+
+          const matchingUnits = supportingEvidenceUnitIds.map((id: string) => unitMap.get(id)!).filter(Boolean);
+          const competitorIds = Array.from(new Set(matchingUnits.map(u => u.canonicalCompetitorId)));
+          const platforms = Array.from(new Set(matchingUnits.map(u => u.platform)));
+          const claimKinds = Array.from(new Set(matchingUnits.flatMap(u => u.semanticClaims.map(c => c.claimKind))));
+
+          batchThemes.push({
+            themeId: t.themeId || `theme_${createHash("sha256").update(t.canonicalMeaning).digest("hex").slice(0, 10)}`,
+            canonicalMeaning: t.canonicalMeaning.trim(),
+            description: t.description || t.canonicalMeaning.trim(),
+            supportingClaimIds,
+            supportingEvidenceUnitIds,
+            claimKinds,
+            competitorIds,
+            platforms,
+            semanticRationale: t.semanticRationale || "Grounded customer truth theme",
+            confidence: typeof t.confidence === "number" ? Math.max(0, Math.min(1, t.confidence)) : 0.85,
+          });
+        }
+
+        const isolatedSet = new Set(Array.isArray(parsed.isolatedTruthClaimIds) ? parsed.isolatedTruthClaimIds : []);
+        const insufficientSet = new Set(Array.isArray(parsed.insufficientClaimIds) ? parsed.insufficientClaimIds : []);
+        const noMeaningfulSet = new Set(Array.isArray(parsed.noMeaningfulTruthClaimIds) ? parsed.noMeaningfulTruthClaimIds : []);
+        const redundantMap = new Map<string, any>();
+        if (Array.isArray(parsed.redundantClaimMappings)) {
+          for (const r of parsed.redundantClaimMappings) {
+            if (r && r.claimId) redundantMap.set(r.claimId, r);
+          }
+        }
+
+        const batchDispositions: ClaimCoverageManifestItem[] = batchClaims.map(c => {
+          let status: ClaimDispositionStatus = "ISOLATED_VALID_TRUTH";
+          let themeId: string | undefined;
+          let representedByThemeId: string | undefined;
+          let redundantWithClaimId: string | undefined;
+          let reason: string | undefined;
+
+          const matchingTheme = batchThemes.find(t => {
+            if (t.supportingClaimIds && t.supportingClaimIds.length > 0) {
+              return t.supportingClaimIds.includes(c.claimId);
+            }
+            return t.supportingEvidenceUnitIds.includes(c.unitId);
+          });
+          if (matchingTheme) {
+            status = "ASSIGNED_TO_THEME";
+            themeId = matchingTheme.themeId;
+            reason = `Assigned to theme: ${matchingTheme.canonicalMeaning}`;
+          } else if (redundantMap.has(c.claimId)) {
+            const red = redundantMap.get(c.claimId);
+            status = "SEMANTICALLY_REDUNDANT";
+            representedByThemeId = red.representedByThemeId;
+            redundantWithClaimId = red.redundantWithClaimId;
+            reason = red.reason || "Semantically redundant with existing claim/theme";
+          } else if (isolatedSet.has(c.claimId)) {
+            status = "ISOLATED_VALID_TRUTH";
+            reason = "Isolated grounded customer voice";
+          } else if (insufficientSet.has(c.claimId)) {
+            status = "INSUFFICIENT_SEMANTIC_SUPPORT";
+            reason = "Fragmentary evidence";
+          } else if (noMeaningfulSet.has(c.claimId)) {
+            status = "NO_MEANINGFUL_CUSTOMER_TRUTH";
+            reason = "Social compliment / aesthetic praise";
+          } else {
+            if (c.primaryForm === "PRAISE" || c.primaryForm === "IRRELEVANT") {
+              status = "NO_MEANINGFUL_CUSTOMER_TRUTH";
+              reason = "Social compliment / aesthetic praise";
+            } else if (c.primaryForm === "INSUFFICIENT_EVIDENCE") {
+              status = "INSUFFICIENT_SEMANTIC_SUPPORT";
+              reason = "Fragmentary customer voice";
+            } else {
+              status = "ISOLATED_VALID_TRUTH";
+              reason = "Stand-alone customer voice inquiry/statement";
+            }
+          }
+
+          return {
+            claimId: c.claimId,
+            evidenceUnitId: c.unitId,
+            claimKind: c.claimKind as SemanticClaimKind,
+            meaning: c.meaning,
+            semanticScope: c.semanticScope,
+            transferability: c.transferability,
+            scopeRationale: c.scopeRationale,
+            rowSemanticScope: c.rowSemanticScope,
+            rowTransferability: c.rowTransferability,
+            status,
+            themeId,
+            representedByThemeId,
+            redundantWithClaimId,
+            reason,
+          };
+        });
+
+        batchResults[currentIdx] = { themes: batchThemes, dispositions: batchDispositions };
       }
+    }
 
-      return {
-        claimId: c.claimId,
-        evidenceUnitId: c.unitId,
-        claimKind: c.claimKind as SemanticClaimKind,
-        meaning: c.meaning,
-        status,
-        themeId,
-        representedByThemeId,
-        redundantWithClaimId,
-        reason,
-      };
-    });
+    const themeWorkerCount = Math.min(THEME_CONCURRENCY, themeBatches.length);
+    if (themeWorkerCount > 0) {
+      const workerPromises = Array.from({ length: themeWorkerCount }, () => themeWorker());
+      await Promise.all(workerPromises);
+    }
 
-    allDispositions.push(...batchDispositions);
+    return {
+      candidateThemes: batchResults.flatMap(r => r ? r.themes : []),
+      allDispositions: batchResults.flatMap(r => r ? r.dispositions : []),
+    };
+  };
+
+  // 1. Initial Generation
+  let { candidateThemes, allDispositions } = await runThemeBatchGeneration();
+
+  // 2. Bounded Semantic Atomicity Check & Targeted Repair
+  if (candidateThemes.length > 0) {
+    const atomicityAudit = await auditThemeInventoryAtomicityWithLLM(
+      candidateThemes,
+      classifiedUnits,
+      businessContext,
+      accountId
+    );
+
+    if (atomicityAudit.verdict === "OVER_COLLAPSED" && atomicityAudit.repairFeedback) {
+      console.log(`[AudienceReasoner] THEME_INVENTORY_ATOMICITY_CHECK | verdict=${atomicityAudit.verdict} | issues=${atomicityAudit.issues.join("; ")} | entering 1 bounded repair cycle`);
+      const repaired = await runThemeBatchGeneration(atomicityAudit.repairFeedback);
+      if (repaired.candidateThemes.length > 0) {
+        candidateThemes = repaired.candidateThemes;
+        allDispositions = repaired.allDispositions;
+      }
+    }
   }
 
   let canonicalThemes = candidateThemes;
@@ -1242,7 +1943,12 @@ OUTPUT JSON FORMAT (JSON object ONLY):
   }
 
   const reconciledDispositions: ClaimCoverageManifestItem[] = allDispositions.map(d => {
-    const matchingTheme = canonicalThemes.find(t => t.supportingClaimIds.includes(d.claimId) || t.supportingEvidenceUnitIds.includes(d.evidenceUnitId));
+    const matchingTheme = canonicalThemes.find(t => {
+      if (t.supportingClaimIds && t.supportingClaimIds.length > 0) {
+        return t.supportingClaimIds.includes(d.claimId);
+      }
+      return t.supportingEvidenceUnitIds.includes(d.evidenceUnitId);
+    });
     if (matchingTheme) {
       return {
         ...d,
@@ -1255,7 +1961,7 @@ OUTPUT JSON FORMAT (JSON object ONLY):
     return d;
   });
 
-  return { themes: canonicalThemes, claimDispositions: reconciledDispositions, candidateThemes, candidateLineage };
+  return { themes: canonicalThemes, claimDispositions: [...initialDispositions, ...reconciledDispositions], candidateThemes, candidateLineage };
 }
 
 export async function synthesizeAudienceSignalsFromThemesWithLLM(
@@ -1265,6 +1971,10 @@ export async function synthesizeAudienceSignalsFromThemesWithLLM(
   businessContext: { heroProduct: string; businessName: string; market: string; category: string },
   accountId: string
 ): Promise<AudienceSignalDraft[]> {
+  if (themes.length === 0 && isolatedTruths.length === 0) {
+    return [];
+  }
+
   const evidenceMap = new Map(evidenceUnits.map(u => [u.id, u]));
 
   const prompt = `You are an audience intelligence strategist synthesizing Audience Intelligence Signals from a validated Semantic Theme Inventory and isolated customer truths.
@@ -1297,6 +2007,9 @@ Synthesize the comprehensive Audience Intelligence Signals across the validated 
 7. AUDIENCE_SEGMENTS: Meaningfully distinct customer sub-groups (only if demographic/behavioral attributes are explicitly evidenced).
 
 CONSTITUTIONAL RULES:
+- PAIN FIDELITY INVARIANT: Every clause in a canonical statement MUST be strictly and completely entailed by the cited quotes.
+- QUESTION != PAIN: Routine customer questions ('Price please', 'What size is the model wearing?') are purchase inquiries / intent, NOT customer friction or lack of transparency unless evidence explicitly states difficulty or hidden pricing.
+- RESTOCK VS SYSTEM FAILURE: Restock requests ('Please restock medium', 'Everything is sold out') establish product availability demand / stockout frustration, NOT operational inventory tracking failure or fulfillment system breakdown.
 - Ground EVERY signal strictly in the provided themes and evidence.
 - Every signal MUST cite the exact themeIds (or claimIds for isolated truths) and evidenceUnitIds.
 - Provide a clear support rationale per cited evidence unit (NO citation hallucination).
@@ -1331,11 +2044,51 @@ OUTPUT JSON FORMAT (JSON array ONLY):
     ],
     temperature: 0.1,
     max_tokens: 4000,
+    forceProvider: "openai",
   });
 
-  const rawContent = res.choices[0]?.message?.content || "[]";
-  const cleanJson = rawContent.replace(/^\`\`\`[a-z]*\s*/i, "").replace(/\s*\`\`\`$/i, "").trim();
-  const parsed = JSON.parse(cleanJson);
+  const validateSignals = (arr: any): { valid: boolean; data?: any; error?: string } => {
+    if (!Array.isArray(arr)) {
+      return { valid: false, error: "Output must be a JSON array of signals" };
+    }
+    const validTypes = new Set(["pain", "desire", "objection", "question", "purchase_intent", "complaint", "pattern", "root_cause", "psychological_driver", "segment"]);
+    for (const item of arr) {
+      if (!item.type || !validTypes.has(item.type)) {
+        return { valid: false, error: `Signal item missing valid type (got ${item.type})` };
+      }
+      if (!item.canonical || typeof item.canonical !== "string") {
+        return { valid: false, error: "Signal item missing canonical string" };
+      }
+    }
+    return { valid: true, data: arr };
+  };
+
+  const rawSignals = res.choices[0]?.message?.content || "[]";
+  let parsed: any[];
+  try {
+    const cleanJson = sanitizeJsonArray(rawSignals);
+    parsed = JSON.parse(cleanJson);
+    const val = validateSignals(parsed);
+    if (!val.valid) {
+      throw new Error(val.error);
+    }
+  } catch (err: any) {
+    console.warn(`[AudienceReasoner] Signal synthesis syntax/schema failure (${err.message}), entering bounded LLM repair.`);
+    const repairResult = await repairMalformedJsonWithLLM<any[]>({
+      rawContent: rawSignals,
+      errorMessage: err.message,
+      expectedSchemaName: "AudienceSignalDraftArray",
+      schemaExample: `[\n  {\n    "type": "pain",\n    "canonical": "...",\n    "explanation": "...",\n    "themeIds": ["theme_1"],\n    "supportingClaimIds": ["clm_1"],\n    "support": [\n      {\n        "evidenceUnitId": "ev_unit_1",\n        "claimId": "clm_1",\n        "whyItSupportsThisSignal": "..."\n      }\n    ]\n  }\n]`,
+      accountId,
+      endpoint: "semantic-reasoner-signal-repair",
+      validator: validateSignals,
+    });
+
+    if (!repairResult.success || !repairResult.data) {
+      throw new Error(`Signal synthesis JSON repair exhausted: ${repairResult.error}`);
+    }
+    parsed = repairResult.data;
+  }
   if (!Array.isArray(parsed)) return [];
 
   const draftSignals: AudienceSignalDraft[] = [];
@@ -1453,6 +2206,191 @@ OUTPUT JSON FORMAT (JSON array ONLY):
 }
 
 /**
+ * Corroborates validated Direct candidate themes with Supporting (Adjacent) and Benchmark (Aspirational) evidence.
+ * Invariant: Non-direct evidence CANNOT generate new candidate themes. It can only attach as corroborating support
+ * to an existing Direct theme or remain unassigned supporting context.
+ */
+export async function corroborateThemesWithNonDirectEvidenceWithLLM(
+  directThemes: SemanticTheme[],
+  nonDirectUnits: TerminalEvidenceClassification[],
+  businessContext: { heroProduct: string; businessName: string; market: string; category: string },
+  accountId: string
+): Promise<{
+  corroboratedThemes: SemanticTheme[];
+  nonDirectDispositions: ClaimCoverageManifestItem[];
+}> {
+  if (nonDirectUnits.length === 0 || directThemes.length === 0) {
+    const nonDirectDispositions: ClaimCoverageManifestItem[] = nonDirectUnits.flatMap(u =>
+      u.semanticClaims.map(c => ({
+        claimId: c.claimId,
+        evidenceUnitId: u.evidenceUnitId,
+        claimKind: c.claimKind,
+        meaning: c.meaning,
+        semanticScope: c.semanticScope,
+        transferability: c.transferability,
+        scopeRationale: c.scopeRationale,
+        rowSemanticScope: c.rowSemanticScope || u.semanticScope,
+        rowTransferability: c.rowTransferability || u.transferability,
+        status: (u.primaryForm === "PRAISE" || u.primaryForm === "IRRELEVANT" ? "NO_MEANINGFUL_CUSTOMER_TRUTH" : (u.primaryForm === "INSUFFICIENT_EVIDENCE" ? "INSUFFICIENT_SEMANTIC_SUPPORT" : "ISOLATED_VALID_TRUTH")) as ClaimDispositionStatus,
+        reason: "Supporting social/benchmark context (no primary market voice theme match)",
+      }))
+    );
+    return { corroboratedThemes: directThemes, nonDirectDispositions };
+  }
+
+  const unitMap = new Map(nonDirectUnits.map(u => [u.evidenceUnitId, u]));
+  const nonDirectClaims = nonDirectUnits.flatMap(u => u.semanticClaims.map(c => ({
+    unitId: u.evidenceUnitId,
+    claimId: c.claimId,
+    claimKind: c.claimKind,
+    meaning: c.meaning,
+    semanticScope: c.semanticScope,
+    transferability: c.transferability,
+    scopeRationale: c.scopeRationale,
+    rowSemanticScope: c.rowSemanticScope || u.semanticScope,
+    rowTransferability: c.rowTransferability || u.transferability,
+    brand: u.canonicalBrandName,
+    quote: u.rawText,
+    strategicRole: u.strategicRole || "ASPIRATIONAL",
+    evidencePool: u.evidencePool || "BENCHMARK_CONTEXT",
+    primaryForm: u.primaryForm,
+  })));
+
+  const prompt = `You are an expert market research analyst evaluating whether supporting social comments / reviews / benchmark customer evidence corroborates verified PRIMARY MARKET VOICE candidate themes.
+BUSINESS CONTEXT:
+- Business: ${businessContext.businessName}
+- Offering / Hero Product: ${businessContext.heroProduct}
+- Category: ${businessContext.category}
+- Target Market: ${businessContext.market}
+
+CANONICAL PRIMARY MARKET VOICE THEMES (${directThemes.length} THEMES):
+${directThemes.map((t, idx) => `[Theme ${idx + 1}] ID: ${t.themeId}\nMeaning: "${t.canonicalMeaning}"\nDescription: ${t.description}`).join("\n\n")}
+
+SUPPORTING SOCIAL / BENCHMARK EVIDENCE ITEMS (${nonDirectUnits.length} UNITS, ${nonDirectClaims.length} CLAIMS):
+${nonDirectUnits.map((u, idx) => {
+  const claimsStr = u.semanticClaims.map(c => `[${c.claimId}] (${c.claimKind} | Scope: [${c.semanticScope || "CATEGORY_RECURRING"}]) ${c.meaning}`).join(" | ");
+  return `[Supporting Unit ${idx + 1}] ID: ${u.evidenceUnitId} | Role: ${u.strategicRole || "ASPIRATIONAL"} | Brand: ${u.canonicalBrandName}\nQuote: "${u.rawText}"\nClaims: ${claimsStr}`;
+}).join("\n\n")}
+
+TASK:
+1. For each supporting evidence unit and claim, determine whether it directly corroborates one of the existing CANONICAL PRIMARY MARKET VOICE THEMES.
+2. Invariant: Supporting social/benchmark evidence CANNOT create new themes. It can ONLY corroborate existing Primary Market Voice themes or remain unmatched.
+3. If an item clearly expresses the same underlying customer truth/friction/desire as a Primary Market Voice Theme, assign its claimId and evidenceUnitId to that themeId.
+4. If an item does NOT match any Primary Market Voice Theme, mark it in unmatchedClaimIds.
+
+OUTPUT JSON FORMAT (JSON object ONLY):
+{
+  "corroborations": [
+    {
+      "claimId": "${nonDirectClaims[0]?.claimId || "clm_1"}",
+      "evidenceUnitId": "${nonDirectUnits[0]?.evidenceUnitId || "ev_1"}",
+      "themeId": "${directThemes[0]?.themeId || "theme_1"}",
+      "corroborationRationale": "Clear rationale of how this supporting evidence corroborates the primary market voice theme"
+    }
+  ],
+  "unmatchedClaimIds": []
+}`;
+
+  let parsed: any = { corroborations: [], unmatchedClaimIds: [] };
+
+  try {
+    const res = await aiChat({
+      accountId,
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are an objective market research analyst. Output JSON object with corroborations and unmatchedClaimIds only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.1,
+      max_tokens: 4000,
+      endpoint: "semantic-reasoner-theme-corroboration",
+      forceProvider: "openai",
+    });
+
+    const raw = res.choices[0]?.message?.content || "{}";
+    const cleanJson = sanitizeJson(raw);
+    parsed = JSON.parse(cleanJson);
+  } catch (err: any) {
+    console.warn(`[AudienceReasoner] Supporting social theme corroboration warning: ${err.message}; proceeding with uncorroborated supporting dispositions.`);
+  }
+
+  const corroborations = Array.isArray(parsed?.corroborations) ? parsed.corroborations : [];
+  const themeMap = new Map(directThemes.map(t => [t.themeId, { ...t, supportingClaimIds: [...t.supportingClaimIds], supportingEvidenceUnitIds: [...t.supportingEvidenceUnitIds], competitorIds: [...t.competitorIds], platforms: [...t.platforms] }]));
+  const assignedClaimMap = new Map<string, { themeId: string; reason: string }>();
+
+  for (const corr of corroborations) {
+    if (!corr || !corr.claimId || !corr.themeId) continue;
+    const theme = themeMap.get(corr.themeId);
+    if (!theme) continue;
+
+    if (!theme.supportingClaimIds.includes(corr.claimId)) {
+      theme.supportingClaimIds.push(corr.claimId);
+    }
+    if (corr.evidenceUnitId && unitMap.has(corr.evidenceUnitId)) {
+      const u = unitMap.get(corr.evidenceUnitId)!;
+      if (!theme.supportingEvidenceUnitIds.includes(corr.evidenceUnitId)) {
+        theme.supportingEvidenceUnitIds.push(corr.evidenceUnitId);
+      }
+      if (u.canonicalCompetitorId && !theme.competitorIds.includes(u.canonicalCompetitorId)) {
+        theme.competitorIds.push(u.canonicalCompetitorId);
+      }
+      if (u.platform && !theme.platforms.includes(u.platform)) {
+        theme.platforms.push(u.platform);
+      }
+    }
+    assignedClaimMap.set(corr.claimId, {
+      themeId: corr.themeId,
+      reason: corr.corroborationRationale || `Corroborates primary market voice theme: ${theme.canonicalMeaning}`,
+    });
+  }
+
+  const nonDirectDispositions: ClaimCoverageManifestItem[] = nonDirectClaims.map(c => {
+    const assigned = assignedClaimMap.get(c.claimId);
+    if (assigned) {
+      return {
+        claimId: c.claimId,
+        evidenceUnitId: c.unitId,
+        claimKind: c.claimKind as SemanticClaimKind,
+        meaning: c.meaning,
+        semanticScope: c.semanticScope,
+        transferability: c.transferability,
+        scopeRationale: c.scopeRationale,
+        rowSemanticScope: c.rowSemanticScope,
+        rowTransferability: c.rowTransferability,
+        status: "ASSIGNED_TO_THEME" as ClaimDispositionStatus,
+        themeId: assigned.themeId,
+        representedByThemeId: assigned.themeId,
+        reason: assigned.reason,
+      };
+    }
+    let status: ClaimDispositionStatus = "ISOLATED_VALID_TRUTH";
+    if (c.primaryForm === "PRAISE" || c.primaryForm === "IRRELEVANT") {
+      status = "NO_MEANINGFUL_CUSTOMER_TRUTH";
+    } else if (c.primaryForm === "INSUFFICIENT_EVIDENCE") {
+      status = "INSUFFICIENT_SEMANTIC_SUPPORT";
+    }
+    return {
+      claimId: c.claimId,
+      evidenceUnitId: c.unitId,
+      claimKind: c.claimKind as SemanticClaimKind,
+      meaning: c.meaning,
+      semanticScope: c.semanticScope,
+      transferability: c.transferability,
+      scopeRationale: c.scopeRationale,
+      rowSemanticScope: c.rowSemanticScope,
+      rowTransferability: c.rowTransferability,
+      status,
+      reason: "Supporting social/benchmark context (no primary market voice theme match)",
+    };
+  });
+
+  return {
+    corroboratedThemes: Array.from(themeMap.values()),
+    nonDirectDispositions,
+  };
+}
+
+/**
  * GLOBAL CROSS-BATCH AUDIENCE SYNTHESIS (TWO-STAGE):
  * Stage 1: Discovers verified Semantic Themes across the complete semantic claim corpus.
  * Stage 2: Synthesizes draft Audience Signals from the validated Themes.
@@ -1463,8 +2401,49 @@ export async function synthesizeGlobalAudienceWithLLM(
   accountId: string,
   _campaignId?: string
 ): Promise<{ draft: AudienceIntelligenceDraft; manifest: SignalCoverageManifest; themes: SemanticTheme[]; candidateThemes: SemanticTheme[]; candidateLineage: CandidateThemeLineage[] }> {
-  // Step 1: Semantic Theme Inventory
-  const { themes, claimDispositions, candidateThemes, candidateLineage } = await generateSemanticThemeInventoryWithLLM(classifiedUnits, businessContext, accountId);
+  // Step 1: Market-Voice-Primary Theme Inventory + Supporting Social Customer Voice Corroboration
+  // Invariant: Primary evidencePool strictly owns theme genesis. Supporting evidencePool corroborates only.
+  const primaryUnits = classifiedUnits.filter(u => u.evidencePool === "PRIMARY_MARKET_VOICE");
+  const supportingUnits = classifiedUnits.filter(u => u.evidencePool === "SUPPORTING_SOCIAL_CUSTOMER_VOICE");
+
+  let themes: SemanticTheme[] = [];
+  let claimDispositions: ClaimCoverageManifestItem[] = [];
+  let candidateThemes: SemanticTheme[] = [];
+  let candidateLineage: CandidateThemeLineage[] = [];
+
+  if (primaryUnits.length > 0) {
+    const directRes = await generateSemanticThemeInventoryWithLLM(primaryUnits, businessContext, accountId);
+    themes = directRes.themes;
+    candidateThemes = directRes.candidateThemes;
+    candidateLineage = directRes.candidateLineage;
+    claimDispositions = directRes.claimDispositions;
+
+    if (supportingUnits.length > 0) {
+      const corrRes = await corroborateThemesWithNonDirectEvidenceWithLLM(themes, supportingUnits, businessContext, accountId);
+      themes = corrRes.corroboratedThemes;
+      claimDispositions = [...claimDispositions, ...corrRes.nonDirectDispositions];
+    }
+  } else {
+    // Zero Primary Market Voice units -> 0 candidate themes generated (Supporting social comments cannot generate candidate themes independently)
+    themes = [];
+    candidateThemes = [];
+    candidateLineage = [];
+    claimDispositions = supportingUnits.flatMap(u =>
+      u.semanticClaims.map(c => ({
+        claimId: c.claimId,
+        evidenceUnitId: u.evidenceUnitId,
+        claimKind: c.claimKind,
+        meaning: c.meaning,
+        semanticScope: c.semanticScope,
+        transferability: c.transferability,
+        scopeRationale: c.scopeRationale,
+        rowSemanticScope: c.rowSemanticScope || u.semanticScope,
+        rowTransferability: c.rowTransferability || u.transferability,
+        status: (u.primaryForm === "PRAISE" || u.primaryForm === "IRRELEVANT" ? "NO_MEANINGFUL_CUSTOMER_TRUTH" : (u.primaryForm === "INSUFFICIENT_EVIDENCE" ? "INSUFFICIENT_SEMANTIC_SUPPORT" : "ISOLATED_VALID_TRUTH")) as ClaimDispositionStatus,
+        reason: "Supporting social evidence excluded from candidate theme generation (no primary market voice evidence)",
+      }))
+    );
+  }
 
   // Step 2: Signal Synthesis from Themes
   const dedupUnits: DeduplicatedEvidenceUnit[] = classifiedUnits.map(c => ({
@@ -1477,10 +2456,15 @@ export async function synthesizeGlobalAudienceWithLLM(
     rawOccurrenceCount: 1,
     likesCount: 0,
     originalIds: c.rawEvidenceId ? [c.rawEvidenceId] : [],
+    strategicRole: c.strategicRole,
+    evidencePool: c.evidencePool,
+    semanticScope: c.semanticScope,
+    transferability: c.transferability,
+    contributors: c.contributors,
   }));
 
-  const allClaims = classifiedUnits.flatMap(u => u.semanticClaims);
-  const isolatedTruthClaims = allClaims.filter(c => claimDispositions.some(d => d.claimId === c.claimId && d.status === "ISOLATED_VALID_TRUTH"));
+  const directClaims = primaryUnits.flatMap(u => u.semanticClaims);
+  const isolatedTruthClaims = directClaims.filter(c => claimDispositions.some(d => d.claimId === c.claimId && d.status === "ISOLATED_VALID_TRUTH"));
 
   const allDraftSignals = await synthesizeAudienceSignalsFromThemesWithLLM(themes, isolatedTruthClaims, dedupUnits, businessContext, accountId);
 
@@ -1636,6 +2620,9 @@ CONSTITUTIONAL RULES FOR EVIDENCE VALIDATION:
 
 4. WHAT TO REJECT (HALLUCINATION & FABRICATION ONLY):
    - Reject ONLY when the CORE CUSTOMER TRUTH is unsupported:
+     * OVER_GENERALIZED: converting simple questions ("Price please", "What size is the model wearing?") or restock requests into operational/fulfillment failures without evidence.
+     * SINGLE_BRAND_OVER_ELEVATION: elevating a single company or vendor's isolated dispute (SINGLE_BRAND_SPECIFIC / INCIDENT_SPECIFIC) into a category-wide market truth or global pain without independent category corroboration.
+     * SEMANTIC_DRIFT: asserting causes, mechanisms, or issues that differ from what customers actually expressed.
      * UNSUPPORTED_SEGMENT: invented demographics or unstated user attributes.
      * SPECULATIVE_PSYCHOLOGY: invented psychological/identity drivers with no textual evidence.
      * SYMPTOM_AS_ROOT_CAUSE: invented causal mechanisms without causal evidence.
@@ -1651,7 +2638,7 @@ OUTPUT JSON FORMAT:
     {
       "issueId": "iss_1",
       "affectedSignalIds": ["sig_id_2"],
-      "problemType": "UNGROUNDED_EVIDENCE" | "WRONG_CATEGORY" | "UNSUPPORTED_ATTRIBUTE" | "PRAISE_AS_PAIN" | "PURCHASE_INTENT_AS_PAIN" | "QUESTION_AS_OBJECTION" | "INCOHERENT_CLUSTER" | "SYMPTOM_AS_ROOT_CAUSE" | "SPECULATIVE_PSYCHOLOGY" | "UNSUPPORTED_SEGMENT" | "IRRELEVANT_SCOPE" | "NON_APPROVED_COMPETITOR" | "MARKETING_AS_VOICE" | "MISSED_SUPPORTED_THEME" | "THEME_OVER_MERGE",
+      "problemType": "UNGROUNDED_EVIDENCE" | "OVERSTATED_WORDING" | "OVER_GENERALIZED" | "SINGLE_BRAND_OVER_ELEVATION" | "SEMANTIC_DRIFT" | "WRONG_CATEGORY" | "UNSUPPORTED_ATTRIBUTE" | "PRAISE_AS_PAIN" | "PURCHASE_INTENT_AS_PAIN" | "QUESTION_AS_OBJECTION" | "INCOHERENT_CLUSTER" | "SYMPTOM_AS_ROOT_CAUSE" | "SPECULATIVE_PSYCHOLOGY" | "UNSUPPORTED_SEGMENT" | "IRRELEVANT_SCOPE" | "NON_APPROVED_COMPETITOR" | "MARKETING_AS_VOICE" | "MISSED_SUPPORTED_THEME" | "THEME_OVER_MERGE",
       "reason": "Specific forensic explanation of the evidence failure",
       "evidenceRefs": ["ev_unit_id"],
       "repairDirective": "Directive for structural correction, recovery of missed theme, or drop"
@@ -1670,6 +2657,7 @@ OUTPUT JSON FORMAT:
       ],
       temperature: 0.1,
       max_tokens: 4000,
+      forceProvider: "openai",
     });
 
     const rawContent = res.choices[0]?.message?.content || "{}";
@@ -1798,6 +2786,7 @@ OUTPUT JSON FORMAT (JSON array ONLY):
       ],
       temperature: 0.1,
       max_tokens: 3000,
+      forceProvider: "openai",
     });
 
     const rawContent = res.choices[0]?.message?.content || "[]";
@@ -1872,8 +2861,15 @@ export function buildFinalCoverageManifest(
 
   const claimManifest: ClaimCoverageManifestItem[] = allClaims.map(c => {
     const priorDisp = dispMap.get(c.claimId);
-    const associatedSignals = finalSignals.filter(s => s.evidenceIds.includes(c.unitId) || (s.supportingClaimIds || []).includes(c.claimId));
-    const matchingTheme = themes.find(t => t.supportingClaimIds.includes(c.claimId) || t.supportingEvidenceUnitIds.includes(c.unitId));
+    const associatedSignals = finalSignals.filter(s =>
+      (s.supportingClaimIds && s.supportingClaimIds.length > 0 ? s.supportingClaimIds.includes(c.claimId) : s.evidenceIds.includes(c.unitId))
+    );
+    const matchingTheme = themes.find(t => {
+      if (t.supportingClaimIds && t.supportingClaimIds.length > 0) {
+        return t.supportingClaimIds.includes(c.claimId);
+      }
+      return t.supportingEvidenceUnitIds.includes(c.unitId);
+    });
 
     let status: ClaimDispositionStatus = priorDisp?.status || "ISOLATED_VALID_TRUTH";
     let themeId: string | undefined = matchingTheme?.themeId || priorDisp?.themeId;
@@ -1892,6 +2888,11 @@ export function buildFinalCoverageManifest(
       evidenceUnitId: c.unitId,
       claimKind: c.claimKind,
       meaning: c.meaning,
+      semanticScope: c.semanticScope || priorDisp?.semanticScope,
+      transferability: c.transferability || priorDisp?.transferability,
+      scopeRationale: c.scopeRationale || priorDisp?.scopeRationale,
+      rowSemanticScope: c.rowSemanticScope || priorDisp?.rowSemanticScope,
+      rowTransferability: c.rowTransferability || priorDisp?.rowTransferability,
       status,
       themeId,
       representedByThemeId,
@@ -1968,8 +2969,21 @@ export function synthesizeFinalSignals(
     }).sort((a, b) => b.confidenceScore - a.confidenceScore);
   }
 
+  const isPrimaryUnit = (u: DeduplicatedEvidenceUnit) =>
+    u.evidencePool === "PRIMARY_MARKET_VOICE";
+
+  const hasPrimaryVoice = dedupUnits.some(isPrimaryUnit);
+  const painDrafts = approvedDrafts.filter(d => d.type === "pain" || d.type === "complaint");
+  // Primary invariant: pains must have support from PRIMARY_MARKET_VOICE when primary market voice exists
+  const groundedPainDrafts = hasPrimaryVoice
+    ? painDrafts.filter(d => {
+        const citedUnits = d.evidenceIds.map(id => evidenceMap.get(id)).filter(Boolean) as DeduplicatedEvidenceUnit[];
+        return citedUnits.some(isPrimaryUnit);
+      })
+    : painDrafts;
+
   return {
-    pains: toSynthesized(approvedDrafts.filter(d => d.type === "pain" || d.type === "complaint"), "pain"),
+    pains: toSynthesized(groundedPainDrafts, "pain"),
     desires: toSynthesized(approvedDrafts.filter(d => d.type === "desire"), "desire"),
     objections: toSynthesized(approvedDrafts.filter(d => d.type === "objection"), "objection"),
     patterns: toSynthesized(approvedDrafts.filter(d => d.type === "pattern"), "pattern"),
@@ -1982,7 +2996,7 @@ export function synthesizeFinalSignals(
 export async function runDynamicCustomerVoiceExtraction(opts: {
   accountId: string;
   campaignId: string;
-  competitors: Array<{ id: string; name: string; websiteUrl?: string | null; profileLink?: string | null; platform?: string | null }>;
+  competitors: Array<{ id: string; name: string; websiteUrl?: string | null;  platform?: string | null }>;
   customerEvidenceUnits?: CustomerEvidenceUnit[];
   comments?: Array<{ id: string; commentText: string | null; competitorId: string; likesCount?: number | null; platform?: string | null; postId?: string | null }>;
   reviews?: Array<{ id: string; reviewText: string | null; competitorId: string; rating?: number | null; platform?: string | null }>;
@@ -2051,26 +3065,84 @@ export async function runDynamicCustomerVoiceExtraction(opts: {
 
   // 3. 1:1 Bounded Batch Classification with Completeness Validation
   const BATCH_SIZE = 25;
-  const allClassifications: TerminalEvidenceClassification[] = [];
+  const CONCURRENCY = 5;
+
+  const batches: DeduplicatedEvidenceUnit[][] = [];
+  for (let i = 0; i < dedupUnits.length; i += BATCH_SIZE) {
+    batches.push(dedupUnits.slice(i, i + BATCH_SIZE));
+  }
+
+  const batchResults: (TerminalEvidenceClassification[] | null)[] = new Array(batches.length).fill(null);
   let providerFailureOccurred = false;
   let statusMessage = "";
   let failedBatchCount = 0;
   let processedUnitsCount = 0;
+  let normalBatchesSucceeded = 0;
 
-  for (let i = 0; i < dedupUnits.length; i += BATCH_SIZE) {
-    const batch = dedupUnits.slice(i, i + BATCH_SIZE);
-    try {
-      const batchClassifications = await classifyBatchEvidenceUnits(batch, businessContext, accountId, campaignId);
-      allClassifications.push(...batchClassifications);
-      processedUnitsCount += batch.length;
-    } catch (err: any) {
-      providerFailureOccurred = true;
-      failedBatchCount++;
-      statusMessage = `Audience Reasoner batch classification failed: ${err.message}`;
-      console.warn(`[AudienceReasoner] Batch classification error:`, err.message);
-      break;
+  const splitMetrics: SplitRecoveryMetrics = {
+    parentBatchesSplit: 0,
+    childBatchesCreated: 0,
+    recoveredBatches: 0,
+  };
+
+  const reasonerStartTime = Date.now();
+  const batchDurations: number[] = [];
+
+  let nextBatchIdx = 0;
+  async function reasonerWorker() {
+    while (nextBatchIdx < batches.length) {
+      if (providerFailureOccurred) break;
+      const currentIdx = nextBatchIdx++;
+      const batch = batches[currentIdx];
+      const bStart = Date.now();
+      const batchLabel = `Batch ${currentIdx + 1}/${batches.length}`;
+
+      try {
+        const splitCountBefore = splitMetrics.parentBatchesSplit;
+        const batchClassifications = await classifyBatchWithAdaptiveSplitting(
+          batch,
+          businessContext,
+          accountId,
+          campaignId,
+          batchLabel,
+          splitMetrics
+        );
+        const bDuration = Date.now() - bStart;
+        batchDurations.push(bDuration);
+        batchResults[currentIdx] = batchClassifications;
+        if (splitMetrics.parentBatchesSplit === splitCountBefore) {
+          normalBatchesSucceeded++;
+        }
+      } catch (err: any) {
+        providerFailureOccurred = true;
+        failedBatchCount++;
+        statusMessage = `Audience Reasoner ${batchLabel} classification failed: ${err.message}`;
+        console.error(`[AudienceReasoner] ${batchLabel} exhausted all recovery attempts:`, err.message);
+      }
     }
   }
+
+  const workerCount = Math.min(CONCURRENCY, batches.length);
+  if (workerCount > 0) {
+    const workerPromises = Array.from({ length: workerCount }, () => reasonerWorker());
+    await Promise.all(workerPromises);
+  }
+
+  // Canonical index-ordered reassembly
+  const allClassifications: TerminalEvidenceClassification[] = [];
+  for (let i = 0; i < batchResults.length; i++) {
+    const res = batchResults[i];
+    if (res) {
+      allClassifications.push(...res);
+      processedUnitsCount += batches[i].length;
+    }
+  }
+
+  const totalReasonerDurationMs = Date.now() - reasonerStartTime;
+  const avgBatchMs = batchDurations.length > 0 ? Math.round(batchDurations.reduce((a, b) => a + b, 0) / batchDurations.length) : 0;
+  const slowestBatchMs = batchDurations.length > 0 ? Math.max(...batchDurations) : 0;
+
+  console.log(`[AudienceReasoner] TIMING_METRICS | totalDurationMs=${totalReasonerDurationMs} | units=${dedupUnits.length} | batchSize=${BATCH_SIZE} | batches=${batches.length} | normalSucceeded=${normalBatchesSucceeded} | parentSplit=${splitMetrics.parentBatchesSplit} | childCreated=${splitMetrics.childBatchesCreated} | recovered=${splitMetrics.recoveredBatches} | failedBatches=${failedBatchCount}`);
 
   // Category Accounting
   const accounting: CategoryAccounting = {
@@ -2095,6 +3167,11 @@ export async function runDynamicCustomerVoiceExtraction(opts: {
       statusMessage: statusMessage || "Incomplete evidence processing due to provider failure",
       providerFailure: true,
       failedBatchCount,
+      normalBatchesSucceeded,
+      parentBatchesSplit: splitMetrics.parentBatchesSplit,
+      childBatchesCreated: splitMetrics.childBatchesCreated,
+      recoveredBatches: splitMetrics.recoveredBatches,
+      totalBatchesCount: batches.length,
       rawEvidenceCount: comments.length + reviews.length,
       deduplicatedUnitsCount: dedupUnits.length,
       processedEvidenceUnits: processedUnitsCount,
@@ -2272,6 +3349,11 @@ export async function runDynamicCustomerVoiceExtraction(opts: {
     draft,
     judgeResult,
     repairedSignalIds,
+    normalBatchesSucceeded,
+    parentBatchesSplit: splitMetrics.parentBatchesSplit,
+    childBatchesCreated: splitMetrics.childBatchesCreated,
+    recoveredBatches: splitMetrics.recoveredBatches,
+    totalBatchesCount: batches.length,
     claims: allClassifications,
   };
 }

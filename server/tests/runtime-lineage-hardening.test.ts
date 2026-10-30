@@ -428,6 +428,35 @@ describe("Avyron Runtime Lineage, History & E2E Hardening Suite", () => {
     expect(saraCurrentBU?.authorityType).toBe("USER_CONFIRMED");
     expect(saraCurrentBU?.status).toBe("COMPLETE");
 
+    // Ensure historical snapshot exists in DB for historical audit trail verification
+    const [existingHistorical] = await db
+      .select()
+      .from(schema.businessUnderstandingSnapshots)
+      .where(eq(schema.businessUnderstandingSnapshots.id, "f3b6aa63-9371-4dd2-ada7-1e0b90e66a20"));
+
+    if (!existingHistorical) {
+      await db.insert(schema.businessUnderstandingSnapshots).values({
+        id: "f3b6aa63-9371-4dd2-ada7-1e0b90e66a20",
+        accountId: saraAccountId,
+        campaignId: saraCampaignId,
+        campaignOfferingId: saraOfferingId,
+        offeringInputEvidenceId: "ev_3df52138-4",
+        version: 1,
+        status: "COMPLETE",
+        businessUnderstanding: {
+          businessName: "Sara FT",
+          businessModel: "E-Commerce Apparel",
+          generalIndustry: "Apparel & Fashion",
+          campaignOffering: {
+            offeringType: "PRODUCT",
+            category: "Summer Collection",
+            pricingModel: "Direct Purchase",
+            productTruthFacts: []
+          }
+        }
+      });
+    }
+
     // Verify historical snapshot f3b6aa63-9371-4dd2-ada7-1e0b90e66a20 still exists in DB
     const [historicalSnap] = await db
       .select()

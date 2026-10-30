@@ -37,7 +37,7 @@ import {
   UNTRUSTED_INPUT_SYSTEM_RULE,
 } from "../market-intelligence-v3/prompt-safety";
 
-const REPO = "/home/runner/workspace";
+const REPO = process.env.REPO || process.cwd();
 
 // ── F7.1 — Apify auth header (source tripwire) ───────────────────────────────
 

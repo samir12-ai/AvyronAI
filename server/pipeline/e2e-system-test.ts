@@ -185,7 +185,7 @@ async function seedCompetitorCorpus(
         campaignId,
         name: p.competitorName,
         platform: p.platform,
-        profileLink: `https://${p.platform}.com/${p.competitorName.replace(/\s+/g, "")}`,
+        
         businessType: "e2e",
         primaryObjective: "e2e",
         isActive: true,

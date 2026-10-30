@@ -66,6 +66,8 @@ function buildDesignerPrompt(args: {
   rejectedClaimPatterns: string[];
   upstreamBuyerPsychology?: string | null;
   judgeFeedback?: string;
+  productTruthFacts?: Array<{ factId: string; statement: string; factType?: string }>;
+  approvedMechanism?: { name: string; description?: string };
 }): string {
   const rcBlock = args.rootCauses.length
     ? args.rootCauses.map(rc => `${rc.id}: ${rc.description}`).join("\n")
@@ -77,6 +79,12 @@ function buildDesignerPrompt(args: {
     ? args.rejectedClaimPatterns.slice(0, 6).map(r => `- ${r}`).join("\n")
     : "(none)";
   const psychBlock = args.upstreamBuyerPsychology || "(not yet supplied by upstream — infer conservatively from segment + objection signals above)";
+  const factsBlock = args.productTruthFacts && args.productTruthFacts.length > 0
+    ? `\n═══ CANONICAL PRODUCT TRUTH CAPABILITIES (STRICT BOUNDARIES) ═══\n${args.productTruthFacts.map((f, i) => `[FACT ${i + 1}] (ID: ${f.factId}): ${f.statement}`).join("\n")}\n`
+    : "";
+  const mechanismBlock = args.approvedMechanism?.name
+    ? `\n═══ APPROVED STRATEGIC MECHANISM ═══\nMechanism Name: ${args.approvedMechanism.name}\nDescription: ${args.approvedMechanism.description || "Core Mechanism"}\n`
+    : "";
 
   const judgePreface = args.judgeFeedback
     ? `\n═══ PRIOR ATTEMPT WAS REJECTED ═══\nReason: ${args.judgeFeedback}\nRewrite with SPECIFIC referents — named source, named mechanism, named failure mode. Do NOT repeat the prior generic output.\n`
@@ -91,7 +99,8 @@ A strong system says: "buyer is in [specific risk state]; trusts [specific sourc
 You will design the bridge. You will name it. You will state what it transfers and why.
 ${judgePreface}
 ${FEW_SHOT_EXAMPLES}
-
+${factsBlock}
+${mechanismBlock}
 ═══ AUDIENCE PSYCHOLOGY ═══
 Sophistication tier: ${args.sophisticationTier ?? "unknown"} (1=naive, 5=saturated/burnt)
 Awareness stage: ${args.awarenessStage}
@@ -124,9 +133,9 @@ ${rejectedBlock}
 7. Do NOT use generic words: "trust", "credibility", "authority", "social proof" without a concrete referent.
 8. If you cannot find specific evidence for a field, say "INSUFFICIENT_EVIDENCE — would need [specific signal]" — do NOT fabricate.
 9. PRODUCT TRUTH & CAPABILITY BOUNDING:
-   - transferMechanism.name, description, and proofArtifact MUST strictly align with the Product Truth facts and capabilities of THIS product.
-   - You MUST NOT claim or invent product capabilities (such as automated billing/refund dashboards, financial reconciliation, dispute management, or customer support guarantees) unless explicitly stated in the Product Anchor / Product Truth facts above.
-   - If market evidence describes competitor billing/refund complaints or poor customer service, do NOT convert those competitor complaints into our product features. Address market skepticism through transparent workflow demonstrations, live diagnostic audits, or verifiable methodology of our ACTUAL product capabilities.
+   - transferMechanism.name, description, and proofArtifact MUST strictly align with the Product Truth facts and the Approved Mechanism above.
+   - You MUST NOT claim or invent product capabilities (such as automated billing/refund dashboards, financial reconciliation, live tracking portals, software dashboards, delivery guarantees, human-driven studio composition over automation, phonetic pronunciation input, permanent/lifetime link hosting guarantees, or unsupported absolutes like "never generic" or "permanent access") unless explicitly verified in the Product Truth facts above.
+   - COMPETITOR ATTRIBUTION BOUNDARY: If market evidence or objections describe competitor complaints (e.g. expired links at a competitor, competitor add-on fees, shipping delays, lost items), frame buyerRiskState and trustDeficit as market/competitor-induced buyer skepticism and resolve it through our ACTUAL verified capabilities and workflow from the Product Truth facts above, NEVER by attributing competitor failures to our business or inventing unverified guarantees.
 
 Return ONLY valid JSON:
 {
@@ -166,7 +175,7 @@ Your job: reject anything that is generic, label-only, or trivial. Accept only d
 - buyerRiskState is vague ("they need to trust us") instead of specific ("buyer fears looking incompetent to CFO")
 - transferMechanism.name is a category label ("authority") instead of a named mechanism
 - transferMechanism.proofArtifact is abstract ("case studies") instead of physical ("3 named-CMO logos with LinkedIn + monthly metric")
-- CAPABILITY INVENTIONS: Claims capabilities (e.g. automated billing portals, refund management, customer service case studies, payment dispute reconciliation) that are outside the Product Anchor / Product Truth facts.
+- CAPABILITY INVENTIONS: Claims capabilities (e.g. automated billing portals, refund management, customer service case studies, payment dispute reconciliation, human-driven composition over automation, phonetic pronunciation input, or permanent link hosting guarantees) that are outside the Product Anchor / Product Truth facts.
 - failureModes are generic or fewer than 2
 - commercialFunction does not name SPECIFIC source-to-claim transfer
 - Any field reads like a textbook definition rather than a real-world design choice
@@ -212,7 +221,7 @@ function normalizeSeverity(v: any): RiskSeverity {
   return "moderate";
 }
 
-function parseDesign(parsed: any, modelUsed: string, retryCount: number): TrustTransferDesign | null {
+function parseDesign(parsed: any, modelUsed: string, retryCount: number, judgeVerdict: "ACCEPTED" | "REJECTED" | "NOT_RUN" = "ACCEPTED"): TrustTransferDesign | null {
   if (!parsed || !parsed.buyerRiskState || !parsed.transferMechanism) return null;
   const tm = parsed.transferMechanism || {};
   return {
@@ -237,7 +246,7 @@ function parseDesign(parsed: any, modelUsed: string, retryCount: number): TrustT
     commercialFunction: String(parsed.commercialFunction || "").trim(),
     groundedSignals: Array.isArray(parsed.groundedSignals) ? parsed.groundedSignals.map(String) : [],
     reasoningSteps: Array.isArray(parsed.reasoningSteps) ? parsed.reasoningSteps.map(String) : [],
-    judgeVerdict: "NOT_RUN",
+    judgeVerdict,
     retryCount,
     modelUsed,
     generatedAt: new Date().toISOString(),
@@ -256,6 +265,8 @@ export async function designTrustTransfer(args: {
   rejectedClaimPatterns: string[];
   upstreamBuyerPsychology?: string | null;
   accountId: string;
+  productTruthFacts?: Array<{ factId: string; statement: string; factType?: string }>;
+  approvedMechanism?: { name: string; description?: string };
   // Anchor doctrine (criteria A + F): pre-rendered doctrine/DNA anchor block
   // computed ONCE by the parent persuasion engine. Injected into BOTH the
   // designer prompts and the judge prompts (anchor in first prompt AND judge).
@@ -309,10 +320,27 @@ export async function designTrustTransfer(args: {
         return { valid: false, failureClass: "CONTRACT_FAILURE", rejections: [{ rule: "Valid JSON", reason: "Output must be valid JSON and contain transferMechanism" }] };
       }
       
-      const anchorText = (ttAnchorPrefix + ttGroundingBlock).toLowerCase();
+      const anchorText = (ttAnchorPrefix + ttGroundingBlock + JSON.stringify(args.productTruthFacts || [])).toLowerCase();
       if (anchorText.length > 0) {
         const generatedProof = String(parsed.transferMechanism?.proofArtifact || "").toLowerCase();
         const generatedMech = String(parsed.transferMechanism?.name || "").toLowerCase();
+        const allGenText = `${parsed.buyerRiskState || ""} ${parsed.trustDeficit || ""} ${generatedMech} ${parsed.transferMechanism?.description || ""} ${generatedProof}`.toLowerCase();
+
+        if (/\bhuman[- ]driven\b|\bhuman composer|\bhuman musician|\bover automation\b/i.test(allGenText) && !anchorText.includes("human composer")) {
+          return {
+            valid: false,
+            failureClass: "GENERATION_QUALITY_FAILURE",
+            rejections: [{ rule: "Product Truth Boundary", reason: "Trust transfer design claims human-driven composition over automation, which contradicts Product Truth." }],
+          };
+        }
+
+        if (/\bphonetic\b|\bspecify name pronunciation\b|\bpermanent link\b|\blifetime access\b/i.test(allGenText) && !anchorText.includes("phonetic")) {
+          return {
+            valid: false,
+            failureClass: "GENERATION_QUALITY_FAILURE",
+            rejections: [{ rule: "Product Truth Boundary", reason: "Trust transfer design invents phonetic pronunciation input or permanent link hosting guarantees not in Product Truth." }],
+          };
+        }
         
         // Simple heuristic: at least some significant words from the generated proof/mechanism must exist in the anchor
         const words = (generatedProof + " " + generatedMech).split(/\s+/).filter(w => w.length > 5);
@@ -347,7 +375,7 @@ CRITICAL: When fixing structural or formatting errors (like JSON parsing), LLMs 
 --- CAUSAL DEPTH & GROUNDING CHECKLIST ---
 To pass the validation gate on this attempt, your new output MUST satisfy the following rules. The judge will check these exactly:
 1. [ ] ANCHORED PROOF: You must explicitly build the trust transfer mechanism around verified proofs, guarantees, or capabilities from the provided doctrine/anchor.
-2. [ ] NO INVENTION: Do not hallucinate mechanisms, proofs, features, or metrics that are not explicitly present in the anchor data.
+2. [ ] NO INVENTION: Do not hallucinate mechanisms, proofs, features, human composers, phonetic pronunciation inputs, or permanent link guarantees that are not explicitly present in the anchor data.
 
 Fix the error, strictly follow the checklist, and output ONLY valid JSON matching the originally requested schema.`;
 
@@ -364,7 +392,8 @@ Fix the error, strictly follow the checklist, and output ONLY valid JSON matchin
   });
 
   const parsedFinal = safeJsonParse(resultObj.result) as any;
-  const finalDesign = parseDesign(parsedFinal, MODEL, 0);
+  const finalVerdict = parsedFinal?._system_validation?.finalVerdict === "HONEST_FAIL" ? "REJECTED" : "ACCEPTED";
+  const finalDesign = parseDesign(parsedFinal, MODEL, resultObj.telemetry?.attempts ? Math.max(0, resultObj.telemetry.attempts - 1) : 0, finalVerdict);
   if (!finalDesign) return null;
   finalDesign._system_validation = parsedFinal?._system_validation;
 

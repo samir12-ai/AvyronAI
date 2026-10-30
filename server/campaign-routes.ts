@@ -1,8 +1,40 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { campaignSelections, adSpendEntries, performanceSnapshots, conversionEvents, manualCampaignMetrics, manualRetentionMetrics, iterationGateInputs, retentionGateInputs, strategyMemory, userPublicProfiles, userChannelSnapshots, growthCampaigns } from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import {
+  campaignSelections,
+  adSpendEntries,
+  performanceSnapshots,
+  conversionEvents,
+  manualCampaignMetrics,
+  manualRetentionMetrics,
+  iterationGateInputs,
+  retentionGateInputs,
+  strategyMemory,
+  userPublicProfiles,
+  userChannelSnapshots,
+  ownedPosts,
+  growthCampaigns,
+  businesses,
+  businessProducts,
+  campaignOfferings,
+  campaignBudgetSettings,
+  strategicPlans,
+  planApprovals,
+  businessUnderstandingSnapshots,
+  competitorRelevanceDecisions,
+  miRefreshSchedule,
+  orchestratorJobs,
+  businessExecutionStates,
+} from "@shared/schema";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { getCampaignMetrics, getRevenueSummary, detectPerformanceSignals, getDashboardMetrics, resolveDataMode, getManualMetrics } from "./campaign-data-layer";
+import {
+  getAccountEntitlement,
+  checkCampaignActivationEntitlement,
+  setAccountEntitlementTier,
+  getCampaignUsageLedger,
+  type PackageTier,
+} from "./entitlements";
 
 import { resolveAccountId } from "./auth";
 import { ProductAnchorSchema, parseProductAnchor, deriveAnchorFromProductDna } from "./shared/strategic-doctrine";
@@ -12,31 +44,152 @@ import { loadProductDNA } from "./shared/product-dna";
 import { getOpenEnrichmentRequests, getOpenEnrichmentRequest, markEnrichmentResolved } from "./dna-enrichment/store";
 const VALID_GOAL_TYPES = ["LEADS", "AWARENESS", "RETARGETING", "SALES", "TESTING"] as const;
 
+async function enrichCampaignSelections(accountId: string, selections: Array<typeof campaignSelections.$inferSelect>) {
+  if (selections.length === 0) return [];
+
+  const [bizRows, prodRows, offRows, budgetRows, planRows] = await Promise.all([
+    db.select().from(businesses).where(eq(businesses.accountId, accountId)),
+    db.select().from(businessProducts).where(eq(businessProducts.accountId, accountId)),
+    db.select().from(campaignOfferings).where(eq(campaignOfferings.accountId, accountId)),
+    db.select().from(campaignBudgetSettings).where(eq(campaignBudgetSettings.accountId, accountId)),
+    db
+      .select({
+        id: strategicPlans.id,
+        campaignId: strategicPlans.campaignId,
+        status: strategicPlans.status,
+        version: strategicPlans.version,
+        isDesignatedActive: strategicPlans.isDesignatedActive,
+        createdAt: strategicPlans.createdAt,
+      })
+      .from(strategicPlans)
+      .where(eq(strategicPlans.accountId, accountId))
+      .orderBy(desc(strategicPlans.createdAt)),
+  ]);
+
+  const bizMap = new Map(bizRows.map((b) => [b.id, b]));
+  const prodMap = new Map(prodRows.map((p) => [p.id, p]));
+  const offByCampaign = new Map<string, typeof campaignOfferings.$inferSelect>();
+  for (const off of offRows) {
+    if (!offByCampaign.has(off.campaignId)) {
+      offByCampaign.set(off.campaignId, off);
+    }
+  }
+  const budgetByCampaign = new Map(budgetRows.map((b) => [b.campaignId, b]));
+
+  const activePlanByCampaign = new Map<
+    string,
+    { id: string; status: string; version: number; isDesignatedActive: boolean }
+  >();
+  const latestPlanByCampaign = new Map<
+    string,
+    { id: string; status: string; version: number; isDesignatedActive: boolean }
+  >();
+
+  for (const p of planRows) {
+    if (!latestPlanByCampaign.has(p.campaignId)) {
+      latestPlanByCampaign.set(p.campaignId, p);
+    }
+    if (
+      (p.isDesignatedActive || p.status === "APPROVED" || p.status === "EXECUTING") &&
+      !activePlanByCampaign.has(p.campaignId)
+    ) {
+      activePlanByCampaign.set(p.campaignId, p);
+    }
+  }
+
+  return selections.map((s) => {
+    const cid = s.selectedCampaignId;
+    const off = offByCampaign.get(cid);
+    const biz = (s.businessId && bizMap.get(s.businessId)) || (off?.businessId && bizMap.get(off.businessId)) || bizRows[0] || null;
+    const prod = (s.productId && prodMap.get(s.productId)) || (off?.productId && prodMap.get(off.productId)) || null;
+    const budget = budgetByCampaign.get(cid) || null;
+    const activePlan = activePlanByCampaign.get(cid) || null;
+    const latestPlan = latestPlanByCampaign.get(cid) || null;
+
+    const rawStatus = s.isArchived
+      ? "archived"
+      : s.campaignStatus === "paused"
+      ? "paused"
+      : s.setupStatus === "IN_PROGRESS" && !activePlan && !latestPlan
+      ? "setup"
+      : s.campaignStatus || "active";
+
+    return {
+      id: cid,
+      name: s.selectedCampaignName,
+      platform: s.selectedPlatform || "meta",
+      goalType: s.campaignGoalType,
+      status: rawStatus,
+      campaignStatus: s.campaignStatus || "active",
+      isArchived: Boolean(s.isArchived),
+      location: s.campaignLocation || null,
+      targetMarket: s.campaignLocation || null,
+      dataSourceMode: s.dataSourceMode || "benchmark",
+      businessId: biz?.id || s.businessId || null,
+      businessName: biz?.name || null,
+      businessReviewStatus: biz?.reviewStatus || "CONFIRMED",
+      productId: prod?.id || s.productId || null,
+      productName: prod?.name || off?.offeringName || s.selectedCampaignName,
+      productType: prod?.productType || off?.productType || "PRODUCT",
+      productDescription: prod?.description || off?.description || null,
+      productUrl: prod?.productUrl || off?.productUrl || biz?.websiteUrl || null,
+      productReviewStatus: prod?.reviewStatus || off?.reviewStatus || "CONFIRMED",
+      campaignOfferingId: s.campaignOfferingId || off?.id || null,
+      setupStatus: s.setupStatus || (activePlan || latestPlan ? "COMPLETE" : "IN_PROGRESS"),
+      setupStep: s.setupStep || (activePlan || latestPlan ? "06_READY" : "01_BUSINESS"),
+      activePlan: activePlan
+        ? {
+            id: activePlan.id,
+            version: activePlan.version,
+            status: activePlan.status,
+            isDesignatedActive: activePlan.isDesignatedActive,
+          }
+        : latestPlan
+        ? {
+            id: latestPlan.id,
+            version: latestPlan.version,
+            status: latestPlan.status,
+            isDesignatedActive: false,
+          }
+        : null,
+      budget: budget
+        ? {
+            monthlyBudget: budget.monthlyBudget ? Number(budget.monthlyBudget) : null,
+            currency: budget.currency || "USD",
+          }
+        : null,
+      selectedAt: s.selectedAt,
+      updatedAt: s.updatedAt,
+    };
+  });
+}
+
 export function registerCampaignRoutes(app: Express) {
   app.get("/api/campaigns", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const includeArchived = req.query.includeArchived === "true";
 
-      const selections = await db
+      const allSelections = await db
         .select()
         .from(campaignSelections)
         .where(eq(campaignSelections.accountId, accountId))
         .orderBy(desc(campaignSelections.selectedAt));
 
-      const campaigns = selections.map((s) => ({
-        id: s.selectedCampaignId,
-        name: s.selectedCampaignName,
-        platform: s.selectedPlatform || "meta",
-        goalType: s.campaignGoalType,
-        status: s.campaignStatus || "active",
-        location: s.campaignLocation || null,
-        dataSourceMode: s.dataSourceMode || "benchmark",
-      }));
+      const filtered = includeArchived
+        ? allSelections
+        : allSelections.filter((s) => !s.isArchived);
+
+      const [campaigns, entitlement] = await Promise.all([
+        enrichCampaignSelections(accountId, filtered),
+        getAccountEntitlement(accountId),
+      ]);
 
       res.json({
         campaigns,
+        entitlement,
         source: "db",
-        message: campaigns.length > 0 ? "Campaigns loaded from database." : "No campaigns found. Select a campaign to get started.",
+        message: campaigns.length > 0 ? "Campaigns loaded from database." : "No campaigns found. Select or create a campaign to get started.",
       });
     } catch (error: any) {
       console.error("[Campaigns] Error fetching campaigns:", error);
@@ -86,6 +239,17 @@ export function registerCampaignRoutes(app: Express) {
 
       const validModes = ["campaign_metrics", "benchmark"];
       const resolvedMode = dataSourceMode && validModes.includes(dataSourceMode) ? dataSourceMode : "benchmark";
+
+      const entCheck = await checkCampaignActivationEntitlement(accountId);
+      if (!entCheck.allowed) {
+        return res.status(403).json({
+          code: "CAMPAIGN_LIMIT_REACHED",
+          message: entCheck.reason,
+          entitlement: entCheck.entitlement,
+          suggestedUpgradeTier: entCheck.suggestedUpgradeTier,
+          requestId,
+        });
+      }
 
       const campaignId = `campaign_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       const campaignName = name.trim();
@@ -469,14 +633,15 @@ export function registerCampaignRoutes(app: Express) {
 
       let selection;
       if (existing.length > 0) {
+        const currentRow = existing[0];
         const updated = await db
           .update(campaignSelections)
           .set({
-            selectedCampaignName: campaignName,
-            selectedPlatform: platform || "meta",
-            campaignGoalType: goalType,
-            campaignStatus: "active",
-            campaignLocation: campaignLocation || null,
+            selectedCampaignName: campaignName || currentRow.selectedCampaignName,
+            selectedPlatform: platform || currentRow.selectedPlatform || "meta",
+            campaignGoalType: goalType || currentRow.campaignGoalType,
+            campaignStatus: currentRow.campaignStatus || "active",
+            campaignLocation: campaignLocation !== undefined ? campaignLocation : currentRow.campaignLocation,
             selectedAt: new Date(),
             updatedAt: new Date(),
           })
@@ -490,9 +655,7 @@ export function registerCampaignRoutes(app: Express) {
         selection = updated[0];
       } else {
         // NO-TENANT-LEAK: refuse to claim a campaignId already owned by a
-        // DIFFERENT account. Without this, an account could mint an ownership
-        // row for a foreign campaignId and then overwrite that campaign's
-        // shared growth_campaigns product anchor via PUT /product-anchor.
+        // DIFFERENT account.
         const claimedByOther = await db
           .select({ ownerAccountId: campaignSelections.accountId })
           .from(campaignSelections)
@@ -501,6 +664,18 @@ export function registerCampaignRoutes(app: Express) {
         if (claimedByOther.length > 0 && claimedByOther[0].ownerAccountId !== accountId) {
           return res.status(409).json({ code: "CAMPAIGN_ID_CLAIMED", message: "This campaign belongs to another account", requestId });
         }
+
+        const entCheck = await checkCampaignActivationEntitlement(accountId, campaignId);
+        if (!entCheck.allowed) {
+          return res.status(403).json({
+            code: "CAMPAIGN_LIMIT_REACHED",
+            message: entCheck.reason,
+            entitlement: entCheck.entitlement,
+            suggestedUpgradeTier: entCheck.suggestedUpgradeTier,
+            requestId,
+          });
+        }
+
         const inserted = await db
           .insert(campaignSelections)
           .values({
@@ -516,11 +691,16 @@ export function registerCampaignRoutes(app: Express) {
         selection = inserted[0];
       }
 
+      const [enriched] = await enrichCampaignSelections(accountId, [selection]);
+
       console.log(`[Campaigns] Campaign selected: ${campaignName} (${goalType}) for account ${accountId}`);
 
       res.json({
         success: true,
-        selection,
+        selection: {
+          ...selection,
+          ...enriched,
+        },
       });
     } catch (error: any) {
       console.error("[Campaigns] Error selecting campaign:", error);
@@ -531,13 +711,33 @@ export function registerCampaignRoutes(app: Express) {
   app.get("/api/campaigns/selected", async (req, res) => {
     try {
       const accountId = resolveAccountId(req);
+      const requestedCampaignId = typeof req.query.campaignId === "string" ? req.query.campaignId.trim() : "";
 
-      const selections = await db
-        .select()
-        .from(campaignSelections)
-        .where(eq(campaignSelections.accountId, accountId))
-        .orderBy(desc(campaignSelections.selectedAt))
-        .limit(1);
+      let selections;
+      if (requestedCampaignId) {
+        selections = await db
+          .select()
+          .from(campaignSelections)
+          .where(
+            and(
+              eq(campaignSelections.accountId, accountId),
+              eq(campaignSelections.selectedCampaignId, requestedCampaignId)
+            )
+          )
+          .limit(1);
+      } else {
+        selections = await db
+          .select()
+          .from(campaignSelections)
+          .where(
+            and(
+              eq(campaignSelections.accountId, accountId),
+              eq(campaignSelections.isArchived, false)
+            )
+          )
+          .orderBy(desc(campaignSelections.selectedAt))
+          .limit(1);
+      }
 
       if (selections.length === 0) {
         return res.json({
@@ -548,21 +748,25 @@ export function registerCampaignRoutes(app: Express) {
       }
 
       const selection = selections[0];
+      const [enriched] = await enrichCampaignSelections(accountId, [selection]);
 
       let warning = null;
       const campaignStatus = selection.campaignStatus || "active";
 
       if (campaignStatus === "paused" || campaignStatus === "removed") {
         warning = {
-          type: "CAMPAIGN_INVALID",
-          message: `Campaign "${selection.selectedCampaignName}" is now ${campaignStatus}. Please select a different campaign.`,
+          type: "CAMPAIGN_PAUSED",
+          message: `Campaign "${selection.selectedCampaignName}" is currently ${campaignStatus}. Recurring background acquisition is paused.`,
           campaignStatus,
         };
       }
 
       res.json({
         selected: true,
-        selection,
+        selection: {
+          ...selection,
+          ...enriched,
+        },
         warning,
       });
     } catch (error: any) {
@@ -573,16 +777,366 @@ export function registerCampaignRoutes(app: Express) {
 
   app.delete("/api/campaigns/selected", async (req, res) => {
     try {
-      const accountId = resolveAccountId(req);
-
-      await db
-        .delete(campaignSelections)
-        .where(eq(campaignSelections.accountId, accountId));
-
-      res.json({ success: true, message: "Campaign selection cleared" });
+      // Multi-campaign safety: NEVER delete campaign_selections rows when clearing client selection!
+      res.json({ success: true, message: "Campaign selection state cleared without deleting workspace campaigns" });
     } catch (error: any) {
       console.error("[Campaigns] Error clearing selection:", error);
       res.status(500).json({ code: "CLEAR_FAILED", message: "Failed to clear campaign selection", requestId: `clr_${Date.now()}` });
+    }
+  });
+
+  // Pause, resume, or archive a specific campaign (Requirement 1 & 7 & 8)
+  app.post("/api/campaigns/:campaignId/status", async (req: Request, res: Response) => {
+    const requestId = `cstatus_${Date.now()}`;
+    try {
+      const accountId = resolveAccountId(req);
+      const campaignId = String(req.params.campaignId || "");
+      const { status } = req.body as { status?: "active" | "paused" | "archived" };
+
+      if (!campaignId || !status || !["active", "paused", "archived"].includes(status)) {
+        return res.status(400).json({
+          code: "INVALID_STATUS",
+          message: "status must be one of: active, paused, archived",
+          requestId,
+        });
+      }
+
+      const [existing] = await db
+        .select()
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId)
+          )
+        )
+        .limit(1);
+
+      if (!existing) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found in this workspace", requestId });
+      }
+
+      if (status === "active" && existing.campaignStatus !== "active") {
+        const entCheck = await checkCampaignActivationEntitlement(accountId, campaignId);
+        if (!entCheck.allowed) {
+          return res.status(403).json({
+            code: "CAMPAIGN_LIMIT_REACHED",
+            message: entCheck.reason,
+            entitlement: entCheck.entitlement,
+            suggestedUpgradeTier: entCheck.suggestedUpgradeTier,
+            requestId,
+          });
+        }
+      }
+
+      const isArchived = status === "archived";
+      const nextCampaignStatus = status === "archived" ? "paused" : status;
+
+      const [updated] = await db
+        .update(campaignSelections)
+        .set({
+          campaignStatus: nextCampaignStatus,
+          isArchived,
+          pausedAt: nextCampaignStatus === "paused" ? new Date() : null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId)
+          )
+        )
+        .returning();
+
+      // Stop or resume recurring scheduled competitor refreshes for THIS campaign only
+      await db
+        .update(miRefreshSchedule)
+        .set({
+          status: nextCampaignStatus === "active" ? "active" : "paused",
+        })
+        .where(
+          and(
+            eq(miRefreshSchedule.accountId, accountId),
+            eq(miRefreshSchedule.campaignId, campaignId)
+          )
+        );
+
+      const [enriched] = await enrichCampaignSelections(accountId, [updated]);
+      const entitlement = await getAccountEntitlement(accountId);
+
+      res.json({
+        success: true,
+        campaign: enriched,
+        entitlement,
+        message:
+          status === "paused"
+            ? `Campaign "${updated.selectedCampaignName}" paused. Recurring background acquisition stopped for this campaign.`
+            : status === "archived"
+            ? `Campaign "${updated.selectedCampaignName}" archived.`
+            : `Campaign "${updated.selectedCampaignName}" resumed and active.`,
+      });
+    } catch (error: any) {
+      console.error("[Campaigns] Error updating campaign status:", error);
+      res.status(500).json({ code: "STATUS_UPDATE_FAILED", message: error.message || "Failed to update campaign status", requestId });
+    }
+  });
+
+  // Entitlements inspection & proposed package tier configuration (Requirement 8)
+  app.get("/api/campaigns/entitlements", async (req: Request, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const entitlement = await getAccountEntitlement(accountId);
+      res.json({ success: true, entitlement });
+    } catch (error: any) {
+      res.status(500).json({ code: "ENTITLEMENTS_FAILED", message: error.message });
+    }
+  });
+
+  app.post("/api/campaigns/entitlements", async (req: Request, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const isOperatorAdmin =
+        Boolean((req as any).user?.isAdmin) ||
+        Boolean(
+          process.env.OPERATOR_ADMIN_TOKEN &&
+            req.header("x-admin-token") === process.env.OPERATOR_ADMIN_TOKEN
+        );
+
+      if (process.env.NODE_ENV === "production" && !isOperatorAdmin) {
+        return res.status(403).json({
+          code: "ENTITLEMENT_MUTATION_FORBIDDEN_IN_PROD",
+          message:
+            "Entitlement tier changes in production require operator/admin authorization or verified billing integration.",
+        });
+      }
+
+      const { packageTier, isTestEntitlement, notes, maxActiveOverride } = req.body as {
+        packageTier?: PackageTier;
+        isTestEntitlement?: boolean;
+        notes?: string;
+        maxActiveOverride?: number;
+      };
+      if (!packageTier || !["starter", "growth", "agency", "test_isolated"].includes(packageTier)) {
+        return res.status(400).json({
+          code: "INVALID_PACKAGE_TIER",
+          message: "packageTier must be one of: starter, growth, agency, test_isolated",
+        });
+      }
+      if (process.env.NODE_ENV === "production" && packageTier === "test_isolated" && !isOperatorAdmin) {
+        return res.status(403).json({
+          code: "TEST_ENTITLEMENT_FORBIDDEN_IN_PROD",
+          message: "test_isolated entitlement is restricted in production.",
+        });
+      }
+      const entitlement = await setAccountEntitlementTier(accountId, packageTier, {
+        isTestEntitlement,
+        notes,
+        maxActiveOverride,
+      });
+      res.json({
+        success: true,
+        entitlement,
+        message: `Workspace package entitlement set to ${entitlement.displayName} (${entitlement.maxActiveCampaigns} active campaigns max).`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ code: "ENTITLEMENT_UPDATE_FAILED", message: error.message });
+    }
+  });
+
+  // Per-campaign usage & cost attribution ledger (Requirement 8)
+  app.get("/api/campaigns/:campaignId/usage-ledger", async (req: Request, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const campaignId = String(req.params.campaignId || "");
+      const [owned] = await db
+        .select()
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId)
+          )
+        )
+        .limit(1);
+      if (!owned) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found for this account" });
+      }
+      const ledger = await getCampaignUsageLedger(accountId, campaignId);
+      res.json({ success: true, ledger });
+    } catch (error: any) {
+      res.status(500).json({ code: "USAGE_LEDGER_FAILED", message: error.message });
+    }
+  });
+
+  // Per-campaign competitor relevance decisions (Requirement 3 & 4)
+  app.get("/api/campaigns/:campaignId/competitor-relevance", async (req: Request, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const campaignId = String(req.params.campaignId || "");
+      const decisions = await db
+        .select()
+        .from(competitorRelevanceDecisions)
+        .where(
+          and(
+            eq(competitorRelevanceDecisions.accountId, accountId),
+            eq(competitorRelevanceDecisions.campaignId, campaignId)
+          )
+        )
+        .orderBy(desc(competitorRelevanceDecisions.updatedAt));
+      res.json({ success: true, campaignId, decisions });
+    } catch (error: any) {
+      res.status(500).json({ code: "COMPETITOR_RELEVANCE_FAILED", message: error.message });
+    }
+  });
+
+  // Full end-to-end campaign lineage trace (Requirement 5 & 10)
+  app.get("/api/campaigns/:campaignId/trace", async (req: Request, res: Response) => {
+    try {
+      const accountId = resolveAccountId(req);
+      const campaignId = String(req.params.campaignId || "");
+
+      const [selection] = await db
+        .select()
+        .from(campaignSelections)
+        .where(
+          and(
+            eq(campaignSelections.accountId, accountId),
+            eq(campaignSelections.selectedCampaignId, campaignId)
+          )
+        )
+        .limit(1);
+
+      if (!selection) {
+        return res.status(404).json({ code: "CAMPAIGN_NOT_FOUND", message: "Campaign not found" });
+      }
+
+      const [enriched] = await enrichCampaignSelections(accountId, [selection]);
+
+      const [
+        businessRow,
+        productRow,
+        offeringRow,
+        buSnapshots,
+        relevanceDecisions,
+        jobs,
+        plans,
+        execStates,
+        usageLedger,
+      ] = await Promise.all([
+        enriched.businessId
+          ? db.select().from(businesses).where(eq(businesses.id, enriched.businessId)).limit(1)
+          : Promise.resolve([]),
+        enriched.productId
+          ? db.select().from(businessProducts).where(eq(businessProducts.id, enriched.productId)).limit(1)
+          : Promise.resolve([]),
+        db
+          .select()
+          .from(campaignOfferings)
+          .where(and(eq(campaignOfferings.accountId, accountId), eq(campaignOfferings.campaignId, campaignId)))
+          .orderBy(desc(campaignOfferings.createdAt))
+          .limit(1),
+        db
+          .select()
+          .from(businessUnderstandingSnapshots)
+          .where(
+            and(
+              eq(businessUnderstandingSnapshots.accountId, accountId),
+              eq(businessUnderstandingSnapshots.campaignId, campaignId)
+            )
+          )
+          .orderBy(desc(businessUnderstandingSnapshots.createdAt))
+          .limit(1),
+        db
+          .select()
+          .from(competitorRelevanceDecisions)
+          .where(
+            and(
+              eq(competitorRelevanceDecisions.accountId, accountId),
+              eq(competitorRelevanceDecisions.campaignId, campaignId)
+            )
+          )
+          .orderBy(desc(competitorRelevanceDecisions.createdAt)),
+        db
+          .select({
+            id: orchestratorJobs.id,
+            status: orchestratorJobs.status,
+            planId: orchestratorJobs.planId,
+            createdAt: orchestratorJobs.createdAt,
+            completedAt: orchestratorJobs.completedAt,
+          })
+          .from(orchestratorJobs)
+          .where(and(eq(orchestratorJobs.accountId, accountId), eq(orchestratorJobs.campaignId, campaignId)))
+          .orderBy(desc(orchestratorJobs.createdAt))
+          .limit(5),
+        db
+          .select({
+            id: strategicPlans.id,
+            version: strategicPlans.version,
+            status: strategicPlans.status,
+            isDesignatedActive: strategicPlans.isDesignatedActive,
+            rootBundleId: strategicPlans.rootBundleId,
+            createdAt: strategicPlans.createdAt,
+          })
+          .from(strategicPlans)
+          .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, campaignId)))
+          .orderBy(desc(strategicPlans.createdAt))
+          .limit(5),
+        db
+          .select({
+            id: businessExecutionStates.id,
+            mode: businessExecutionStates.mode,
+            primaryBottleneck: businessExecutionStates.primaryBottleneck,
+            status: businessExecutionStates.status,
+            createdAt: businessExecutionStates.createdAt,
+          })
+          .from(businessExecutionStates)
+          .where(
+            and(
+              eq(businessExecutionStates.accountId, accountId),
+              eq(businessExecutionStates.campaignId, campaignId)
+            )
+          )
+          .orderBy(desc(businessExecutionStates.createdAt))
+          .limit(3),
+        getCampaignUsageLedger(accountId, campaignId),
+      ]);
+
+      res.json({
+        success: true,
+        trace: {
+          accountId,
+          business: businessRow[0] || null,
+          product: productRow[0] || null,
+          campaign: enriched,
+          offering: offeringRow[0] || null,
+          understandingSnapshot: buSnapshots[0]
+            ? {
+                id: buSnapshots[0].id,
+                version: buSnapshots[0].version,
+                status: buSnapshots[0].status,
+                websiteSnapshotId: buSnapshots[0].websiteSnapshotId,
+                offeringInputEvidenceId: buSnapshots[0].offeringInputEvidenceId,
+                campaignOfferingId: buSnapshots[0].campaignOfferingId,
+                companyFacts: buSnapshots[0].companyFacts,
+                productFacts: buSnapshots[0].productFacts,
+                campaignChoices: buSnapshots[0].campaignChoices,
+                evidenceProvenance: buSnapshots[0].evidenceProvenance,
+                inputSnapshotVersion: buSnapshots[0].inputSnapshotVersion,
+                createdAt: buSnapshots[0].createdAt,
+              }
+            : null,
+          competitorRelevanceDecisions: relevanceDecisions,
+          strategyRuns: jobs,
+          plans,
+          activePlan: plans.find((p) => p.isDesignatedActive || p.status === "APPROVED") || null,
+          monitoringAndPerformance: {
+            executionStates: execStates,
+          },
+          usageLedger,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ code: "TRACE_FAILED", message: error.message });
     }
   });
 
@@ -819,6 +1373,16 @@ export function registerCampaignRoutes(app: Express) {
       const roas = (result.spend ?? 0) > 0 ? +((result.revenue ?? 0) / result.spend).toFixed(2) : 0;
 
       console.log(`[Campaigns] Manual metrics saved for campaign ${campaignId}: spend=${result.spend}, revenue=${result.revenue}, conversions=${result.conversions}`);
+
+      // Trigger Performance Loop re-evaluation and Adaptive Reasoning sync so manual inputs reach Performance immediately
+      try {
+        const { evaluateAndPersistBusinessExecutionState } = await import("./performance-loop/execution-intelligence");
+        await evaluateAndPersistBusinessExecutionState({ accountId, campaignId });
+        const { syncCampaignAdaptiveReasoning } = await import("./adaptive/case-coordinator");
+        await syncCampaignAdaptiveReasoning({ accountId, campaignId });
+      } catch (perfErr: any) {
+        console.warn(`[Campaigns] Non-fatal Performance re-evaluation warning after manual metrics save: ${perfErr?.message || perfErr}`);
+      }
 
       res.json({
         success: true,
@@ -1245,16 +1809,70 @@ export function registerCampaignRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
-      const profiles = await db
-        .select()
-        .from(userPublicProfiles)
-        .where(
-          and(
-            eq(userPublicProfiles.campaignId, campaignId),
-            eq(userPublicProfiles.accountId, accountId),
+      const [profiles, postRows, snapRows] = await Promise.all([
+        db
+          .select()
+          .from(userPublicProfiles)
+          .where(
+            and(
+              eq(userPublicProfiles.campaignId, campaignId),
+              eq(userPublicProfiles.accountId, accountId),
+            )
+          ),
+        db
+          .select()
+          .from(ownedPosts)
+          .where(
+            and(
+              eq(ownedPosts.campaignId, campaignId),
+              eq(ownedPosts.accountId, accountId),
+            )
+          ),
+        db
+          .select()
+          .from(userChannelSnapshots)
+          .where(
+            and(
+              eq(userChannelSnapshots.campaignId, campaignId),
+              eq(userChannelSnapshots.accountId, accountId),
+            )
           )
-        );
-      res.json({ success: true, profiles });
+          .orderBy(desc(userChannelSnapshots.scrapedAt)),
+      ]);
+
+      const enrichedProfiles = profiles.map((p) => {
+        const storedPostsCount = postRows.filter((op) => op.platform === p.platform).length;
+        const latestSnapRow = snapRows.find((s) => s.platform === p.platform);
+        let parsedSnap: any = null;
+        if (latestSnapRow?.snapshotData) {
+          try {
+            parsedSnap = JSON.parse(latestSnapRow.snapshotData);
+          } catch {}
+        }
+        const isUnresolvedLinkedIn =
+          p.platform.toLowerCase() === "linkedin" &&
+          (!p.handle ||
+            p.handle === "company" ||
+            p.url === "https://linkedin.com/company" ||
+            parsedSnap?.identityStatus === "UNRESOLVED");
+        const accountTotalContent = parsedSnap?.accountTotalContent ?? null;
+        return {
+          ...p,
+          identityStatus: isUnresolvedLinkedIn ? "UNRESOLVED" : parsedSnap?.identityStatus ?? "CONFIRMED",
+          storedPostsCount,
+          storedHistoricalPostCount: storedPostsCount,
+          fetchedWindowPostCount: parsedSnap?.fetchedWindowPostCount ?? parsedSnap?.postCount ?? null,
+          inWindowPostCount: parsedSnap?.inWindowPostCount ?? null,
+          rolling30dPostCount: parsedSnap?.rolling30dPostCount ?? null,
+          accountTotalContent,
+          accountTotalDisplay: accountTotalContent ?? "UNKNOWN",
+          latestScrapeStatus: parsedSnap?.scrapeStatus ?? null,
+          isPartialCoverage: parsedSnap?.isPartialCoverage ?? false,
+          countMeaning: "stored_unique_items_in_db",
+        };
+      });
+
+      res.json({ success: true, profiles: enrichedProfiles });
     } catch (error: any) {
       console.error("[Campaigns] User channels GET error:", error);
       res.status(500).json({ code: "USER_CHANNELS_FAILED", message: "Failed to fetch user channels" });
@@ -1265,28 +1883,100 @@ export function registerCampaignRoutes(app: Express) {
     try {
       const { campaignId } = req.params;
       const accountId = resolveAccountId(req);
-      const { instagramHandle, websiteUrl } = req.body;
+      const {
+        instagramHandle,
+        tiktokHandle,
+        youtubeUrl,
+        linkedinUrl,
+        websiteUrl,
+        channels,
+        triggerScrape = false,
+      } = req.body;
+
+      const { normalizeYouTubeChannelUrl, parseLinkedInIdentity } = await import("./acquisition/multi-source-providers");
+      const { extractHandleFromUrl } = await import("./competitive-intelligence/profile-scraper");
 
       const channelsToUpsert: { platform: string; handle: string | null; url: string | null }[] = [];
 
-      if (instagramHandle !== undefined) {
-        channelsToUpsert.push({
-          platform: "instagram",
-          handle: instagramHandle ? instagramHandle.replace(/^@/, "").toLowerCase().trim() : null,
-          url: null,
-        });
+      const rawList: Array<{ platform: string; raw: string | null }> = [];
+      if (Array.isArray(channels)) {
+        for (const ch of channels) {
+          if (ch?.platform) {
+            rawList.push({
+              platform: String(ch.platform).toLowerCase().trim(),
+              raw: ch.url !== undefined ? ch.url : ch.handle ?? null,
+            });
+          }
+        }
       }
+      if (instagramHandle !== undefined) rawList.push({ platform: "instagram", raw: instagramHandle });
+      if (tiktokHandle !== undefined) rawList.push({ platform: "tiktok", raw: tiktokHandle });
+      if (youtubeUrl !== undefined) rawList.push({ platform: "youtube", raw: youtubeUrl });
+      if (linkedinUrl !== undefined) rawList.push({ platform: "linkedin", raw: linkedinUrl });
+      if (websiteUrl !== undefined) rawList.push({ platform: "website", raw: websiteUrl });
 
-      if (websiteUrl !== undefined) {
-        channelsToUpsert.push({
-          platform: "website",
-          handle: null,
-          url: websiteUrl ? websiteUrl.trim() : null,
-        });
+      for (const item of rawList) {
+        const rawVal = item.raw != null ? String(item.raw).trim() : "";
+        if (!rawVal) continue;
+        if (item.platform === "linkedin") {
+          const liIdentity = parseLinkedInIdentity(rawVal);
+          if (!liIdentity.valid) {
+            // Never erase a saved URL on validation error; return 400 with actionable error
+            return res.status(400).json({
+              code: "INVALID_LINKEDIN_URL",
+              message:
+                liIdentity.error ||
+                "Invalid LinkedIn URL: please provide your full /company/<slug> or /in/<slug> LinkedIn URL.",
+              field: "linkedin",
+            });
+          }
+          channelsToUpsert.push({
+            platform: "linkedin",
+            handle: liIdentity.handle,
+            url: liIdentity.canonicalUrl,
+          });
+        } else if (item.platform === "instagram") {
+          const cleanHandle = (extractHandleFromUrl(rawVal) || rawVal.replace(/^@/, "")).toLowerCase().trim();
+          channelsToUpsert.push({
+            platform: "instagram",
+            handle: cleanHandle,
+            url: `https://www.instagram.com/${cleanHandle}`,
+          });
+        } else if (item.platform === "tiktok") {
+          const cleanHandle = rawVal.replace(/^https?:\/\/(www\.)?tiktok\.com\/@?/i, "").replace(/^@/, "").split(/[/?#]/)[0].trim();
+          channelsToUpsert.push({
+            platform: "tiktok",
+            handle: cleanHandle,
+            url: `https://www.tiktok.com/@${cleanHandle}`,
+          });
+        } else if (item.platform === "youtube") {
+          let cleanHandle = rawVal;
+          if (rawVal.startsWith("http://") || rawVal.startsWith("https://")) {
+            try {
+              const parsed = new URL(rawVal);
+              const pathSegments = parsed.pathname.split("/").filter(Boolean);
+              cleanHandle = (pathSegments[pathSegments.length - 1] || rawVal).replace(/^@/, "");
+            } catch {}
+          } else {
+            cleanHandle = rawVal.replace(/^@/, "");
+          }
+          const cleanUrl = normalizeYouTubeChannelUrl(rawVal.startsWith("http") ? rawVal : "", cleanHandle);
+          channelsToUpsert.push({
+            platform: "youtube",
+            handle: cleanHandle,
+            url: cleanUrl,
+          });
+        } else if (item.platform === "website") {
+          channelsToUpsert.push({
+            platform: "website",
+            handle: null,
+            url: rawVal.startsWith("http") ? rawVal : `https://${rawVal}`,
+          });
+        }
       }
 
       if (channelsToUpsert.length === 0) {
-        return res.status(400).json({ code: "MISSING_CHANNELS", message: "At least one channel (instagramHandle or websiteUrl) is required" });
+        return res.status(400).json({ code: "MISSING_CHANNELS", message: "At least one valid channel is required" });
       }
 
       const results = [];
@@ -1322,6 +2012,22 @@ export function registerCampaignRoutes(app: Express) {
             .values({ accountId, campaignId, platform: ch.platform, handle: ch.handle, url: ch.url })
             .returning();
           results.push(inserted[0]);
+        }
+      }
+
+      if (triggerScrape) {
+        try {
+          const { scrapeUserChannels } = await import("./user-channel-scraper");
+          await scrapeUserChannels(accountId, campaignId, {
+            forceRefresh: true,
+            targetPlatforms: channelsToUpsert.map((c) => c.platform),
+            trigger: "USER_CHANNELS_PUT",
+            requesterEngine: "SETTINGS",
+          });
+          const { evaluateAndPersistBusinessExecutionState } = await import("./performance-loop/execution-intelligence");
+          await evaluateAndPersistBusinessExecutionState({ accountId, campaignId });
+        } catch (scrapeErr: any) {
+          console.warn(`[Campaigns] Non-fatal owned channel scrape warning: ${scrapeErr?.message || scrapeErr}`);
         }
       }
 

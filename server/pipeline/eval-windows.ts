@@ -124,6 +124,22 @@ export async function evaluateWindowState(
   const windowStart = new Date(anchorAt.getTime() + windowIndex * WINDOW_MS);
   const windowEnd = new Date(windowStart.getTime() + WINDOW_MS);
 
+  // 3.5) Reconcile any stale open windows from superseded plans or prior window indices
+  // so there is at most ONE active open window per campaign anchored to the designated active plan.
+  try {
+    await db.execute(sql`
+      UPDATE pipeline_eval_windows
+      SET state = 'closed',
+          closed_at = COALESCE(closed_at, ${now})
+      WHERE account_id = ${accountId}
+        AND campaign_id = ${campaignId}
+        AND state = 'open'
+        AND (plan_id <> ${plan.id} OR window_index < ${windowIndex})
+    `);
+  } catch (reconcileErr: any) {
+    console.warn(`[EvalWindows] Stale window reconciliation warning: ${reconcileErr?.message || reconcileErr}`);
+  }
+
   // 4) Lazy-create the window row. ON CONFLICT DO NOTHING keeps it idempotent.
   await db
     .insert(pipelineEvalWindows)

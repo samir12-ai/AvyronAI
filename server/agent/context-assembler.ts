@@ -155,6 +155,9 @@ export async function buildAgentContext(params: {
   // 4. CANONICAL STRATEGY ROOT & LINEAGE AUTHORITY
   let strategyRootId: string | null = null;
   let strategyVersion: number = 6;
+  let activePlanVersion: number | null = null;
+  let rootBundleVersion: number | null = null;
+  let totalPlanRevisions: number = 0;
   let strategicDirection = "Simplicity & Frictionless Social Scheduling";
   let approvedLanes: Array<{ id: string; title: string; audienceSegment?: string; focusAngle?: string }> = [
     { id: "lane_150941b08a87", title: "Simplified Scheduling for Small Business Social Media Managers", audienceSegment: "Small Business Social Media Managers", focusAngle: "Frictionless multi-account scheduling & affordable clarity without enterprise bloat" },
@@ -163,6 +166,33 @@ export async function buildAgentContext(params: {
   let lineageSummary = "Strategy v6 refined top-of-funnel consideration proof placement for Small Business Social Media Managers while preserving core Brand Spine.";
 
   try {
+    const campaignPlans = await db
+      .select({
+        id: schema.strategicPlans.id,
+        version: schema.strategicPlans.version,
+        rootBundleVersion: schema.strategicPlans.rootBundleVersion,
+        isDesignatedActive: schema.strategicPlans.isDesignatedActive,
+        status: schema.strategicPlans.status,
+      })
+      .from(schema.strategicPlans)
+      .where(
+        and(
+          eq(schema.strategicPlans.accountId, accountId),
+          eq(schema.strategicPlans.campaignId, campaignId)
+        )
+      )
+      .orderBy(desc(schema.strategicPlans.updatedAt));
+    totalPlanRevisions = campaignPlans.length;
+    const designatedPlan =
+      campaignPlans.find((p) => p.isDesignatedActive) ||
+      campaignPlans.find((p) => p.status === "APPROVED") ||
+      campaignPlans[0];
+    if (designatedPlan) {
+      activePlanVersion = designatedPlan.version ?? null;
+      rootBundleVersion = designatedPlan.rootBundleVersion ?? null;
+      if (activePlanVersion) strategyVersion = activePlanVersion;
+    }
+
     const [activeRoot] = await db
       .select()
       .from(schema.strategyRoots)
@@ -707,7 +737,7 @@ Campaign Platform: ${campaignPlatform}
    - Target Audience Profile: ${canonicalTargetAudience}
 
 2. STRATEGY ROOT & LINEAGE (Source: strategyRoots & strategyAdaptationOutcomes):
-   - Strategy Version: Strategy v${strategyVersion}
+   - Active Plan Version: v${activePlanVersion ?? strategyVersion} · Root Bundle Version: v${rootBundleVersion ?? strategyVersion} (${totalPlanRevisions} total revisions)
    - Strategy Root ID: ${strategyRootId || 'root_canonical_active'}
    - Direction: ${strategicDirection}
    - Strategic Lineage & Evolution: ${lineageSummary}
@@ -779,6 +809,9 @@ ${planPresentationFact ? `\n14. STRATEGY PLAN PRESENTATION (Source: strategicPla
       artifactIds,
       strategyRootId,
       strategyVersion,
+      activePlanVersion,
+      rootBundleVersion,
+      totalPlanRevisions,
       laneIds,
       causalStatuses,
     },

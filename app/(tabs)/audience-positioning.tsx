@@ -21,7 +21,7 @@ export default function AudiencePositioningScreen() {
   const shellController = useAppShellController();
   const { selectedCampaign, selectedCampaignId } = useCampaign();
 
-  const campaignId = selectedCampaign?.selectedCampaignId || selectedCampaignId || shellController.activeWorkspace?.id || 'campaign_1773576062201_6t0oxi';
+  const campaignId = selectedCampaign?.selectedCampaignId || selectedCampaignId || shellController.activeWorkspace?.id || '';
   const { data, isLoading, error, refetch } = useAudiencePositioning(campaignId);
 
   return (

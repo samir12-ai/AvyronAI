@@ -45,25 +45,79 @@ export function registerCiCompetitorRoutes(app: Express) {
         .orderBy(sql`${ciCompetitors.createdAt} DESC`);
 
       const ids = competitors.map(c => c.id);
-      const extraUrlsMap: Record<string, { tiktokUrl: string | null; googleMapsUrl: string | null }> = {};
+      const extraUrlsMap: Record<
+        string,
+        {
+          platform: string | null;
+          profileLink: string | null;
+          blogUrl: string | null;
+          tiktokUrl: string | null;
+          googleMapsUrl: string | null;
+        }
+      > = {};
       if (ids.length > 0) {
-        const extraRes = await db.execute(sql`SELECT id, tiktok_url, google_maps_url FROM ci_competitors WHERE id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`);
-        for (const row of extraRes.rows as any[]) {
-          extraUrlsMap[row.id] = { tiktokUrl: row.tiktok_url ?? null, googleMapsUrl: row.google_maps_url ?? null };
+        const srcRes = await db.execute(
+          sql`SELECT competitor_id, platform, canonical_url, status, activity_state
+              FROM competitor_sources
+              WHERE competitor_id IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})
+                AND status NOT IN ('DISABLED', 'REJECTED')
+                AND COALESCE(activity_state, '') != 'QUARANTINED_MISATTRIBUTED'`
+        );
+        for (const row of srcRes.rows as any[]) {
+          const cid = row.competitor_id as string;
+          if (!extraUrlsMap[cid]) {
+            extraUrlsMap[cid] = {
+              platform: null,
+              profileLink: null,
+              blogUrl: null,
+              tiktokUrl: null,
+              googleMapsUrl: null,
+            };
+          }
+          const plat = String(row.platform || "").toUpperCase();
+          const url = row.canonical_url ?? null;
+          if (plat === "INSTAGRAM" && !extraUrlsMap[cid].profileLink) {
+            extraUrlsMap[cid].platform = "instagram";
+            extraUrlsMap[cid].profileLink = url;
+          } else if (plat === "TIKTOK") {
+            extraUrlsMap[cid].tiktokUrl = url;
+            if (!extraUrlsMap[cid].profileLink) {
+              extraUrlsMap[cid].platform = "tiktok";
+              extraUrlsMap[cid].profileLink = url;
+            }
+          } else if (plat === "BLOG") {
+            extraUrlsMap[cid].blogUrl = url;
+          } else if (plat === "GOOGLE_MAPS" || plat === "GOOGLE_REVIEWS" || plat === "REVIEWS" || plat === "TRUSTPILOT") {
+            if (!extraUrlsMap[cid].googleMapsUrl) {
+              extraUrlsMap[cid].googleMapsUrl = url;
+            }
+          } else if (!extraUrlsMap[cid].profileLink && url) {
+            extraUrlsMap[cid].platform = plat.toLowerCase();
+            extraUrlsMap[cid].profileLink = url;
+          }
         }
       }
 
       const enriched = await Promise.all(competitors.map(async c => {
-        const validation = validateEvidence(c);
+        const extra = extraUrlsMap[c.id] ?? {
+          platform: null,
+          profileLink: null,
+          blogUrl: null,
+          tiktokUrl: null,
+          googleMapsUrl: null,
+        };
+        const resolvedProfileLink = (c as any).profileLink ?? extra.profileLink ?? c.websiteUrl ?? null;
+        const resolvedPlatform = (c as any).platform ?? extra.platform ?? "website";
+        const resolvedBlogUrl = (c as any).blogUrl ?? extra.blogUrl ?? null;
+        const validation = validateEvidence({ ...c, profileLink: resolvedProfileLink });
         const coverage = await getCompetitorDataCoverage(c.id, accountId);
-        const extra = extraUrlsMap[c.id] ?? { tiktokUrl: null, googleMapsUrl: null };
         return {
           id: c.id,
           accountId: c.accountId,
           campaignId: c.campaignId,
           name: c.name,
-          platform: c.platform,
-          profileLink: c.profileLink,
+          platform: resolvedPlatform,
+          profileLink: resolvedProfileLink,
           businessType: c.businessType,
           primaryObjective: c.primaryObjective,
           postingFrequency: c.postingFrequency,
@@ -77,7 +131,7 @@ export function registerCiCompetitorRoutes(app: Express) {
           screenshotUrls: c.screenshotUrls,
           notes: c.notes,
           websiteUrl: c.websiteUrl,
-          blogUrl: c.blogUrl,
+          blogUrl: resolvedBlogUrl,
           tiktokUrl: extra.tiktokUrl,
           googleMapsUrl: extra.googleMapsUrl,
           isActive: c.isActive,
@@ -88,7 +142,17 @@ export function registerCiCompetitorRoutes(app: Express) {
           dataCoverage: coverage,
         };
       }));
-      res.json({ competitors: enriched });
+      const allCampaignComps = await db
+        .select({ id: ciCompetitors.id, isActive: ciCompetitors.isActive })
+        .from(ciCompetitors)
+        .where(and(eq(ciCompetitors.accountId, accountId), eq(ciCompetitors.campaignId, campaignId), eq(ciCompetitors.isDemo, false)));
+      const inactiveCompetitors = allCampaignComps.filter(c => c.isActive === false);
+      res.json({
+        competitors: enriched,
+        activeCompetitorCount: enriched.length,
+        inactiveCandidateCount: inactiveCompetitors.length,
+        totalCampaignCompetitorRows: allCampaignComps.length,
+      });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }

@@ -87,7 +87,6 @@ describe("Canonical Competitor Quality Revalidation Suite", { timeout: 180000 },
       tier: "A",
       businessType: "DIRECT_COMPETITOR",
       primaryObjective: "CUSTOMER_ACQUISITION",
-      profileLink: "https://wholesale-marketplace-sample.com",
       isActive: true,
     });
 
@@ -198,7 +197,6 @@ describe("Canonical Competitor Quality Revalidation Suite", { timeout: 180000 },
       tier: "A",
       businessType: "DIRECT_COMPETITOR",
       primaryObjective: "CUSTOMER_ACQUISITION",
-      profileLink: "https://beirutmodestlabel.com",
       isActive: true,
     });
 
@@ -267,7 +265,6 @@ describe("Canonical Competitor Quality Revalidation Suite", { timeout: 180000 },
       tier: "A",
       businessType: "DIRECT_COMPETITOR",
       primaryObjective: "CUSTOMER_ACQUISITION",
-      profileLink: "https://elegancedresses.com",
       isActive: true,
     });
 

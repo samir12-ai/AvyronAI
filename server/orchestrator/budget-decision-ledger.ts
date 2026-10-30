@@ -25,6 +25,31 @@
  */
 
 export type BudgetAction = "halt" | "hold" | "test" | "scale";
+export type GovernanceState = "CLEAR" | "REVIEW_REQUIRED" | "RESTRICTED" | "BLOCKED";
+export type BudgetConfirmation = "user_confirmed" | "unconfirmed" | "missing";
+
+export interface GovernedBudgetState {
+  spendAction: BudgetAction;                 // halt|hold|test|scale — the SPENDING action only
+  action?: BudgetAction;                     // alias for spendAction
+  executionMode: "recommendation_only" | "execution";
+  governanceState: GovernanceState;          // review/approval status — separate from spendAction
+  reasons: Array<{ code: string; detail: string }>;
+  reasoning?: string;                        // convenient summary of reasons
+  source: "ledger" | "budget_governor_emit" | "governance_failure";
+  budgetConfirmation: BudgetConfirmation;
+  verdictId: string | null;                  // system_control_verdicts.id when known
+  totalMonthlyBudget?: number | null;
+  currency?: string;
+}
+
+export const SYSTEM_CONTROL_TARGET_MAP: Record<string, { spendAction: BudgetAction; governanceState: GovernanceState }> = {
+  halt: { spendAction: "halt", governanceState: "BLOCKED" },
+  hold: { spendAction: "hold", governanceState: "RESTRICTED" },
+  test: { spendAction: "test", governanceState: "CLEAR" },
+  scale: { spendAction: "scale", governanceState: "CLEAR" },
+  review_required: { spendAction: "hold", governanceState: "REVIEW_REQUIRED" },
+  needs_reconciliation: { spendAction: "hold", governanceState: "REVIEW_REQUIRED" },
+};
 
 /**
  * Task #70 / Phase 7 — authoritative resolver for the current budget action.
@@ -93,6 +118,10 @@ export interface BudgetDecisionLedgerEntry {
   originalAction: BudgetAction;
   /** Budget action after downgrade. */
   finalAction: BudgetAction;
+  /** Governance review/approval state after downgrade. */
+  governanceState?: GovernanceState;
+  /** System Control verdict ID if available. */
+  verdictId?: string | null;
   /** Which layer drove the downgrade. */
   downgradeSource: BudgetDowngradeSource;
   /** Structured codes from `controlVerdict.downgrades`. */
@@ -188,7 +217,7 @@ function isBudgetAction(value: string): value is BudgetAction {
  */
 export class InvalidBudgetDowngradeError extends Error {
   constructor(public readonly invalidTo: string) {
-    super(`BudgetDecisionLedger: downgrade target "${invalidTo}" is not a valid BudgetAction (${Array.from(VALID_BUDGET_ACTIONS).join("|")})`);
+    super(`BudgetDecisionLedger: downgrade target "${invalidTo}" is not a valid System Control target (${Object.keys(SYSTEM_CONTROL_TARGET_MAP).join("|")})`);
     this.name = "InvalidBudgetDowngradeError";
   }
 }
@@ -199,8 +228,16 @@ export interface BudgetDecisionLedgerInput {
   proposedDowngrades: Array<{ to: string; code: string }>;
   /** When the prior repair already attributed itself, the orchestrator should not overwrite. */
   alreadyAttributedTo?: BudgetDowngradeSource | null;
+  verdictId?: string | null;
   now?: number;
 }
+
+const GOVERNANCE_SEVERITY: Record<GovernanceState, number> = {
+  BLOCKED: 0,
+  REVIEW_REQUIRED: 1,
+  RESTRICTED: 2,
+  CLEAR: 3,
+};
 
 /**
  * Pure computation of the downgrade ledger entry. NO mutation of inputs.
@@ -215,11 +252,11 @@ export function computeBudgetDecisionLedgerEntry(
     return null;
   }
 
-  // Fail-closed validation: every proposed `to` MUST be a valid BudgetAction.
+  // Fail-closed validation: every proposed `to` MUST be a recognized System Control target.
   // An unknown value upstream is a contract violation (system-control emitted
-  // a downgrade target outside the enum) and we refuse to silently coerce.
+  // an unrecognized downgrade target) and we refuse to silently coerce.
   for (const d of input.proposedDowngrades) {
-    if (!isBudgetAction(d.to)) {
+    if (!SYSTEM_CONTROL_TARGET_MAP[d.to]) {
       throw new InvalidBudgetDowngradeError(d.to);
     }
   }
@@ -227,13 +264,19 @@ export function computeBudgetDecisionLedgerEntry(
     throw new InvalidBudgetDowngradeError(input.originalAction);
   }
 
-  // Pick the most severe (lowest-rank) downgrade target. After validation
-  // above, every `d.to` is statically known to be a BudgetAction.
-  const validatedTargets = input.proposedDowngrades.map(d => d.to as BudgetAction);
-  const targetAction = validatedTargets.reduce<BudgetAction>(
+  // Map each target to its structured spendAction and governanceState
+  const mappedTargets = input.proposedDowngrades.map(d => SYSTEM_CONTROL_TARGET_MAP[d.to]);
+
+  const targetSpendAction = mappedTargets.reduce<BudgetAction>(
     (most, candidate) =>
-      DOWNGRADE_SEVERITY[candidate] < DOWNGRADE_SEVERITY[most] ? candidate : most,
-    validatedTargets[0],
+      DOWNGRADE_SEVERITY[candidate.spendAction] < DOWNGRADE_SEVERITY[most] ? candidate.spendAction : most,
+    mappedTargets[0].spendAction,
+  );
+
+  const targetGovernanceState = mappedTargets.reduce<GovernanceState>(
+    (most, candidate) =>
+      GOVERNANCE_SEVERITY[candidate.governanceState] < GOVERNANCE_SEVERITY[most] ? candidate.governanceState : most,
+    mappedTargets[0].governanceState,
   );
 
   const downgradeReasons = input.proposedDowngrades.map(d => d.code);
@@ -255,10 +298,150 @@ export function computeBudgetDecisionLedgerEntry(
     jobId: input.jobId,
     decidedAt: now,
     originalAction: input.originalAction,
-    finalAction: actionMutated ? targetAction : input.originalAction,
+    finalAction: actionMutated ? targetSpendAction : input.originalAction,
+    governanceState: targetGovernanceState,
+    verdictId: input.verdictId ?? null,
     downgradeSource,
     downgradeReasons,
     actionMutated,
     writer: "system_control_downgrade",
+  };
+}
+
+/**
+ * Authoritative resolver for the governed budget state.
+ *
+ * Separates SPENDING action (spendAction: halt|hold|test|scale) from
+ * GOVERNANCE review status (governanceState: CLEAR|REVIEW_REQUIRED|RESTRICTED|BLOCKED).
+ */
+export function resolveGovernedBudgetState(budgetGovernorOutput: any): GovernedBudgetState {
+  if (!budgetGovernorOutput) {
+    return {
+      spendAction: "hold",
+      executionMode: "recommendation_only",
+      governanceState: "BLOCKED",
+      reasons: [{ code: "OUTPUT_MISSING", detail: "Budget governor output is missing or null." }],
+      source: "governance_failure",
+      budgetConfirmation: "missing",
+      verdictId: null,
+    };
+  }
+
+  // 1. Governance failure (e.g. System Control decision could not be persisted/stamped)
+  if (budgetGovernorOutput._governanceFailure) {
+    return {
+      spendAction: "hold",
+      executionMode: "recommendation_only",
+      governanceState: "BLOCKED",
+      reasons: [{ code: "GOVERNANCE_FAILURE", detail: "System Control decision could not be persisted or stamped onto budget state." }],
+      source: "governance_failure",
+      budgetConfirmation: budgetGovernorOutput.budgetConfirmation || "unconfirmed",
+      verdictId: budgetGovernorOutput.verdictId || null,
+    };
+  }
+
+  const budgetConfirmation: BudgetConfirmation =
+    budgetGovernorOutput.budgetConfirmation === "user_confirmed"
+      ? "user_confirmed"
+      : (budgetGovernorOutput.totalMonthlyBudget === null || budgetGovernorOutput.totalMonthlyBudget === undefined)
+        ? "missing"
+        : "unconfirmed";
+
+  const verdictId = budgetGovernorOutput._ledgerEntry?.verdictId || budgetGovernorOutput.verdictId || null;
+  const totalMonthlyBudget = budgetGovernorOutput.totalMonthlyBudget ?? null;
+  const currency = budgetGovernorOutput.currency || "USD";
+
+  // 2. Authoritative ledger entry from System Control downgrade
+  const ledger = budgetGovernorOutput._ledgerEntry as BudgetDecisionLedgerEntry | undefined;
+  if (ledger && isBudgetAction(ledger.finalAction)) {
+    const govState: GovernanceState = ledger.governanceState
+      || (ledger.finalAction === "halt" ? "BLOCKED" : ledger.finalAction === "hold" ? "REVIEW_REQUIRED" : "CLEAR");
+    const reasons = (ledger.downgradeReasons || []).map((code: string) => ({
+      code,
+      detail: `Downgraded by ${ledger.downgradeSource}: ${code}`,
+    }));
+
+    return {
+      spendAction: ledger.finalAction,
+      action: ledger.finalAction,
+      executionMode: budgetGovernorOutput.executionMode || (budgetGovernorOutput.decision?.executionMode) || "recommendation_only",
+      governanceState: govState,
+      reasons,
+      reasoning: reasons.map(r => r.detail).join("; "),
+      source: "ledger",
+      budgetConfirmation,
+      verdictId,
+      totalMonthlyBudget,
+      currency,
+    };
+  }
+
+  // 3. Emitted action from Budget Governor
+  const rawAction = budgetGovernorOutput.decision?.action;
+  const isExecutionMode = budgetGovernorOutput.executionMode === "execution" || budgetGovernorOutput.mode === "execution";
+
+  // Recommendation-only mode: spendAction is always "hold" with honest reasoning, not synthetic "test"
+  if (!isExecutionMode) {
+    const reasons = [{
+      code: "RECOMMENDATION_ONLY",
+      detail: budgetGovernorOutput.decision?.reasoning || "Recommendation-only mode: no live spend authorized without user confirmation and execution approval.",
+    }];
+    const governanceState: GovernanceState = budgetConfirmation === "user_confirmed" ? "CLEAR" : "REVIEW_REQUIRED";
+
+    return {
+      spendAction: "hold",
+      action: "hold",
+      executionMode: "recommendation_only",
+      governanceState,
+      reasons,
+      reasoning: reasons.map(r => r.detail).join("; "),
+      source: "budget_governor_emit",
+      budgetConfirmation,
+      verdictId,
+      totalMonthlyBudget,
+      currency,
+    };
+  }
+
+  // Execution mode with valid budget action
+  if (typeof rawAction === "string" && isBudgetAction(rawAction)) {
+    const reasons: Array<{ code: string; detail: string }> = [];
+    let govState: GovernanceState = "CLEAR";
+    if (budgetConfirmation !== "user_confirmed") {
+      govState = "REVIEW_REQUIRED";
+      reasons.push({ code: "BUDGET_UNCONFIRMED", detail: "Budget amount has not been confirmed by the user." });
+    }
+    if (rawAction === "halt") govState = "BLOCKED";
+    else if (rawAction === "hold" && govState !== "BLOCKED") govState = "RESTRICTED";
+
+    return {
+      spendAction: rawAction,
+      action: rawAction,
+      executionMode: "execution",
+      governanceState: govState,
+      reasons,
+      reasoning: reasons.map(r => r.detail).join("; ") || (budgetGovernorOutput.decision?.reasoning ?? ""),
+      source: "budget_governor_emit",
+      budgetConfirmation,
+      verdictId,
+      totalMonthlyBudget,
+      currency,
+    };
+  }
+
+  // Fallback if action is unknown or invalid
+  const fallbackReasons = [{ code: "INVALID_ACTION", detail: `Unrecognized budget action "${rawAction}".` }];
+  return {
+    spendAction: "hold",
+    action: "hold",
+    executionMode: "recommendation_only",
+    governanceState: "BLOCKED",
+    reasons: fallbackReasons,
+    reasoning: fallbackReasons.map(r => r.detail).join("; "),
+    source: "governance_failure",
+    budgetConfirmation,
+    verdictId,
+    totalMonthlyBudget,
+    currency,
   };
 }

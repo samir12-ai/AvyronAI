@@ -38,7 +38,6 @@ describe("Evidence Routing Contract & Normalization", () => {
       campaignId: testCamp,
       name: "Test Modest Brand",
       platform: "instagram",
-      profileLink: "https://instagram.com/testmodestbrand",
       businessType: "Competitor",
       primaryObjective: "Engagement",
       isActive: true,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAudiencePainRegistry,
-  classifyAudiencePain,
   selectPainForUse,
   validateAudiencePainRegistry,
 } from "../shared/audience-pain-registry";

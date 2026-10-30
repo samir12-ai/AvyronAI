@@ -3,11 +3,15 @@ import { aiGemini, aiChat } from "../ai-client";
 import { db } from "../db";
 import { 
   competitorUnderstandingSnapshots, 
-  competitorWebsiteSnapshots 
-} from "@shared/schema";
-import { eq, desc } from "drizzle-orm";
+  competitorWebsiteSnapshots,
+  ciCompetitorPosts
+} from "../../shared/schema";
+import { eq, and, desc } from "drizzle-orm";
 import { randomUUID as uuidv4 } from "crypto";
 import { runCompetitorWebsiteCrawler, type CompetitorPageEvidence } from "./competitor-crawler";
+
+// Active in-memory lock to prevent conflicting concurrent runs for the same competitor
+const activeUnderstandingJobs = new Set<string>();
 
 export interface CompetitorUnderstandingPayload {
   competitorUnderstandingAuthorityId: string;
@@ -135,75 +139,207 @@ export async function runCompetitorUnderstandingEngine(
   campaignId: string,
   competitorId: string,
   websiteUrl: string,
-  competitorName: string
+  competitorName: string,
+  options?: { forceRecrawl?: boolean; snapshotId?: string }
 ): Promise<CompetitorUnderstandingPayload> {
-  const authorityId = `comp_auth_${uuidv4().substring(0, 8)}`;
-  console.log(`[CompetitorUnderstandingEngine] Running for competitor ${competitorName} (${competitorId})`);
-
-  // 1. Ensure Competitor Website Crawl exists
-  let pages: CompetitorPageEvidence[] = [];
-  let competitorWebsiteSnapshotId = "";
-
-  const [existingSnap] = await db.select().from(competitorWebsiteSnapshots)
-    .where(eq(competitorWebsiteSnapshots.competitorId, competitorId))
-    .orderBy(desc(competitorWebsiteSnapshots.createdAt))
-    .limit(1);
-
-  if (existingSnap && existingSnap.status === "COMPLETE" && Array.isArray(existingSnap.pagesCrawled) && existingSnap.pagesCrawled.length > 0) {
-    competitorWebsiteSnapshotId = existingSnap.id;
-    pages = existingSnap.pagesCrawled as CompetitorPageEvidence[];
-  } else {
-    const crawlRes = await runCompetitorWebsiteCrawler(accountId, campaignId, competitorId, websiteUrl, 6);
-    competitorWebsiteSnapshotId = crawlRes.snapshotId;
-    pages = crawlRes.pagesCrawled;
+  const lockKey = `${accountId}:${competitorId}`;
+  if (activeUnderstandingJobs.has(lockKey)) {
+    console.warn(`[CompetitorUnderstandingEngine] Job already active for competitor ${competitorName} (${competitorId}). Returning latest snapshot.`);
+    const [latest] = await db.select().from(competitorUnderstandingSnapshots)
+      .where(eq(competitorUnderstandingSnapshots.competitorId, competitorId))
+      .orderBy(desc(competitorUnderstandingSnapshots.createdAt))
+      .limit(1);
+    if (latest?.competitorUnderstanding) {
+      return latest.competitorUnderstanding as CompetitorUnderstandingPayload;
+    }
   }
 
-  const evidenceIds = pages.map(p => p.competitorBusinessEvidenceId);
-  const pageSnippets = pages.map(p => `--- PAGE [${p.pageType}] (${p.sourceUrl}) (EvidenceID: ${p.competitorBusinessEvidenceId}) ---\n${p.snippet}`).join("\n\n");
+  activeUnderstandingJobs.add(lockKey);
+  try {
+    const authorityId = `comp_auth_${uuidv4().substring(0, 8)}`;
+    console.log(`[CompetitorUnderstandingEngine] Running for competitor ${competitorName} (${competitorId})`);
 
-  // 2. Proposer Prompt for Exhaustive, Granular Extraction
-  const prompt = `
+    // 1. Gather Available Evidence (Website Crawl & Verified Posts)
+    let pages: CompetitorPageEvidence[] = [];
+    let competitorWebsiteSnapshotId = options?.snapshotId || "";
+
+    if (competitorWebsiteSnapshotId) {
+      const [snap] = await db.select().from(competitorWebsiteSnapshots)
+        .where(eq(competitorWebsiteSnapshots.id, competitorWebsiteSnapshotId))
+        .limit(1);
+      if (snap?.pagesCrawled && Array.isArray(snap.pagesCrawled)) {
+        pages = snap.pagesCrawled as CompetitorPageEvidence[];
+      }
+    } else if (!options?.forceRecrawl) {
+      const [existingSnap] = await db.select().from(competitorWebsiteSnapshots)
+        .where(eq(competitorWebsiteSnapshots.competitorId, competitorId))
+        .orderBy(desc(competitorWebsiteSnapshots.createdAt))
+        .limit(1);
+
+      if (existingSnap && existingSnap.status === "COMPLETE" && Array.isArray(existingSnap.pagesCrawled) && existingSnap.pagesCrawled.length > 0) {
+        competitorWebsiteSnapshotId = existingSnap.id;
+        pages = existingSnap.pagesCrawled as CompetitorPageEvidence[];
+      }
+    }
+
+    // Deduplication check: if compatible valid understanding already exists for this snapshot OR for any snapshot with identical normalized page content, reuse it!
+    if ((competitorWebsiteSnapshotId || pages.length > 0) && !options?.forceRecrawl) {
+      if (competitorWebsiteSnapshotId) {
+        const [existingCu] = await db.select().from(competitorUnderstandingSnapshots)
+          .where(and(
+            eq(competitorUnderstandingSnapshots.competitorId, competitorId),
+            eq(competitorUnderstandingSnapshots.competitorWebsiteSnapshotId, competitorWebsiteSnapshotId),
+            eq(competitorUnderstandingSnapshots.status, "COMPLETE")
+          ))
+          .orderBy(desc(competitorUnderstandingSnapshots.createdAt))
+          .limit(1);
+
+        if (existingCu?.competitorUnderstanding) {
+          console.log(`[CompetitorUnderstandingEngine] Reusing existing valid understanding for ${competitorName} (authority ${existingCu.id}, same snapshotId)`);
+          return existingCu.competitorUnderstanding as CompetitorUnderstandingPayload;
+        }
+      }
+
+      if (pages.length > 0) {
+        const currentPageHashes = pages.map(p => `${p.sourceUrl}:${p.contentHash}`).sort().join("|");
+        const priorUnderstandingRows = await db.select().from(competitorUnderstandingSnapshots)
+          .where(and(
+            eq(competitorUnderstandingSnapshots.competitorId, competitorId),
+            eq(competitorUnderstandingSnapshots.status, "COMPLETE")
+          ))
+          .orderBy(desc(competitorUnderstandingSnapshots.createdAt))
+          .limit(5);
+
+        if (priorUnderstandingRows.length > 0) {
+          const priorWebSnaps = await db.select().from(competitorWebsiteSnapshots)
+            .where(eq(competitorWebsiteSnapshots.competitorId, competitorId))
+            .orderBy(desc(competitorWebsiteSnapshots.createdAt))
+            .limit(10);
+          const webSnapById = new Map(priorWebSnaps.map(s => [s.id, s]));
+
+          for (const cu of priorUnderstandingRows) {
+            const linkedSnap = webSnapById.get(cu.competitorWebsiteSnapshotId);
+            const linkedPages = Array.isArray(linkedSnap?.pagesCrawled) ? (linkedSnap!.pagesCrawled as CompetitorPageEvidence[]) : [];
+            const linkedPageHashes = linkedPages.map(p => `${p.sourceUrl}:${p.contentHash}`).sort().join("|");
+            if (linkedPageHashes && linkedPageHashes === currentPageHashes && cu.competitorUnderstanding) {
+              console.log(`[CompetitorUnderstandingEngine] Reusing existing valid understanding for ${competitorName} (authority ${cu.id}, identical page contentHash)`);
+              return cu.competitorUnderstanding as CompetitorUnderstandingPayload;
+            }
+          }
+        }
+      }
+    }
+
+    // If still no pages and websiteUrl is provided, run crawler
+    if (pages.length === 0 && websiteUrl && websiteUrl.trim().length > 3) {
+      try {
+        const crawlRes = await runCompetitorWebsiteCrawler(accountId, campaignId, competitorId, websiteUrl, 6);
+        competitorWebsiteSnapshotId = crawlRes.snapshotId;
+        pages = crawlRes.pagesCrawled;
+      } catch (crawlErr: any) {
+        console.warn(`[CompetitorUnderstandingEngine] Crawler warning for ${competitorName}:`, crawlErr.message);
+      }
+    }
+
+    // Also fetch verified social posts if available
+    const posts = await db.select().from(ciCompetitorPosts)
+      .where(eq(ciCompetitorPosts.competitorId, competitorId))
+      .orderBy(desc(ciCompetitorPosts.createdAt))
+      .limit(15);
+
+    // If a websiteUrl was provided for website understanding (not an app store listing) and 0 website pages were crawled,
+    // or if NO evidence exists at all, record honest incomplete state rather than fabricating website understanding from social posts alone.
+    const isAppStore = websiteUrl && (websiteUrl.includes("apps.apple.com") || websiteUrl.includes("play.google.com"));
+    if ((pages.length === 0 && websiteUrl && !isAppStore) || (pages.length === 0 && posts.length === 0)) {
+      console.warn(`[CompetitorUnderstandingEngine] Zero usable website pages (pages=${pages.length}, posts=${posts.length}) for ${competitorName}`);
+      const emptyPayload: CompetitorUnderstandingPayload = {
+        competitorUnderstandingAuthorityId: authorityId,
+        accountId,
+        campaignId,
+        competitorId,
+        competitorWebsiteSnapshotId: competitorWebsiteSnapshotId || "none",
+        parentAuthorityIds: [],
+        status: "INCOMPLETE",
+        reason: pages.length === 0 && websiteUrl ? "Zero usable website pages extracted from competitor website" : "Zero usable website pages or social posts available for analysis",
+        capabilities: [],
+        positioning: [],
+        mechanisms: [],
+        offers: [],
+        targetRoles: [],
+        proof: [],
+        notEstablishedAreas: ["Website catalog specifications", "Product pricing", "Commercial terms", "Positioning claims"],
+        analyzedAt: Date.now()
+      };
+
+      await db.insert(competitorUnderstandingSnapshots).values({
+        id: authorityId,
+        accountId,
+        campaignId,
+        competitorId,
+        competitorWebsiteSnapshotId: competitorWebsiteSnapshotId || "none",
+        status: "INCOMPLETE",
+        competitorUnderstanding: emptyPayload as any
+      });
+
+      return emptyPayload;
+    }
+
+    const evidenceIds = [
+      ...pages.map(p => p.competitorBusinessEvidenceId),
+      ...posts.map(p => `ev_post_${p.id}`)
+    ];
+
+    const pageSnippets = pages.map(p => `--- PAGE [${p.pageType}] (${p.sourceUrl}) (EvidenceID: ${p.competitorBusinessEvidenceId}) ---\n${p.snippet}`).join("\n\n");
+    const postSnippets = posts.length > 0
+      ? `\n\n--- VERIFIED SOCIAL POST EVIDENCE (${posts.length} posts reviewed) ---\n` +
+        posts.map((p, idx) => `[Post ${idx + 1}] (${p.timestamp ? new Date(p.timestamp).toISOString() : 'Recent'}) (Likes: ${p.likes ?? 0}, Comments: ${p.comments ?? 0}): "${p.caption}"`).join("\n\n")
+      : "";
+
+    const combinedEvidence = `${pageSnippets}${postSnippets}`;
+
+    // 2. Proposer Prompt for Exhaustive, Granular Extraction
+    const prompt = `
 You are the Avyron Competitor Intelligence Engine.
-Analyze the first-party website evidence for competitor "${competitorName}" (ID: ${competitorId}).
+Analyze the first-party website and verified social evidence for competitor "${competitorName}" (ID: ${competitorId}).
 Extract an exhaustive, granular, evidence-grounded competitor product profile.
 
-CRAWLED WEBSITE EVIDENCE:
-${pageSnippets}
+AVAILABLE EVIDENCE:
+${combinedEvidence}
 
 EXTRACTION INSTRUCTIONS:
-1. Capabilities: Extract EVERY distinct product feature, tool, module, and operational workflow established in the evidence.
+1. Capabilities: Extract EVERY distinct product feature, physical product line, material/fabric attribute, tool, module, and operational workflow established in the evidence.
 2. Positioning: Category framing, strategic value propositions, and core promises.
-3. Mechanisms: HOW the competitor delivers outcomes (automation, algorithms, AI models, human review, direct integrations).
-4. Offers: Subscription tiers, pricing figures, free trial terms, entry CTAs.
-5. Target Roles: Personas targeted by the competitor (USER, BUYER, DECISION_MAKER).
-6. Proof: Testimonials, case studies, customer logos, benchmarks, published metrics.
+3. Mechanisms: HOW the competitor delivers outcomes (materials, craftsmanship, engineering, algorithms, logistics, or direct service).
+4. Offers: Commercial offerings, catalog collections, pricing figures, discount structures, shipping/return policies, or subscription packages.
+5. Target Roles: Audiences and personas targeted by the competitor (USER for end consumer/wearer, BUYER for purchaser, DECISION_MAKER for household or commercial decision-maker).
+6. Proof: Customer reviews, ratings, testimonials, case studies, trust badges, benchmarks, published metrics.
 
 CRITICAL RULES:
 - High Semantic Recall: Do NOT collapse 10 distinct features into 1 broad summary. Extract each distinct capability separately.
 - Strict Grounding: Every statement must be directly grounded in the provided page snippets.
 - Epistemic Status: If a capability is NOT mentioned on the website, mark it in notEstablishedAreas.
 - Anti-Fabrication: NEVER fabricate negative capability claims like "Competitor lacks X" unless explicitly stated as an exclusion.
-- Zero Generic Placeholders: Do NOT output vague filler text.
+- Zero Generic Placeholders: Do NOT output vague filler text or assume SaaS business models for non-software companies.
 
 Return JSON matching this exact structure:
 {
   "capabilities": [
-    { "statement": "Feature or capability description", "status": "WEBSITE_ESTABLISHED", "rationale": "Evidence explanation" }
+    { "statement": "Feature, product attribute, or capability description", "status": "WEBSITE_ESTABLISHED", "rationale": "Evidence explanation" }
   ],
   "positioning": [
     { "statement": "Value proposition statement", "categoryFrame": "Category", "primaryPromise": "Promise", "status": "WEBSITE_ESTABLISHED" }
   ],
   "mechanisms": [
-    { "statement": "Underlying mechanism or workflow delivery process", "status": "WEBSITE_ESTABLISHED" }
+    { "statement": "Underlying mechanism, design, or workflow delivery process", "status": "WEBSITE_ESTABLISHED" }
   ],
   "offers": [
-    { "offerStatement": "Starter plan description", "pricing": "$49/mo", "planPackage": "Starter", "freeEntry": "14-day trial", "cta": "Start Free Trial" }
+    { "offerStatement": "Primary offering or catalog focus", "pricing": "Observed pricing or shipping threshold", "planPackage": "Package or Collection Name", "freeEntry": "Entry incentive or trial/return term", "cta": "Primary Call to Action" }
   ],
   "targetRoles": [
-    { "roleTitle": "Marketing Manager", "roleType": "USER", "status": "WEBSITE_ESTABLISHED" }
+    { "roleTitle": "Target Customer Segment or Persona", "roleType": "BUYER", "status": "WEBSITE_ESTABLISHED" }
   ],
   "proof": [
-    { "proofType": "CASE_STUDY", "statement": "Proof or testimonial statement" }
+    { "proofType": "TESTIMONIAL", "statement": "Customer review or proof statement" }
   ],
   "notEstablishedAreas": ["Area not mentioned"]
 }
@@ -248,8 +384,7 @@ Return JSON matching this exact structure:
       candidateData.capabilities = candidateData.capabilities.filter(c => 
         c.statement && c.statement.length >= 3 &&
         !c.statement.toLowerCase().includes("lacks ") && 
-        !c.statement.toLowerCase().includes("does not have ") && 
-        !c.statement.toLowerCase().includes("provides marketing platform capabilities")
+        !c.statement.toLowerCase().includes("does not have ")
       );
 
       // TWO-STAGE JUDGE VERIFICATION
@@ -396,4 +531,7 @@ Return JSON matching this exact structure:
 
   console.log(`[CompetitorUnderstandingEngine] COMPLETE for ${competitorId}. AuthorityId: ${authorityId}, Capabilities: ${validCapabilities.length}, Positioning: ${validPositioning.length}, Mechanisms: ${validMechanisms.length}`);
   return payload;
+  } finally {
+    activeUnderstandingJobs.delete(lockKey);
+  }
 }

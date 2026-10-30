@@ -160,9 +160,21 @@ function assessUpstreamReliability(results: Map<string, any> | null | undefined)
   failedEngines: string[];
   totalConsidered: number;
   statusByEngine: Record<string, string>;
+  technicalFailureEngines: Array<{
+    engineId: string;
+    category: string;
+    code: string;
+    blockReason: string;
+  }>;
 } {
   const statusByEngine: Record<string, string> = {};
   const failedEngines: string[] = [];
+  const technicalFailureEngines: Array<{
+    engineId: string;
+    category: string;
+    code: string;
+    blockReason: string;
+  }> = [];
   let completed = 0;
   for (const engineId of RELIABILITY_CRITICAL_ENGINES) {
     const entry = results?.get(engineId);
@@ -180,13 +192,39 @@ function assessUpstreamReliability(results: Map<string, any> | null | undefined)
     statusByEngine[engineId] = engineStatusLabel;
     if (RELIABILITY_FAILED_STATUSES.has(engineStatusLabel) || engineStatusLabel === "MISSING") {
       failedEngines.push(engineId);
+      const failureAttr = entry?.output?.failureAttribution;
+      const reasonText = String(entry?.blockReason || entry?.error || entry?.output?.statusMessage || "");
+      if (
+        failureAttr &&
+        (failureAttr.category === "JUDGE_CONTRACT_FAILURE" ||
+          failureAttr.category === "TECHNICAL_EXECUTION_FAILURE")
+      ) {
+        technicalFailureEngines.push({
+          engineId,
+          category: String(failureAttr.category),
+          code: String(failureAttr.code || "TECHNICAL_FAILURE"),
+          blockReason: reasonText || String(failureAttr.summary || failureAttr.code),
+        });
+      } else if (
+        !failureAttr &&
+        /JUDGE_EVALUATION_DUPLICATES|JUDGE_RESPONSE_CONTRACT_FAILURE|CLAIM_IDENTITY_CONFLICT|CONTRACT_FAILURE|TECHNICAL_FAILURE|SCHEMA_VALIDATION_FAILED|JSON_PARSE_FAILED/i.test(reasonText)
+      ) {
+        technicalFailureEngines.push({
+          engineId,
+          category: /JUDGE_|CLAIM_IDENTITY_CONFLICT|CONTRACT_FAILURE/i.test(reasonText)
+            ? "JUDGE_CONTRACT_FAILURE"
+            : "TECHNICAL_EXECUTION_FAILURE",
+          code: reasonText.slice(0, 120),
+          blockReason: reasonText,
+        });
+      }
     } else if (engineStatusLabel === "SUCCESS" || engineStatusLabel === "PARTIAL") {
       completed++;
     }
   }
   const total = RELIABILITY_CRITICAL_ENGINES.length;
   const score = total === 0 ? 1 : completed / total;
-  return { score, failedEngines, totalConsidered: total, statusByEngine };
+  return { score, failedEngines, totalConsidered: total, statusByEngine, technicalFailureEngines };
 }
 
 function extractSignals(results: Map<string, any> | null | undefined): ExtractedSignals {
@@ -462,6 +500,7 @@ const VALID_DISEASES: CommercialDisease[] = [
   "execution_readiness_gap",
   "category_position_collapse",
   "system_data_insufficiency",
+  "technical_pipeline_interruption",
   "unknown_disease",
 ];
 
@@ -546,7 +585,8 @@ export async function enrichRecoveryPlan(
   // or BLOCKED, the underlying cause is operational (the pipeline broke),
   // not commercial — and any LLM-synthesized commercial diagnosis would
   // amount to fabricating a story from absent data. Force-emit
-  // system_data_insufficiency with concrete unreached-engine evidence.
+  // technical_pipeline_interruption (when a technical/Judge-contract failure
+  // occurred) or system_data_insufficiency with concrete unreached-engine evidence.
   const reliability = assessUpstreamReliability(ctx.results);
   console.log(
     `[RecoveryIntelligence] STEP_1 | designing | issues=${plan.issues.length} ` +
@@ -556,25 +596,47 @@ export async function enrichRecoveryPlan(
   );
 
   if (reliability.score < 0.40 && reliability.failedEngines.length > 0) {
-    console.log(`[RecoveryIntelligence] RELIABILITY_FAST_PATH | score=${reliability.score.toFixed(2)} → emitting system_data_insufficiency`);
+    const hasTechFailure = reliability.technicalFailureEngines.length > 0;
+    const primaryTech = reliability.technicalFailureEngines[0];
+    const emittedDisease: CommercialDisease = hasTechFailure
+      ? "technical_pipeline_interruption"
+      : "system_data_insufficiency";
+    console.log(`[RecoveryIntelligence] RELIABILITY_FAST_PATH | score=${reliability.score.toFixed(2)} → emitting ${emittedDisease}`);
     const intel: RecoveryIntelligence = {
-      commercialDisease: "system_data_insufficiency",
-      diseaseStatement:
-        `Recovery diagnosis suppressed: ${reliability.failedEngines.length} upstream engine(s) did not complete ` +
-        `(${reliability.failedEngines.slice(0, 5).join(", ")}${reliability.failedEngines.length > 5 ? ", …" : ""}). ` +
-        `Any commercial diagnosis would be unsupported by signal — the underlying defect is operational, not strategic.`,
+      commercialDisease: emittedDisease,
+      diseaseStatement: hasTechFailure
+        ? `Pipeline execution halted due to a technical/Judge-contract failure in ${primaryTech.engineId} (${primaryTech.category}: ${primaryTech.code}); downstream engines were skipped because of this technical error, not insufficient market or audience data.`
+        : `Recovery diagnosis suppressed: ${reliability.failedEngines.length} upstream engine(s) did not complete ` +
+          `(${reliability.failedEngines.slice(0, 5).join(", ")}${reliability.failedEngines.length > 5 ? ", …" : ""}). ` +
+          `Any commercial diagnosis would be unsupported by signal — the underlying defect is operational, not strategic.`,
       causalDiagnosis: [{
-        cause: `Upstream pipeline reliability=${reliability.score.toFixed(2)} (below 0.40 floor); ${reliability.failedEngines.length} of ${reliability.totalConsidered} critical engines unreached`,
+        cause: hasTechFailure
+          ? `Technical/Judge-contract failure in ${primaryTech.engineId} (${primaryTech.category}: ${primaryTech.code})`
+          : `Upstream pipeline reliability=${reliability.score.toFixed(2)} (below 0.40 floor); ${reliability.failedEngines.length} of ${reliability.totalConsidered} critical engines unreached`,
         symptom: plan.issues.map(i => i.blockCode).join(", ") || "BLOCK reported on degraded pipeline",
-        downstreamEffect: "LLM-synthesized commercial diagnosis would compose a plausible-sounding root cause from missing data, masking the true defect (engine timeouts / errors / blocks)",
-        repair: `Resolve operational failures in [${reliability.failedEngines.slice(0, 6).join(", ")}] FIRST — re-run those engines, then re-attempt recovery diagnosis`,
-        evidenceCitations: reliability.failedEngines.slice(0, 6).map(e => `${e}.status=${reliability.statusByEngine[e]}`),
+        downstreamEffect: hasTechFailure
+          ? `Downstream engines (${reliability.failedEngines.filter(e => e !== primaryTech.engineId).slice(0, 5).join(", ") || "none"}) were skipped because ${primaryTech.engineId} halted on a technical/contract error rather than a market-signal deficiency`
+          : "LLM-synthesized commercial diagnosis would compose a plausible-sounding root cause from missing data, masking the true defect (engine timeouts / errors / blocks)",
+        repair: hasTechFailure
+          ? `Resolve the ${primaryTech.category} (${primaryTech.code}) in ${primaryTech.engineId} and re-run the pipeline`
+          : `Resolve operational failures in [${reliability.failedEngines.slice(0, 6).join(", ")}] FIRST — re-run those engines, then re-attempt recovery diagnosis`,
+        evidenceCitations: hasTechFailure
+          ? [
+              `${primaryTech.engineId}.failureCategory=${primaryTech.category}`,
+              `${primaryTech.engineId}.failureCode=${primaryTech.code}`,
+              ...reliability.failedEngines.slice(0, 5).map(e => `${e}.status=${reliability.statusByEngine[e]}`),
+            ]
+          : reliability.failedEngines.slice(0, 6).map(e => `${e}.status=${reliability.statusByEngine[e]}`),
       }],
       strategicRecoveryThesis:
         "The principal must trust nothing about the commercial story until the pipeline produces it. This is a reliability event, not a strategy event.",
       priorityLogic: "Cannot prioritize commercial repairs ahead of operational ones. Restore engine completion first; commercial diagnosis becomes possible second.",
-      highestLeverageFix: `Fix the operational failures in [${reliability.failedEngines.slice(0, 4).join(", ")}] before any commercial repair attempt.`,
-      buyerPsychologyConstraint: "INSUFFICIENT_AUDIENCE_DATA — buyer constraint cannot be inferred when the engines that produce buyer signal did not complete.",
+      highestLeverageFix: hasTechFailure
+        ? `Repair the technical/Judge-contract failure (${primaryTech.code}) in ${primaryTech.engineId} and re-run the pipeline.`
+        : `Fix the operational failures in [${reliability.failedEngines.slice(0, 4).join(", ")}] before any commercial repair attempt.`,
+      buyerPsychologyConstraint: hasTechFailure
+        ? `TECHNICAL_PIPELINE_INTERRUPTION — buyer constraint was not evaluated because ${primaryTech.engineId} halted due to a technical or judge-contract failure (${primaryTech.code}), not insufficient audience data.`
+        : "INSUFFICIENT_AUDIENCE_DATA — buyer constraint cannot be inferred when the engines that produce buyer signal did not complete.",
       nextModeRationale: "SYSTEM_UNTRUSTED / HUMAN_REVIEW_REQUIRED is the only defensible mode: the system cannot certify any commercial recommendation it derives from a partially-failed pipeline.",
       judgeVerdict: "NOT_RUN",
       retryCount: 0,
@@ -590,23 +652,35 @@ export async function enrichRecoveryPlan(
   // system_data_insufficiency intelligence record — this is itself a useful
   // strategic signal ("we don't have enough data to recommend anything").
   if (signals.enginesPresent.length === 0) {
-    console.log(`[RecoveryIntelligence] FAST_PATH | engines_present=0 → emitting system_data_insufficiency`);
+    const hasTechFailure = reliability.technicalFailureEngines.length > 0;
+    const primaryTech = reliability.technicalFailureEngines[0];
+    const emittedDisease: CommercialDisease = hasTechFailure
+      ? "technical_pipeline_interruption"
+      : "system_data_insufficiency";
+    console.log(`[RecoveryIntelligence] FAST_PATH | engines_present=0 → emitting ${emittedDisease}`);
     const intel: RecoveryIntelligence = {
-      commercialDisease: "system_data_insufficiency",
-      diseaseStatement:
-        "Upstream engine signals are absent — the system cannot ground a commercial diagnosis or recommend a leveraged repair without at least one of audience, MI, offer, or validation outputs.",
+      commercialDisease: emittedDisease,
+      diseaseStatement: hasTechFailure
+        ? `Pipeline execution halted due to a technical/Judge-contract failure in ${primaryTech.engineId} (${primaryTech.category}: ${primaryTech.code}); no downstream strategy outputs were produced because of this technical error, not insufficient market data.`
+        : "Upstream engine signals are absent — the system cannot ground a commercial diagnosis or recommend a leveraged repair without at least one of audience, MI, offer, or validation outputs.",
       causalDiagnosis: [{
-        cause: "Zero upstream engine snapshots reached the recovery layer",
+        cause: hasTechFailure
+          ? `Technical/Judge-contract failure in ${primaryTech.engineId} (${primaryTech.category}: ${primaryTech.code})`
+          : "Zero upstream engine snapshots reached the recovery layer",
         symptom: plan.issues.map(i => i.blockCode).join(", ") || "BLOCK without engine context",
         downstreamEffect: "Any prescriptive recovery move would be a guess; risk of wasted execution cycles and false confidence",
         repair: "Run the upstream engines (start with Audience + MI) before re-attempting recovery diagnosis",
-        evidenceCitations: ["upstream.engines_present=0"],
+        evidenceCitations: hasTechFailure
+          ? [`${primaryTech.engineId}.failureCategory=${primaryTech.category}`, `${primaryTech.engineId}.failureCode=${primaryTech.code}`]
+          : ["upstream.engines_present=0"],
       }],
       strategicRecoveryThesis:
         "The principal cannot trust any specific repair recommendation here — the upstream layer is silent. Restore signal first, then re-diagnose.",
       priorityLogic: "Cannot prioritize without signal. Run Audience + MI first to surface the dominant constraint.",
       highestLeverageFix: "Re-run the orchestrator from the Audience engine — restore upstream signal before diagnosing recovery.",
-      buyerPsychologyConstraint: "INSUFFICIENT_AUDIENCE_DATA — cannot diagnose buyer constraint without audience snapshot.",
+      buyerPsychologyConstraint: hasTechFailure
+        ? `TECHNICAL_PIPELINE_INTERRUPTION — buyer constraint could not be evaluated because ${primaryTech.engineId} halted on a technical or judge-contract failure (${primaryTech.code}), not insufficient audience data.`
+        : "INSUFFICIENT_AUDIENCE_DATA — cannot diagnose buyer constraint without audience snapshot.",
       nextModeRationale: "HUMAN_REVIEW_REQUIRED is appropriate: with no upstream data the system has no defensible reason to permit any execution mode automatically.",
       judgeVerdict: "NOT_RUN",
       retryCount: 0,

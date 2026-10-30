@@ -25,20 +25,21 @@
 //     produce creative).
 export const ENGINE_PRIORITY_ORDER = [
   { id: "market_intelligence", name: "Market Intelligence", priority: 1, tier: "MARKET_REALITY", dependencies: [] as readonly string[] },
-  { id: "audience", name: "Audience Engine", priority: 2, tier: "MARKET_REALITY", dependencies: ["market_intelligence"] as readonly string[] },
-  { id: "differentiation", name: "Differentiation Engine", priority: 3, tier: "POSITIONING", dependencies: ["market_intelligence", "audience"] as readonly string[] },
-  { id: "positioning", name: "Positioning Engine", priority: 4, tier: "POSITIONING", dependencies: ["market_intelligence", "audience", "differentiation"] as readonly string[] },
-  { id: "mechanism", name: "Mechanism Engine", priority: 5, tier: "OFFER", dependencies: ["audience", "positioning", "differentiation"] as readonly string[] },
-  { id: "offer", name: "Offer Engine", priority: 6, tier: "OFFER", dependencies: ["audience", "positioning", "mechanism"] as readonly string[] },
-  { id: "awareness", name: "Awareness Engine", priority: 7, tier: "MESSAGING", dependencies: ["audience", "positioning", "offer"] as readonly string[] },
-  { id: "funnel", name: "Funnel Engine", priority: 8, tier: "MESSAGING", dependencies: ["audience", "offer", "awareness"] as readonly string[] },
-  { id: "persuasion", name: "Persuasion Engine", priority: 9, tier: "MESSAGING", dependencies: ["audience", "offer", "awareness", "funnel"] as readonly string[] },
-  { id: "integrity", name: "Integrity Engine", priority: 10, tier: "VALIDATION", dependencies: ["positioning", "offer", "awareness", "funnel", "persuasion"] as readonly string[] },
-  { id: "statistical_validation", name: "Statistical Validation", priority: 11, tier: "VALIDATION", dependencies: ["market_intelligence", "audience", "integrity"] as readonly string[] },
-  { id: "budget_governor", name: "Budget Governor", priority: 12, tier: "FINANCIAL", dependencies: ["statistical_validation", "integrity"] as readonly string[] },
-  { id: "channel_selection", name: "Channel Selection", priority: 13, tier: "ALLOCATION", dependencies: ["audience", "funnel", "budget_governor"] as readonly string[] },
-  { id: "iteration", name: "Iteration Engine", priority: 14, tier: "OPTIMIZATION", dependencies: ["funnel", "persuasion", "budget_governor", "channel_selection"] as readonly string[] },
-  { id: "retention", name: "Retention Engine", priority: 15, tier: "OPTIMIZATION", dependencies: ["audience", "offer", "funnel"] as readonly string[] },
+  { id: "market_voice", name: "Market Voice", priority: 2, tier: "MARKET_REALITY", dependencies: ["market_intelligence"] as readonly string[] },
+  { id: "audience", name: "Audience Engine", priority: 3, tier: "MARKET_REALITY", dependencies: ["market_intelligence", "market_voice"] as readonly string[] },
+  { id: "differentiation", name: "Differentiation Engine", priority: 4, tier: "POSITIONING", dependencies: ["market_intelligence", "audience"] as readonly string[] },
+  { id: "positioning", name: "Positioning Engine", priority: 5, tier: "POSITIONING", dependencies: ["market_intelligence", "audience", "differentiation"] as readonly string[] },
+  { id: "mechanism", name: "Mechanism Engine", priority: 6, tier: "OFFER", dependencies: ["audience", "positioning", "differentiation"] as readonly string[] },
+  { id: "offer", name: "Offer Engine", priority: 7, tier: "OFFER", dependencies: ["audience", "positioning", "mechanism"] as readonly string[] },
+  { id: "awareness", name: "Awareness Engine", priority: 8, tier: "MESSAGING", dependencies: ["audience", "positioning", "offer"] as readonly string[] },
+  { id: "funnel", name: "Funnel Engine", priority: 9, tier: "MESSAGING", dependencies: ["audience", "offer", "awareness"] as readonly string[] },
+  { id: "persuasion", name: "Persuasion Engine", priority: 10, tier: "MESSAGING", dependencies: ["audience", "offer", "awareness", "funnel"] as readonly string[] },
+  { id: "integrity", name: "Integrity Engine", priority: 11, tier: "VALIDATION", dependencies: ["positioning", "offer", "awareness", "funnel", "persuasion"] as readonly string[] },
+  { id: "statistical_validation", name: "Statistical Validation", priority: 12, tier: "VALIDATION", dependencies: ["market_intelligence", "audience", "integrity"] as readonly string[] },
+  { id: "channel_selection", name: "Channel Selection", priority: 13, tier: "ALLOCATION", dependencies: ["audience", "funnel"] as readonly string[] },
+  { id: "budget_governor", name: "Budget Governor", priority: 14, tier: "ALLOCATION", dependencies: ["channel_selection"] as readonly string[] },
+  { id: "iteration", name: "Iteration Engine", priority: 15, tier: "OPTIMIZATION", dependencies: ["funnel", "persuasion", "budget_governor", "channel_selection"] as readonly string[] },
+  { id: "retention", name: "Retention Engine", priority: 16, tier: "OPTIMIZATION", dependencies: ["audience", "offer", "funnel"] as readonly string[] },
 ] as const;
 
 export type EngineId = typeof ENGINE_PRIORITY_ORDER[number]["id"];
@@ -73,7 +74,7 @@ const TIER_RANK: Record<PriorityTier, number> = {
 // (lower-tier engines never run after a higher-tier engine). A failure
 // here is a build-time defect and aborts process boot rather than
 // silently re-ordering the pipeline.
-function assertTierRankConsistency(): void {
+export function assertTierRankConsistency(): void {
   let lastTierRank = 0;
   for (const eng of ENGINE_PRIORITY_ORDER) {
     const tier = eng.tier as PriorityTier;
@@ -134,7 +135,7 @@ export interface NeedsInputPayload {
 
 export interface EngineStepResult {
   engineId: EngineId;
-  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "SKIPPED" | "SKIPPED_AWAITING_LIVE_DATA" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY" | "TIMEOUT" | "CONTRACT_INCOMPLETE";
+  status: "SUCCESS" | "PARTIAL" | "BLOCKED" | "FAILED" | "SKIPPED" | "SKIPPED_AWAITING_LIVE_DATA" | "ERROR" | "DEPTH_BLOCKED" | "SIGNAL_BLOCKED" | "NEEDS_INPUT" | "BLOCKED_BY_INTEGRITY" | "TIMEOUT" | "CONTRACT_INCOMPLETE";
   output: any;
   snapshotId?: string;
   durationMs: number;
@@ -159,6 +160,7 @@ export interface EngineStepResult {
 export function shouldBlockDownstream(result: EngineStepResult): boolean {
   return (
     result.status === "BLOCKED" ||
+    result.status === "FAILED" ||
     result.status === "ERROR" ||
     result.status === "TIMEOUT" ||
     result.status === "SIGNAL_BLOCKED" ||
@@ -198,6 +200,7 @@ export function getEngineTier(engineId: EngineId): PriorityTier {
  */
 export const ENGINE_CONTEXT_KEY: Record<string, string> = {
   market_intelligence: "mi",
+  market_voice: "marketVoice",
   audience: "audience",
   positioning: "positioning",
   differentiation: "differentiation",

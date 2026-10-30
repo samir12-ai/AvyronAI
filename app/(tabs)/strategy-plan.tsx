@@ -78,12 +78,26 @@ export default function StrategyPlanScreen() {
     hasStrategy: boolean;
     status: string;
     canonicalVersion: number | null;
+    planVersion?: number | null;
+    bundleVersion?: number | null;
+    jobId?: string | null;
+    strategyRootId?: string | null;
+    rootBundleId?: string | null;
+    strategicPlanId?: string | null;
+    designatedActivePlanId?: string | null;
+    candidateDraftPlanId?: string | null;
+    selectedSnapshotIds?: Record<string, string> | null;
+    positioningEpistemicStatus?: string | null;
+    positioningEpistemicLabel?: string | null;
+    positioningComparisonStatus?: string | null;
     primaryAxis: string | null;
+    contrastAxis?: string | null;
     changedAuthorities: string[];
     preservedAuthorities: string[];
     pendingProposalCount: number;
     pendingProposals: StrategicProposalData[];
     lastUpdated: string | null;
+    continuationPlan?: any | null;
   } | null>(null);
 
   // Modals & Live Orchestration State
@@ -96,6 +110,9 @@ export default function StrategyPlanScreen() {
   const [isRunCompleted, setIsRunCompleted] = useState(false);
   const [isRunFailed, setIsRunFailed] = useState(false);
   const [completionData, setCompletionData] = useState<any>(null);
+  const [continuationPlan, setContinuationPlan] = useState<any>(null);
+  const [isContinuing, setIsContinuing] = useState(false);
+  const continuingRef = useRef(false);
 
   // Proposal Review State
   const [proposalModalVisible, setProposalModalVisible] = useState(false);
@@ -114,7 +131,10 @@ export default function StrategyPlanScreen() {
   const [historyItems, setHistoryItems] = useState<StrategyVersionItem[]>([]);
 
   // Fetch Audience & Positioning intelligence data for downstream section context
-  const { data: intelligenceData } = useAudiencePositioning(campaignId);
+  const { data: intelligenceData } = useAudiencePositioning(campaignId, {
+    planId: planData?.id,
+    runId: planData?.jobId,
+  });
 
   const textSecondary = isDark ? '#8892A4' : '#546478';
 
@@ -142,9 +162,14 @@ export default function StrategyPlanScreen() {
       // 1. Fetch active strategy meta & proposals
       const metaUrl = getApiUrl(`/api/strategy/active/${encodeURIComponent(campaignId)}`);
       const metaRes = await authFetch(metaUrl);
+      let latestJobFromMeta: any = null;
       if (metaRes.ok) {
         const metaData = await safeApiJson(metaRes);
         setStrategyMeta(metaData);
+        if (metaData?.continuationPlan !== undefined) {
+          setContinuationPlan(metaData.continuationPlan);
+        }
+        latestJobFromMeta = metaData?.latestJob || null;
       }
 
       // 2. Fetch active plan details
@@ -158,6 +183,37 @@ export default function StrategyPlanScreen() {
       } else {
         setPlanData(null);
       }
+
+      // 2b. Restore the live run modal after a refresh (running, or stopped with no plan yet)
+      if (latestJobFromMeta?.id) {
+        const jobStatus = latestJobFromMeta.status;
+        const hasPlanNow = Boolean(activeRes.ok && activeData.hasPlan);
+        if (jobStatus === 'RUNNING') {
+          setActiveJobId(latestJobFromMeta.id);
+          setIsRunCompleted(false);
+          setIsRunFailed(false);
+          setRunModalVisible(true);
+        } else if (!hasPlanNow && (jobStatus === 'BLOCKED' || jobStatus === 'FAILED')) {
+          setActiveJobId(latestJobFromMeta.id);
+          setRunModalVisible(true);
+        }
+      }
+
+      // 3. Check if a demo generation run is currently active
+      try {
+        const demoRes = await authFetch(getApiUrl('/api/demo/status'));
+        if (demoRes.ok) {
+          const demoData = await safeApiJson(demoRes);
+          if (demoData?.demoMode && demoData?.latestJob?.status === 'RUNNING' && demoData?.latestJob?.id) {
+            setActiveJobId(demoData.latestJob.id);
+            setIsRunCompleted(false);
+            setIsRunFailed(false);
+            setRunModalVisible(true);
+          }
+        }
+      } catch {
+        // Ignore non-demo or transient check errors
+      }
     } catch (err: any) {
       console.error('[StrategyPlan] Fetch error:', err.message);
     } finally {
@@ -169,6 +225,56 @@ export default function StrategyPlanScreen() {
     setLoading(true);
     fetchPlanAndMeta();
   }, [fetchPlanAndMeta]);
+
+  // Listen to Demo Control Panel scenario switches
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.addEventListener) return;
+    const handleDemoStateChanged = (evt: any) => {
+      const detail = evt?.detail;
+      if (detail?.state === 'GENERATION' && detail?.jobId) {
+        setActiveJobId(detail.jobId);
+        setIsRunCompleted(false);
+        setIsRunFailed(false);
+        setProgressPercent(0);
+        setCompletedCount(0);
+        setRunModalVisible(true);
+      }
+      fetchPlanAndMeta();
+    };
+    window.addEventListener('avyron-demo-state-changed', handleDemoStateChanged);
+    return () => window.removeEventListener('avyron-demo-state-changed', handleDemoStateChanged);
+  }, [fetchPlanAndMeta]);
+
+  const [approvingPlan, setApprovingPlan] = useState(false);
+
+  const handleApproveDraftPlan = async () => {
+    if (approvingPlan) return;
+    setApprovingPlan(true);
+    try {
+      const demoApproveUrl = getApiUrl('/api/demo/approve-plan');
+      let res = await authFetch(demoApproveUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!res.ok && planData?.id) {
+        const planApproveUrl = getApiUrl(`/api/plans/${encodeURIComponent(planData.id)}/approve`);
+        res = await authFetch(planApproveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      await fetchPlanAndMeta();
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('avyron-demo-state-changed', { detail: { approvedPlan: true } }));
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to approve strategy plan.');
+    } finally {
+      setApprovingPlan(false);
+    }
+  };
 
   // Polling loop for active orchestration run
   useEffect(() => {
@@ -186,19 +292,30 @@ export default function StrategyPlanScreen() {
         setCurrentStageName(data.currentStage);
         setProgressPercent(data.progressPercent || 0);
         setCompletedCount(data.completedCount || 0);
+        if (data.continuationPlan !== undefined) {
+          setContinuationPlan(data.continuationPlan);
+        }
 
         if (data.status === 'COMPLETED') {
           setIsRunCompleted(true);
           setIsRunFailed(false);
+          setContinuationPlan(null);
+          await fetchPlanAndMeta();
           setCompletionData({
-            version: strategyMeta?.canonicalVersion ? strategyMeta.canonicalVersion + 1 : 1,
+            version: strategyMeta?.canonicalVersion ? strategyMeta.canonicalVersion : 1,
             generatedAt: new Date().toLocaleTimeString(),
-            primaryDirection: planData?.sections?.brandSpine?.contrastAxis || 'Verified Signal Integrity',
-            primaryChannel: 'Multi-Channel',
-            lanesCount: planData?.sections?.approvedLanes?.length || 3,
+            primaryDirection:
+              planData?.sections?.brandSpine?.contrastAxis ||
+              'Verified Strategic Direction',
+            primaryChannel:
+              planData?.sections?.contentDistribution?.channels?.[0]?.channel ||
+              'Multi-Channel Distribution',
+            lanesCount: planData?.sections?.approvedLanes?.length || 1,
           });
           clearInterval(intervalId);
-          fetchPlanAndMeta();
+          if (typeof window !== 'undefined' && window.dispatchEvent) {
+            window.dispatchEvent(new CustomEvent('avyron-demo-state-changed', { detail: { runCompleted: true } }));
+          }
         } else if (data.status === 'FAILED' || data.status === 'BLOCKED') {
           setIsRunFailed(true);
           setIsRunCompleted(false);
@@ -210,32 +327,107 @@ export default function StrategyPlanScreen() {
     };
 
     pollStatus();
-    intervalId = setInterval(pollStatus, 2000);
+    intervalId = setInterval(pollStatus, 800);
 
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
   }, [activeJobId, runModalVisible, fetchPlanAndMeta, strategyMeta?.canonicalVersion, planData]);
 
-  // Trigger Generate Strategy
-  const handleGenerateStrategy = async () => {
-    if (!campaignId) return;
+  // Trigger Continue Pipeline (validated continuation from first unfinished stage)
+  const handleContinuePipeline = async (fromStage?: string) => {
+    if (!campaignId || continuingRef.current) return;
+    continuingRef.current = true;
+    setIsContinuing(true);
 
+    try {
+      const url = getApiUrl(`/api/strategy/continue/${encodeURIComponent(campaignId)}`);
+      const res = await authFetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(fromStage ? { fromStage } : {}),
+        }),
+      });
+
+      const data = await safeApiJson(res);
+      if (data?.continuationPlan) {
+        setContinuationPlan(data.continuationPlan);
+      }
+
+      if (res.status === 409 && data?.status === 'CANNOT_CONTINUE') {
+        Alert.alert(
+          'Cannot Continue Pipeline',
+          data.explanation || data.message || 'Please start a fresh strategy run.'
+        );
+        return;
+      }
+
+      if (data?.jobId) {
+        setActiveJobId(data.jobId);
+        setIsRunCompleted(false);
+        setIsRunFailed(false);
+        setRunModalVisible(true);
+        if (typeof window !== 'undefined' && window.dispatchEvent) {
+          window.dispatchEvent(
+            new CustomEvent('avyron-demo-state-changed', {
+              detail: { state: 'GENERATION', jobId: data.jobId },
+            })
+          );
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to continue strategy pipeline.');
+    } finally {
+      continuingRef.current = false;
+      setIsContinuing(false);
+    }
+  };
+
+  // Trigger Generate Strategy
+  const handleGenerateStrategy = async (rawOptions?: {
+    forceRefresh?: boolean;
+    recoveryMode?: 'REUSE_EVIDENCE_RECOMPUTE_ANALYSIS' | 'FULL_REFRESH';
+    fromStage?: string;
+  } | any) => {
+    if (!campaignId || continuingRef.current) return;
+
+    const options =
+      rawOptions && typeof rawOptions === 'object' && !('nativeEvent' in rawOptions)
+        ? rawOptions
+        : undefined;
+    const recoveryMode =
+      options?.recoveryMode ||
+      (options?.forceRefresh === false ? 'REUSE_EVIDENCE_RECOMPUTE_ANALYSIS' : 'FULL_REFRESH');
+    const forceRefresh = recoveryMode === 'FULL_REFRESH' && options?.forceRefresh !== false;
+
+    if (!forceRefresh && recoveryMode === 'REUSE_EVIDENCE_RECOMPUTE_ANALYSIS') {
+      return handleContinuePipeline(options?.fromStage);
+    }
+
+    continuingRef.current = true;
+    setIsContinuing(true);
     try {
       const url = getApiUrl(`/api/strategy/generate/${encodeURIComponent(campaignId)}`);
       const res = await authFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ forceRefresh: true }),
+        body: JSON.stringify({
+          forceRefresh,
+          recoveryMode,
+          ...(options?.fromStage ? { fromStage: options.fromStage } : {}),
+        }),
       });
 
       const data = await safeApiJson(res);
 
       if (res.status === 409 || data.status === 'ALREADY_RUNNING') {
-        setActiveJobId(data.jobId);
-        setIsRunCompleted(false);
-        setIsRunFailed(false);
-        setRunModalVisible(true);
+        if (data.jobId) {
+          setActiveJobId(data.jobId);
+          setIsRunCompleted(false);
+          setIsRunFailed(false);
+          setRunModalVisible(true);
+        }
         return;
       }
 
@@ -246,9 +438,15 @@ export default function StrategyPlanScreen() {
         setProgressPercent(0);
         setCompletedCount(0);
         setRunModalVisible(true);
+        if (typeof window !== 'undefined' && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent('avyron-demo-state-changed', { detail: { state: 'GENERATION', jobId: data.jobId } }));
+        }
       }
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to start strategy generation.');
+    } finally {
+      continuingRef.current = false;
+      setIsContinuing(false);
     }
   };
 
@@ -288,6 +486,9 @@ export default function StrategyPlanScreen() {
       });
 
       fetchPlanAndMeta();
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('avyron-demo-state-changed', { detail: { approvedProposalId: proposalId } }));
+      }
     } catch (err: any) {
       Alert.alert('Error', err.message || 'Failed to apply strategic update.');
       setTargetedModalVisible(false);
@@ -361,7 +562,7 @@ export default function StrategyPlanScreen() {
     if (
       tabConfig?.authorityKey &&
       strategyMeta?.changedAuthorities?.includes(tabConfig.authorityKey) &&
-      activeCampaignId &&
+      campaignId &&
       strategyMeta?.strategyRootId
     ) {
       const authKey = tabConfig.authorityKey;
@@ -374,7 +575,7 @@ export default function StrategyPlanScreen() {
       });
 
       try {
-        const url = getApiUrl(`/api/strategy/acknowledge-change/${encodeURIComponent(activeCampaignId)}`);
+        const url = getApiUrl(`/api/strategy/acknowledge-change/${encodeURIComponent(campaignId)}`);
         await authFetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -408,6 +609,100 @@ export default function StrategyPlanScreen() {
   const businessRep = sections.businessRepresentation;
   const stratSummary = sections.strategicSummary;
 
+  const resolvedPlanRev =
+    planData?.activePlanVersion ?? planData?.version ?? strategyMeta?.activePlanVersion ?? strategyMeta?.planVersion ?? 1;
+  const resolvedBundleVer =
+    planData?.rootBundleVersion ?? strategyMeta?.rootBundleVersion ?? strategyMeta?.bundleVersion ?? strategyMeta?.canonicalVersion ?? 1;
+  const resolvedTotalRevisions =
+    planData?.totalPlanRevisions ?? strategyMeta?.totalPlanRevisions ?? null;
+  const resolvedRunId =
+    planData?.jobId ?? sections?._provenance?.jobId ?? strategyMeta?.jobId ?? strategyMeta?.latestJob?.id ?? null;
+  const resolvedStrategyRootId =
+    planData?.strategyRootId ??
+    strategyMeta?.strategyRootId ??
+    sections?.governance?.strategyRoot?.rootId ??
+    sections?._provenance?.strategyRootId ??
+    null;
+
+  const resolvedPlanLifecycle =
+    planData?.status === 'APPROVED' &&
+    (planData?.isDesignatedActive || planData?.executionStatus === 'ACTIVE' || strategyMeta?.status === 'LIVE')
+      ? 'Approved · Active'
+      : planData?.status === 'APPROVED'
+      ? 'Approved'
+      : planData?.status === 'SUPERSEDED'
+      ? 'Superseded'
+      : 'Draft';
+
+  const resolvedEpistemicStatus =
+    businessRep?.strategicSummary?.epistemicStatus ||
+    stratSummary?.epistemicStatus ||
+    sections?.positioning?.epistemicStatus ||
+    strategyMeta?.positioningEpistemicStatus ||
+    intelligenceData?.positioning?.epistemicStatus ||
+    'STRATEGIC_HYPOTHESIS';
+
+  const resolvedEpistemicLabel =
+    businessRep?.strategicSummary?.epistemicLabel ||
+    stratSummary?.epistemicLabel ||
+    sections?.positioning?.epistemicLabel ||
+    strategyMeta?.positioningEpistemicLabel ||
+    intelligenceData?.positioning?.epistemicLabel ||
+    'Proposed Strategic Hypothesis — Requires Market Validation';
+
+  const resolvedComparisonStatus =
+    businessRep?.strategicSummary?.comparisonStatus ||
+    stratSummary?.comparisonStatus ||
+    sections?.positioning?.comparisonStatus ||
+    strategyMeta?.positioningComparisonStatus ||
+    intelligenceData?.positioning?.semanticCollision?.comparisonStatus ||
+    'COMPETITIVE_COMPARISON_UNAVAILABLE';
+
+  const isHypothesis =
+    String(resolvedEpistemicStatus).toUpperCase().includes('HYPOTHESIS') ||
+    String(resolvedEpistemicStatus).toUpperCase().includes('PROPOSED');
+  const isComparisonUnavailable =
+    String(resolvedComparisonStatus).toUpperCase().includes('UNAVAILABLE') ||
+    String(resolvedComparisonStatus).toUpperCase().includes('NO_COMPETITOR');
+  const hasProductFacts = (sections?.consistencyValidation?.inputCoverage?.verifiedFactCount ?? 1) > 0;
+  const hasCompetitorSignals =
+    (Array.isArray(sections?.approvedLanes) &&
+      sections.approvedLanes.some((l: any) => JSON.stringify(l).includes('COMPETITOR_SPECIFIC'))) ||
+    Boolean(intelligenceData?.coreBuyingPain?.evidenceCount);
+
+  const canonicalPositioningTerritory =
+    sections?.positioning?.territory ||
+    sections?.brandSpine?.umbrellaPositionName ||
+    strategyMeta?.primaryAxis ||
+    intelligenceData?.positioning?.umbrellaPosition ||
+    '';
+  const canonicalContrastAxis =
+    sections?.positioning?.contrastAxis ||
+    sections?.brandSpine?.contrastAxis ||
+    strategyMeta?.contrastAxis ||
+    intelligenceData?.positioning?.contrastAxis ||
+    '';
+  const canonicalStatement =
+    sections?.positioning?.narrativeDirection || stratSummary?.strategy || '';
+  const isDistinctRationale = (candidate: string | undefined | null): boolean => {
+    if (!candidate || typeof candidate !== 'string') return false;
+    const trimmed = candidate.trim();
+    if (!trimmed) return false;
+    if (trimmed === canonicalStatement.trim()) return false;
+    if (trimmed === canonicalContrastAxis.trim()) return false;
+    if (/^from\s+.+(?:->|→)\s*to\s+/i.test(trimmed)) return false;
+    return true;
+  };
+  const canonicalDoctrineRationale =
+    (isDistinctRationale(sections?.positioning?.rationale)
+      ? sections.positioning.rationale
+      : null) ||
+    (isDistinctRationale(intelligenceData?.positioning?.rationale)
+      ? intelligenceData.positioning.rationale
+      : null) ||
+    (isDistinctRationale(stratSummary?.rationale) ? stratSummary.rationale : '') ||
+    '';
+
   return (
     <View style={[st.container, { backgroundColor: colors.background }]}>
       <GlobalHeader title="Strategy Plan" />
@@ -415,39 +710,294 @@ export default function StrategyPlanScreen() {
       {/* ── PERSISTENT LIVE STRATEGY STATUS HEADER ── */}
       <View style={st.strategyStatusHeader}>
         <View style={st.statusLeft}>
-          <View style={st.statusLivePill}>
-            <View style={st.statusLiveDot} />
-            <Text style={st.statusLiveText}>LIVE</Text>
-          </View>
-          <View style={st.versionBadge}>
-            <Text style={st.versionBadgeText}>
-              Strategy v{strategyMeta?.canonicalVersion || planData?.version || 1}
-            </Text>
-          </View>
-          <Text style={st.monitoringText}>
-            Monitoring market & business performance
-          </Text>
+          {planData && strategyMeta?.status === 'LIVE' ? (
+            <>
+              <View style={st.statusLivePill}>
+                <View style={st.statusLiveDot} />
+                <Text style={st.statusLiveText}>{resolvedPlanLifecycle.toUpperCase()}</Text>
+              </View>
+              <View style={st.versionBadge}>
+                <Text style={st.versionBadgeText}>
+                  Plan v{resolvedPlanRev} · Bundle v{resolvedBundleVer}
+                  {resolvedTotalRevisions ? ` (${resolvedTotalRevisions} revisions)` : ''}
+                </Text>
+              </View>
+              <Text style={st.monitoringText}>
+                Monitoring market & business performance
+              </Text>
+            </>
+          ) : planData && strategyMeta?.status === 'REVIEW_REQUIRED' ? (
+            <>
+              <View style={[st.statusLivePill, { backgroundColor: '#F59E0B18', borderColor: '#F59E0B50' }]}>
+                <View style={[st.statusLiveDot, { backgroundColor: '#F59E0B' }]} />
+                <Text style={[st.statusLiveText, { color: '#F59E0B' }]}>REVIEW REQUIRED</Text>
+              </View>
+              <View style={st.versionBadge}>
+                <Text style={st.versionBadgeText}>
+                  Plan v{resolvedPlanRev} · Bundle v{resolvedBundleVer}
+                  {resolvedTotalRevisions ? ` (${resolvedTotalRevisions} revisions)` : ''}
+                </Text>
+              </View>
+              <Text style={[st.monitoringText, { color: '#F59E0B' }]}>
+                Strategy modified by upstream signals — review required
+              </Text>
+            </>
+          ) : planData && strategyMeta?.status === 'DRAFT' ? (
+            <>
+              <View style={[st.statusLivePill, { backgroundColor: '#8B5CF618', borderColor: '#8B5CF650' }]}>
+                <View style={[st.statusLiveDot, { backgroundColor: '#8B5CF6' }]} />
+                <Text style={[st.statusLiveText, { color: '#8B5CF6' }]}>DRAFT</Text>
+              </View>
+              <View style={st.versionBadge}>
+                <Text style={st.versionBadgeText}>
+                  Plan v{resolvedPlanRev} · Bundle v{resolvedBundleVer}
+                  {resolvedTotalRevisions ? ` (${resolvedTotalRevisions} revisions)` : ''}
+                </Text>
+              </View>
+              <Text style={[st.monitoringText, { color: '#A78BFA' }]}>
+                Candidate strategy generated — awaiting approval
+              </Text>
+            </>
+          ) : planData && (strategyMeta?.status === 'HISTORICAL_ONLY' || strategyMeta?.hasStrategy) ? (
+            <>
+              <View style={[st.statusLivePill, { backgroundColor: '#3B82F618', borderColor: '#3B82F650' }]}>
+                <View style={[st.statusLiveDot, { backgroundColor: '#3B82F6' }]} />
+                <Text style={[st.statusLiveText, { color: '#3B82F6' }]}>HISTORICAL ONLY</Text>
+              </View>
+              <View style={st.versionBadge}>
+                <Text style={st.versionBadgeText}>
+                  Plan v{resolvedPlanRev} · Bundle v{resolvedBundleVer}
+                  {resolvedTotalRevisions ? ` (${resolvedTotalRevisions} revisions)` : ''}
+                </Text>
+              </View>
+              <Text style={st.monitoringText}>
+                Historical baseline — not currently active for execution
+              </Text>
+            </>
+          ) : continuationPlan?.canContinue ? (
+            <>
+              <View style={[st.statusLivePill, { backgroundColor: '#F59E0B18', borderColor: '#F59E0B50' }]}>
+                <View style={[st.statusLiveDot, { backgroundColor: '#F59E0B' }]} />
+                <Text style={[st.statusLiveText, { color: '#F59E0B' }]}>PIPELINE PAUSED</Text>
+              </View>
+              <Text style={[st.monitoringText, { color: '#FCD34D' }]}>
+                {continuationPlan.explanation ||
+                  `Continue from ${continuationPlan.resumeFromStageLabel || 'next stage'}. ${continuationPlan.reusedStages?.length || 0} completed stages will be reused.`}
+              </Text>
+            </>
+          ) : (
+            <>
+              <View style={[st.statusLivePill, { backgroundColor: '#1E293B', borderColor: '#475569' }]}>
+                <View style={[st.statusLiveDot, { backgroundColor: '#94A3B8' }]} />
+                <Text style={[st.statusLiveText, { color: '#94A3B8' }]}>NO ACTIVE PLAN</Text>
+              </View>
+              <Text style={st.monitoringText}>
+                Ready to generate algorithmic strategy
+              </Text>
+            </>
+          )}
         </View>
 
         <View style={st.statusRight}>
-          <Pressable style={st.historyBtn} onPress={handleOpenTimeline}>
-            <Feather name="clock" size={13} color="#94A3B8" />
-            <Text style={st.historyBtnText}>Activity</Text>
-          </Pressable>
+          {planData && (
+            <>
+              <Pressable style={st.historyBtn} onPress={handleOpenTimeline}>
+                <Feather name="clock" size={13} color="#94A3B8" />
+                <Text style={st.historyBtnText}>Activity</Text>
+              </Pressable>
 
-          <Pressable style={st.historyBtn} onPress={handleOpenHistory}>
-            <Feather name="layers" size={13} color="#94A3B8" />
-            <Text style={st.historyBtnText}>History</Text>
-          </Pressable>
+              <Pressable style={st.historyBtn} onPress={handleOpenHistory}>
+                <Feather name="layers" size={13} color="#94A3B8" />
+                <Text style={st.historyBtnText}>History</Text>
+              </Pressable>
+            </>
+          )}
 
-          <Pressable style={st.generateBtn} onPress={handleGenerateStrategy}>
+          {planData && strategyMeta?.status === 'DRAFT' && (
+            <Pressable
+              style={[st.generateBtn, { backgroundColor: '#10B981' }]}
+              onPress={handleApproveDraftPlan}
+              disabled={approvingPlan}
+            >
+              <Feather name="check-circle" size={13} color="#FFFFFF" />
+              <Text style={st.generateBtnText}>
+                {approvingPlan ? 'Approving...' : 'Approve & Activate Plan'}
+              </Text>
+            </Pressable>
+          )}
+
+          {continuationPlan?.canContinue && (
+            <Pressable
+              style={[
+                st.generateBtn,
+                { backgroundColor: '#10B981' },
+                isContinuing && { opacity: 0.6 },
+              ]}
+              onPress={() => handleContinuePipeline(continuationPlan?.missingPrerequisite?.engineId || continuationPlan?.resumeFromStage || undefined)}
+              disabled={isContinuing}
+            >
+              <Feather name="play" size={13} color="#FFFFFF" />
+              <Text style={st.generateBtnText}>
+                {isContinuing ? 'Continuing...' : 'Continue Pipeline'}
+              </Text>
+            </Pressable>
+          )}
+
+          <Pressable
+            style={[
+              st.generateBtn,
+              continuationPlan?.canContinue && {
+                backgroundColor: '#1E293B',
+                borderWidth: 1,
+                borderColor: '#475569',
+              },
+            ]}
+            onPress={() =>
+              handleGenerateStrategy({
+                forceRefresh: true,
+                recoveryMode: 'FULL_REFRESH',
+              })
+            }
+            disabled={isContinuing}
+          >
             <Feather name="refresh-cw" size={13} color="#FFFFFF" />
             <Text style={st.generateBtnText}>
-              {planData ? 'Regenerate Strategy' : 'Generate Strategy'}
+              {planData
+                ? 'Regenerate Strategy'
+                : continuationPlan?.canContinue
+                ? 'Start Fresh'
+                : 'Generate Strategy'}
             </Text>
           </Pressable>
         </View>
       </View>
+
+      {/* ── INTERRUPTED PIPELINE CONTINUATION BANNER ── */}
+      {continuationPlan?.canContinue && (
+        <View
+          style={[
+            st.proposalBanner,
+            {
+              backgroundColor: 'rgba(16, 185, 129, 0.12)',
+              borderColor: 'rgba(16, 185, 129, 0.45)',
+            },
+          ]}
+        >
+          <View style={st.proposalBannerLeft}>
+            <View
+              style={[
+                st.proposalIconBox,
+                { backgroundColor: 'rgba(16, 185, 129, 0.25)' },
+              ]}
+            >
+              <Feather name="fast-forward" size={16} color="#34D399" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.proposalBannerTitle, { color: '#6EE7B7' }]}>
+                INTERRUPTED PIPELINE READY TO CONTINUE · {continuationPlan.reusedStages?.length || 0} COMPLETED STAGES PRESERVED
+              </Text>
+              <Text style={[st.proposalBannerSub, { color: '#D1FAE5' }]}>
+                {continuationPlan.explanation}
+                {continuationPlan.interruptionDiagnostics?.isProviderInterruption
+                  ? ` (${continuationPlan.interruptionDiagnostics.category}: ${continuationPlan.interruptionDiagnostics.userMessage})`
+                  : ''}
+              </Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable
+              style={[
+                st.reviewBtn,
+                {
+                  backgroundColor: '#1E293B',
+                  borderColor: '#475569',
+                  paddingHorizontal: 10,
+                  paddingVertical: 7,
+                },
+              ]}
+              onPress={() => setRunModalVisible(true)}
+            >
+              <Feather name="list" size={12} color="#CBD5E1" />
+              <Text style={[st.reviewBtnText, { color: '#CBD5E1' }]}>Inspect Stages</Text>
+            </Pressable>
+            <Pressable
+              style={[
+                st.reviewBtn,
+                {
+                  backgroundColor: '#10B981',
+                  borderColor: '#059669',
+                  paddingHorizontal: 14,
+                  paddingVertical: 7,
+                },
+                isContinuing && { opacity: 0.6 },
+              ]}
+              onPress={() =>
+                handleContinuePipeline(
+                  continuationPlan?.missingPrerequisite?.engineId ||
+                    continuationPlan?.resumeFromStage ||
+                    undefined
+                )
+              }
+              disabled={isContinuing}
+            >
+              <Feather name="play" size={13} color="#FFFFFF" />
+              <Text style={[st.reviewBtnText, { color: '#FFFFFF', fontWeight: '800' }]}>
+                {isContinuing ? 'Continuing...' : 'Continue Pipeline'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {/* ── DRAFT STRATEGY APPROVAL BANNER ── */}
+      {planData && strategyMeta?.status === 'DRAFT' && (
+        <View
+          style={[
+            st.proposalBanner,
+            {
+              backgroundColor: 'rgba(139, 92, 246, 0.12)',
+              borderColor: 'rgba(139, 92, 246, 0.45)',
+            },
+          ]}
+        >
+          <View style={st.proposalBannerLeft}>
+            <View
+              style={[
+                st.proposalIconBox,
+                { backgroundColor: 'rgba(139, 92, 246, 0.25)' },
+              ]}
+            >
+              <Feather name="check-square" size={16} color="#C4B5FD" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.proposalBannerTitle, { color: '#DDD6FE' }]}>
+                CANDIDATE STRATEGY v{strategyMeta?.canonicalVersion || planData?.version || 1} READY FOR APPROVAL
+              </Text>
+              <Text style={[st.proposalBannerSub, { color: '#C4B5FD' }]} numberOfLines={1}>
+                Review the 7 strategic authorities below, then approve to lock Strategy v{strategyMeta?.canonicalVersion || 1} for execution & Watchtower monitoring.
+              </Text>
+            </View>
+          </View>
+          <Pressable
+            style={[
+              st.reviewBtn,
+              {
+                backgroundColor: '#10B981',
+                borderColor: '#059669',
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+              },
+            ]}
+            onPress={handleApproveDraftPlan}
+            disabled={approvingPlan}
+          >
+            <Feather name="check-circle" size={13} color="#FFFFFF" />
+            <Text style={[st.reviewBtnText, { color: '#FFFFFF', fontWeight: '800' }]}>
+              {approvingPlan ? 'Approving...' : 'Approve & Lock Strategy v1'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       {/* ── PENDING STRATEGIC UPDATE BANNER ── */}
       {strategyMeta && strategyMeta.pendingProposalCount > 0 && strategyMeta.pendingProposals[0] && (
@@ -517,10 +1067,24 @@ export default function StrategyPlanScreen() {
       <View style={st.tabContentArea}>
         {!planData ? (
           <View style={st.emptyPlanContainer}>
-            <Feather name="map" size={48} color="#64748B" />
-            <Text style={st.emptyPlanTitle}>No Active Strategy Plan</Text>
+            <Feather
+              name={continuationPlan?.canContinue ? 'fast-forward' : 'map'}
+              size={48}
+              color={continuationPlan?.canContinue ? '#10B981' : '#64748B'}
+            />
+            <Text style={st.emptyPlanTitle}>
+              {continuationPlan?.canContinue
+                ? 'Interrupted Strategy Pipeline Ready to Continue'
+                : 'No Active Strategy Plan'}
+            </Text>
             <Text style={st.emptyPlanSub}>
-              Complete your campaign setup to generate a comprehensive, algorithmic strategy tailored strictly to your business facts.
+              {continuationPlan?.canContinue
+                ? `${continuationPlan.explanation}${
+                    continuationPlan.interruptionDiagnostics?.userMessage
+                      ? ` ${continuationPlan.interruptionDiagnostics.userMessage}`
+                      : ''
+                  }`
+                : 'Complete your campaign setup to generate a comprehensive, algorithmic strategy tailored strictly to your business facts.'}
             </Text>
             <View style={{ flexDirection: 'row', gap: 12, marginTop: 16, flexWrap: 'wrap', justifyContent: 'center' }}>
               {!isSetupComplete && (
@@ -532,10 +1096,53 @@ export default function StrategyPlanScreen() {
                   <Text style={st.primaryGenerateText}>GO TO SETUP PAGE</Text>
                 </Pressable>
               )}
-              <Pressable style={st.primaryGenerateBtn} onPress={handleGenerateStrategy}>
-                <Feather name="zap" size={16} color="#FFFFFF" />
-                <Text style={st.primaryGenerateText}>GENERATE STRATEGY</Text>
-              </Pressable>
+              {continuationPlan?.canContinue ? (
+                <>
+                  <Pressable
+                    style={[
+                      st.primaryGenerateBtn,
+                      { backgroundColor: '#10B981' },
+                      isContinuing && { opacity: 0.6 },
+                    ]}
+                    onPress={() =>
+                      handleContinuePipeline(
+                        continuationPlan?.missingPrerequisite?.engineId ||
+                          continuationPlan?.resumeFromStage ||
+                          undefined
+                      )
+                    }
+                    disabled={isContinuing}
+                  >
+                    <Feather name="play" size={16} color="#FFFFFF" />
+                    <Text style={st.primaryGenerateText}>
+                      {isContinuing ? 'CONTINUING PIPELINE...' : 'CONTINUE PIPELINE'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      st.primaryGenerateBtn,
+                      { backgroundColor: '#1E293B', borderWidth: 1, borderColor: '#475569' },
+                    ]}
+                    onPress={() =>
+                      handleGenerateStrategy({
+                        forceRefresh: true,
+                        recoveryMode: 'FULL_REFRESH',
+                      })
+                    }
+                    disabled={isContinuing}
+                  >
+                    <Feather name="rotate-ccw" size={16} color="#CBD5E1" />
+                    <Text style={[st.primaryGenerateText, { color: '#CBD5E1' }]}>
+                      START FRESH (FULL REFRESH)
+                    </Text>
+                  </Pressable>
+                </>
+              ) : (
+                <Pressable style={st.primaryGenerateBtn} onPress={handleGenerateStrategy}>
+                  <Feather name="zap" size={16} color="#FFFFFF" />
+                  <Text style={st.primaryGenerateText}>GENERATE STRATEGY</Text>
+                </Pressable>
+              )}
             </View>
           </View>
         ) : (
@@ -549,16 +1156,74 @@ export default function StrategyPlanScreen() {
                       <Feather name="cpu" size={20} color="#8B5CF6" />
                     </View>
                     <View style={{ flex: 1, marginLeft: 12 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                         <Text style={[st.headerTitle, { color: '#F1F5F9' }]}>Consolidated Strategic Brain</Text>
-                        <View style={st.statusLiveBadge}>
-                          <View style={st.statusLiveDot} />
-                          <Text style={st.statusLiveText}>LIVE</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {strategyMeta?.status === 'LIVE' ? (
+                            <View style={st.statusLiveBadge}>
+                              <View style={st.statusLiveDot} />
+                              <Text style={st.statusLiveText}>{resolvedPlanLifecycle.toUpperCase()}</Text>
+                            </View>
+                          ) : strategyMeta?.status === 'REVIEW_REQUIRED' ? (
+                            <View style={[st.statusLiveBadge, { backgroundColor: '#F59E0B18', borderColor: '#F59E0B35' }]}>
+                              <View style={[st.statusLiveDot, { backgroundColor: '#F59E0B' }]} />
+                              <Text style={[st.statusLiveText, { color: '#F59E0B' }]}>REVIEW REQUIRED</Text>
+                            </View>
+                          ) : (
+                            <View style={[st.statusLiveBadge, { backgroundColor: '#3B82F618', borderColor: '#3B82F635' }]}>
+                              <View style={[st.statusLiveDot, { backgroundColor: '#3B82F6' }]} />
+                              <Text style={[st.statusLiveText, { color: '#3B82F6' }]}>{resolvedPlanLifecycle.toUpperCase()}</Text>
+                            </View>
+                          )}
                         </View>
                       </View>
-                      <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 3 }}>
-                        Active Strategy Blueprint · Version {strategyMeta?.canonicalVersion || planData?.version || 1}
+                      <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 4 }}>
+                        Plan Rev {resolvedPlanRev} · Bundle v{resolvedBundleVer}
+                        {resolvedRunId ? ` · Run ID: ${resolvedRunId}` : ''}
+                        {resolvedStrategyRootId ? ` · Strategy Root ID: ${resolvedStrategyRootId}` : ''}
                       </Text>
+
+                      {/* Separate Evidence & Claim Status Badges */}
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                        <View style={[st.activePill, { backgroundColor: '#10B98115', borderColor: '#10B98135' }]}>
+                          <View style={[st.activeDot, { backgroundColor: '#10B981' }]} />
+                          <Text style={[st.activePillText, { color: '#34D399' }]}>
+                            Lifecycle: {resolvedPlanLifecycle}
+                          </Text>
+                        </View>
+                        {hasProductFacts && (
+                          <View style={[st.activePill, { backgroundColor: '#3B82F615', borderColor: '#3B82F635' }]}>
+                            <View style={[st.activeDot, { backgroundColor: '#60A5FA' }]} />
+                            <Text style={[st.activePillText, { color: '#93C5FD' }]}>
+                              Supported by Product Facts
+                            </Text>
+                          </View>
+                        )}
+                        {hasCompetitorSignals && (
+                          <View style={[st.activePill, { backgroundColor: '#8B5CF615', borderColor: '#8B5CF635' }]}>
+                            <View style={[st.activeDot, { backgroundColor: '#A78BFA' }]} />
+                            <Text style={[st.activePillText, { color: '#C4B5FD' }]}>
+                              Customer-Reported Competitor Signal
+                            </Text>
+                          </View>
+                        )}
+                        {isHypothesis && (
+                          <View style={[st.activePill, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B35' }]}>
+                            <View style={[st.activeDot, { backgroundColor: '#FBBF24' }]} />
+                            <Text style={[st.activePillText, { color: '#FCD34D' }]}>
+                              Proposed Strategic Hypothesis
+                            </Text>
+                          </View>
+                        )}
+                        {isComparisonUnavailable && (
+                          <View style={[st.activePill, { backgroundColor: '#64748B20', borderColor: '#64748B45' }]}>
+                            <View style={[st.activeDot, { backgroundColor: '#94A3B8' }]} />
+                            <Text style={[st.activePillText, { color: '#CBD5E1' }]}>
+                              Competitor Comparison Unavailable
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                     </View>
                   </View>
                 </View>
@@ -571,13 +1236,50 @@ export default function StrategyPlanScreen() {
                         <Feather name="compass" size={13} color="#A78BFA" />
                         <Text style={st.cardTagText}>EXECUTIVE BLUEPRINT</Text>
                       </View>
-                      <View style={st.activePill}>
-                        <View style={st.activeDot} />
-                        <Text style={st.activePillText}>Business Layer · Active</Text>
+                      <View
+                        style={[
+                          st.activePill,
+                          isHypothesis
+                            ? { backgroundColor: '#F59E0B15', borderColor: '#F59E0B35' }
+                            : { backgroundColor: '#10B98115', borderColor: '#10B98135' },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            st.activeDot,
+                            { backgroundColor: isHypothesis ? '#FBBF24' : '#10B981' },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            st.activePillText,
+                            { color: isHypothesis ? '#FCD34D' : '#34D399' },
+                          ]}
+                        >
+                          {resolvedPlanLifecycle} · {isHypothesis ? 'Proposed Strategic Hypothesis' : 'Supported by Product Facts'}
+                        </Text>
                       </View>
                     </View>
 
                     <View style={st.cardHero}>
+                      {isHypothesis && resolvedEpistemicLabel ? (
+                        <View
+                          style={{
+                            backgroundColor: '#F59E0B12',
+                            borderColor: '#F59E0B35',
+                            borderWidth: 1,
+                            borderRadius: 8,
+                            paddingHorizontal: 10,
+                            paddingVertical: 7,
+                            marginBottom: 12,
+                          }}
+                        >
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#FCD34D' }}>
+                            {resolvedEpistemicLabel}
+                          </Text>
+                        </View>
+                      ) : null}
+
                       <Text style={st.heroCategory}>OVERARCHING GROWTH STRATEGY</Text>
                       <Text style={st.heroHeadline}>
                         {businessRep.strategicSummary?.strategy ||
@@ -597,35 +1299,89 @@ export default function StrategyPlanScreen() {
                   </View>
                 )}
 
-                {/* 2. Canonical Strategy Authority */}
-                {stratSummary && (
+                {/* 2. Canonical Strategy Authority (distinct upstream positioning authority, contrast axis, and doctrine rationale) */}
+                {(stratSummary || canonicalPositioningTerritory || canonicalContrastAxis) && (
                   <View style={[st.card, { backgroundColor: '#0F1419', borderColor: '#1F2937' }]}>
                     <View style={st.cardHeader}>
                       <View style={[st.cardTagPill, { backgroundColor: '#10B98118', borderColor: '#10B98135' }]}>
                         <Feather name="shield" size={13} color="#34D399" />
                         <Text style={[st.cardTagText, { color: '#34D399' }]}>CANONICAL STRATEGY AUTHORITY</Text>
                       </View>
-                      <View style={[st.activePill, { backgroundColor: '#10B98115', borderColor: '#10B98130' }]}>
-                        <View style={[st.activeDot, { backgroundColor: '#10B981' }]} />
-                        <Text style={[st.activePillText, { color: '#34D399' }]}>Source of Truth · Engine Verified</Text>
+                      <View
+                        style={[
+                          st.activePill,
+                          {
+                            backgroundColor:
+                              strategyMeta?.status === 'DEGRADED' || isHypothesis ? '#F59E0B15' : '#10B98115',
+                            borderColor:
+                              strategyMeta?.status === 'DEGRADED' || isHypothesis ? '#F59E0B30' : '#10B98130',
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            st.activeDot,
+                            {
+                              backgroundColor:
+                                strategyMeta?.status === 'DEGRADED' || isHypothesis ? '#F59E0B' : '#10B981',
+                            },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            st.activePillText,
+                            {
+                              color:
+                                strategyMeta?.status === 'DEGRADED' || isHypothesis ? '#FBBF24' : '#34D399',
+                            },
+                          ]}
+                        >
+                          {strategyMeta?.status === 'DEGRADED'
+                            ? 'Degraded Fallback · Review Required'
+                            : isHypothesis
+                            ? `Proposed Strategic Hypothesis${isComparisonUnavailable ? ' · Competitor Comparison Unavailable' : ''}`
+                            : 'Supported by Product Facts'}
+                        </Text>
                       </View>
                     </View>
 
                     <View style={st.cardHero}>
-                      <Text style={[st.heroCategory, { color: '#34D399' }]}>ALGORITHMICALLY APPROVED STATEMENT</Text>
-                      <View style={st.quoteBox}>
-                        <Text style={st.quoteText}>"{stratSummary.strategy}"</Text>
-                      </View>
+                      {canonicalPositioningTerritory ? (
+                        <View style={{ marginBottom: 10 }}>
+                          <Text style={[st.heroCategory, { color: '#34D399' }]}>
+                            CANONICAL POSITIONING TERRITORY & CONTRAST AXIS
+                          </Text>
+                          <Text style={[st.heroHeadline, { fontSize: 15, marginBottom: 4 }]}>
+                            {canonicalPositioningTerritory}
+                          </Text>
+                          {canonicalContrastAxis ? (
+                            <Text style={{ fontSize: 12, color: '#94A3B8' }}>
+                              Contrast Axis: {canonicalContrastAxis}
+                            </Text>
+                          ) : null}
+                        </View>
+                      ) : null}
 
-                      {stratSummary.rationale && (
+                      {canonicalStatement ? (
+                        <>
+                          <Text style={[st.heroCategory, { color: '#34D399' }]}>
+                            CANONICAL POSITIONING & STRATEGY STATEMENT
+                          </Text>
+                          <View style={st.quoteBox}>
+                            <Text style={st.quoteText}>"{canonicalStatement}"</Text>
+                          </View>
+                        </>
+                      ) : null}
+
+                      {canonicalDoctrineRationale ? (
                         <View style={[st.rationaleBox, { borderColor: '#10B98130', backgroundColor: '#064E3B18' }]}>
                           <View style={st.rationaleHeader}>
                             <Feather name="zap" size={13} color="#FBBF24" />
                             <Text style={[st.rationaleTitle, { color: '#FCD34D' }]}>CORE DOCTRINE RATIONALE</Text>
                           </View>
-                          <Text style={[st.rationaleText, { color: '#D1FAE5' }]}>{stratSummary.rationale}</Text>
+                          <Text style={[st.rationaleText, { color: '#D1FAE5' }]}>{canonicalDoctrineRationale}</Text>
                         </View>
-                      )}
+                      ) : null}
                     </View>
                   </View>
                 )}
@@ -690,8 +1446,17 @@ export default function StrategyPlanScreen() {
         isCompleted={isRunCompleted}
         isFailed={isRunFailed}
         completionData={completionData}
+        continuationPlan={continuationPlan}
+        isContinuing={isContinuing}
         onViewStrategy={() => setRunModalVisible(false)}
-        onRetry={handleGenerateStrategy}
+        onContinuePipeline={(fromStage) => handleContinuePipeline(fromStage)}
+        onRetry={() => handleContinuePipeline()}
+        onStartFresh={() =>
+          handleGenerateStrategy({
+            forceRefresh: true,
+            recoveryMode: 'FULL_REFRESH',
+          })
+        }
       />
 
       <StrategicProposalModal

@@ -170,7 +170,13 @@ export interface DeepReasoningCaseItem {
 
 export default function ReasoningScreen() {
   const router = useRouter();
-  const searchParams = useLocalSearchParams<{ tab?: string; eventId?: string; warningId?: string }>();
+  const searchParams = useLocalSearchParams<{
+    tab?: string;
+    eventId?: string;
+    warningId?: string;
+    investigateEventId?: string;
+    scenarioId?: string;
+  }>();
   const shell = useAppShellController();
   const campaignId = shell.activeWorkspace?.id ?? null;
 
@@ -178,6 +184,7 @@ export default function ReasoningScreen() {
   const [events, setEvents] = useState<MarketEventItem[]>([]);
   const [warnings, setWarnings] = useState<PerformanceWarningItem[]>([]);
   const [cases, setCases] = useState<DeepReasoningCaseItem[]>([]);
+  const [pendingScenarios, setPendingScenarios] = useState<any[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
 
   // Drill-down modal states
@@ -194,8 +201,24 @@ export default function ReasoningScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [approvingProposal, setApprovingProposal] = useState(false);
+  const [investigatingTarget, setInvestigatingTarget] = useState<string | null>(null);
+  const [investigationProgressStep, setInvestigationProgressStep] = useState<string | null>(null);
+  const [lastApprovalConfirmation, setLastApprovalConfirmation] = useState<{
+    proposalId: string;
+    newStrategyVersion: number;
+    appliedScenarios: string[];
+    title: string;
+    affectedPlanItems: string[];
+  } | null>(null);
 
-  const fetchData = async () => {
+  const openEvidenceUrl = (url: string) => {
+    if (typeof window !== 'undefined' && window.open) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  const fetchData = async (preferredCaseId?: string | null) => {
     if (!campaignId) {
       setLoading(false);
       setRefreshing(false);
@@ -214,10 +237,14 @@ export default function ReasoningScreen() {
 
       setEvents(eventsJson.events || []);
       setWarnings(warningsJson.warnings || []);
-      setCases(casesJson.cases || []);
+      const fetchedCases: DeepReasoningCaseItem[] = casesJson.cases || [];
+      setCases(fetchedCases);
+      setPendingScenarios(casesJson.pendingActionableScenarios || []);
 
-      if (casesJson.cases && casesJson.cases.length > 0 && !selectedCaseId) {
-        setSelectedCaseId(casesJson.cases[0].reasoningCaseId);
+      if (preferredCaseId && fetchedCases.some((c) => c.reasoningCaseId === preferredCaseId)) {
+        setSelectedCaseId(preferredCaseId);
+      } else if (fetchedCases.length > 0 && (!selectedCaseId || !fetchedCases.some((c) => c.reasoningCaseId === selectedCaseId))) {
+        setSelectedCaseId(fetchedCases[0].reasoningCaseId);
       }
     } catch (err: any) {
       console.error('[ReasoningScreen] Fetch error:', err);
@@ -227,14 +254,88 @@ export default function ReasoningScreen() {
     }
   };
 
+  const handleRunDeepReasoning = async (eventIdOrScenarioId: string) => {
+    if (!eventIdOrScenarioId || investigatingTarget) return;
+    setSelectedEventId(null);
+    setActiveTab('deep_reasoning');
+    setInvestigatingTarget(eventIdOrScenarioId);
+    setInvestigationProgressStep('Step 1/3 · Verifying Watchtower snapshot diff & corroborating evidence sources…');
+    try {
+      await new Promise((r) => setTimeout(r, 320));
+      setInvestigationProgressStep('Step 2/3 · Evaluating competing causal hypotheses & affected strategic assumption…');
+      await new Promise((r) => setTimeout(r, 340));
+      setInvestigationProgressStep('Step 3/3 · Computing surgical BEFORE / AFTER strategy patch (no changes applied yet)…');
+      const res = await apiRequest('POST', `/api/demo/investigate/${encodeURIComponent(eventIdOrScenarioId)}`);
+      const resJson = await res.json();
+      await fetchData(resJson.reasoningCaseId || null);
+      if (resJson.reasoningCaseId) {
+        setSelectedCaseId(resJson.reasoningCaseId);
+      }
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('avyron-demo-state-changed', { detail: { investigated: eventIdOrScenarioId } }));
+      }
+    } catch (err) {
+      console.error('[ReasoningScreen] Run Deep Reasoning error:', err);
+    } finally {
+      setInvestigatingTarget(null);
+      setInvestigationProgressStep(null);
+    }
+  };
+
+  const handleApproveCaseProposal = async (proposalId?: string | null) => {
+    if (approvingProposal) return;
+    const targetProposalId = proposalId || (selectedCase?.adaptiveDecision as any)?.proposalId || 'prop_demo_zeytun_001';
+    setApprovingProposal(true);
+    try {
+      const res = await apiRequest('POST', `/api/strategy/change-proposals/${encodeURIComponent(targetProposalId)}/approve`);
+      const resJson = await res.json().catch(() => ({}));
+      const currentCaseDecision: any = selectedCase?.adaptiveDecision || {};
+      setLastApprovalConfirmation({
+        proposalId: targetProposalId,
+        newStrategyVersion: resJson.newVersion || resJson.newStrategyVersion || resJson.appliedVersion || (selectedCase?.strategyRootVersion ? selectedCase.strategyRootVersion + 1 : 2),
+        appliedScenarios: resJson.appliedScenarios || [],
+        title: (selectedCase as any)?.caseTitle || currentCaseDecision.businessAction || 'Strategy Patch Applied',
+        affectedPlanItems: Array.isArray(currentCaseDecision.affectedPlanItems) ? currentCaseDecision.affectedPlanItems : [],
+      });
+      await fetchData(selectedCase?.reasoningCaseId || null);
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('avyron-demo-state-changed', { detail: { approvedProposalId: targetProposalId } }));
+      }
+    } catch (err) {
+      console.error('[ReasoningScreen] Approve proposal error:', err);
+    } finally {
+      setApprovingProposal(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
+    const handleDemoChange = () => {
+      fetchData();
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('avyron-demo-state-changed', handleDemoChange);
+    }
+    return () => {
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('avyron-demo-state-changed', handleDemoChange);
+      }
+    };
   }, [campaignId]);
 
-  // Handle URL query parameters for direct routing into details
+  // Handle URL query parameters for direct routing into details or triggering Deep Reasoning
   useEffect(() => {
     if (searchParams.tab === 'events' || searchParams.tab === 'warnings' || searchParams.tab === 'deep_reasoning') {
       setActiveTab(searchParams.tab);
+    } else if (searchParams.tab === 'cases') {
+      setActiveTab('deep_reasoning');
+    }
+    if (searchParams.investigateEventId || searchParams.scenarioId) {
+      const target = searchParams.investigateEventId || searchParams.scenarioId;
+      if (target) {
+        handleRunDeepReasoning(target);
+      }
+      return;
     }
     if (searchParams.eventId) {
       setActiveTab('events');
@@ -244,11 +345,11 @@ export default function ReasoningScreen() {
       setActiveTab('warnings');
       handleOpenWarningDetail(searchParams.warningId);
     }
-  }, [searchParams.tab, searchParams.eventId, searchParams.warningId]);
+  }, [searchParams.tab, searchParams.eventId, searchParams.warningId, searchParams.investigateEventId, searchParams.scenarioId]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchData();
+    fetchData(selectedCaseId);
   };
 
   const handleOpenEventDetail = async (eventId: string) => {
@@ -330,9 +431,11 @@ export default function ReasoningScreen() {
           <Text style={[styles.tabText, activeTab === 'deep_reasoning' && styles.tabTextActive]}>
             Deep Reasoning
           </Text>
-          {cases.length > 0 && (
-            <View style={[styles.countBadge, { backgroundColor: '#10B981' }]}>
-              <Text style={styles.countBadgeText}>{cases.length}</Text>
+          {(cases.length > 0 || pendingScenarios.length > 0) && (
+            <View style={[styles.countBadge, { backgroundColor: cases.length > 0 ? '#10B981' : '#F59E0B' }]}>
+              <Text style={styles.countBadgeText}>
+                {cases.length > 0 ? `${cases.length} Open` : `${pendingScenarios.length} Ready`}
+              </Text>
             </View>
           )}
         </Pressable>
@@ -360,76 +463,196 @@ export default function ReasoningScreen() {
             </View>
           ) : (
             <View style={styles.listGrid}>
-              {events.map((evt) => (
-                <Pressable
-                  key={evt.signalId}
-                  style={({ hovered }: any) => [
-                    styles.card,
-                    styles.clickableCard,
-                    hovered && styles.cardHovered,
-                  ]}
-                  onPress={() => handleOpenEventDetail(evt.sourceArtifactId)}
-                >
-                  <View style={styles.cardHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.cardOverline}>{evt.competitorName || 'MARKET COMPETITOR'}</Text>
-                      <Text style={styles.cardTitle}>{evt.businessFriendlyType}</Text>
-                    </View>
-                    <View style={[
-                      styles.pill,
-                      evt.intelligenceStatus === 'READY'
-                        ? styles.pillConfirmed
-                        : (evt.intelligenceStatus === 'FAILED' ? styles.pillFailed : styles.pillPending)
-                    ]}>
-                      <Text style={[
-                        styles.pillText,
-                        evt.intelligenceStatus === 'READY' && { color: '#6EE7B7' },
-                        evt.intelligenceStatus === 'PENDING' && { color: '#FCD34D' },
-                        evt.intelligenceStatus === 'FAILED' && { color: '#9CA3AF' },
+              {events.map((evt) => {
+                const rawEvt = evt as any;
+                const evtAny: any = {
+                  ...rawEvt,
+                  customTitle: rawEvt.businessFriendlyType,
+                  product: rawEvt.productReferenced,
+                  segment: rawEvt.segmentName,
+                  lane: rawEvt.laneTitle,
+                  nextActionBadge: rawEvt.nextActionLabel,
+                  supportingEvidenceLinks: (Array.isArray(rawEvt.evidenceUrls) ? rawEvt.evidenceUrls : []).map(
+                    (url: string, i: number) => ({
+                      id: url,
+                      url,
+                      label: (url.split('/').pop() || `source-${i + 1}`),
+                    }),
+                  ),
+                };
+                const linkedCase = cases.find((c) => c.linkedMarketEvents?.some((m) => m.eventId === evt.sourceArtifactId));
+                const isApplied = linkedCase?.adaptationOutcome != null || (linkedCase?.adaptiveDecision as any)?.proposalStatus === 'APPLIED';
+                return (
+                  <Pressable
+                    key={evt.signalId}
+                    style={({ hovered }: any) => [
+                      styles.card,
+                      styles.clickableCard,
+                      evtAny.linkedScenarioId && { borderColor: isApplied ? '#10B981' : '#8B5CF6' },
+                      hovered && styles.cardHovered,
+                    ]}
+                    onPress={() => handleOpenEventDetail(evt.sourceArtifactId)}
+                  >
+                    <View style={styles.cardHeader}>
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <Text style={styles.cardOverline}>
+                          {evt.competitorName || 'MARKET COMPETITOR'} • {rawEvt.categoryType || 'Market change'}
+                        </Text>
+                        <Text style={styles.cardTitle}>{evtAny.customTitle || evt.businessFriendlyType}</Text>
+                      </View>
+                      <View style={[
+                        styles.pill,
+                        evtAny.linkedScenarioId
+                          ? (isApplied ? styles.pillConfirmed : styles.pillPreliminary)
+                          : styles.pillConfirmed,
                       ]}>
-                        {evt.intelligenceStatus === 'READY'
-                          ? 'Intelligence Ready'
-                          : (evt.intelligenceStatus === 'FAILED' ? 'Analysis Unavailable' : 'Analysis In Progress')}
-                      </Text>
+                        <Text style={[
+                          styles.pillText,
+                          evtAny.linkedScenarioId && !isApplied && { color: '#FCD34D' },
+                          (!evtAny.linkedScenarioId || isApplied) && { color: '#6EE7B7' },
+                        ]}>
+                          {isApplied
+                            ? 'Strategy Patch Applied'
+                            : linkedCase
+                              ? 'Investigated · Patch Ready'
+                              : (evtAny.nextActionBadge || 'Intelligence Ready')}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
 
-                  {/* INTELLIGENCE SUMMARY from strategic brief */}
-                  <Text style={styles.summaryText}>{evt.summary}</Text>
+                    {/* Product / Segment / Lane metadata */}
+                    {(evtAny.product || evtAny.segment || evtAny.lane) && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                        {evtAny.product && (
+                          <View style={{ backgroundColor: '#0F172A', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#334155' }}>
+                            <Text style={{ fontSize: 11, color: '#CBD5E1' }}>Product: {evtAny.product}</Text>
+                          </View>
+                        )}
+                        {evtAny.segment && (
+                          <View style={{ backgroundColor: '#0F172A', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#334155' }}>
+                            <Text style={{ fontSize: 11, color: '#CBD5E1' }}>Segment: {evtAny.segment}</Text>
+                          </View>
+                        )}
+                        {evtAny.lane && (
+                          <View style={{ backgroundColor: '#0F172A', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#334155' }}>
+                            <Text style={{ fontSize: 11, color: '#A5B4FC', fontWeight: '600' }}>{evtAny.lane}</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
 
-                  {/* Strategic interpretation preview (if available) */}
-                  {(evt as any).strategicInterpretation && (
-                    <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#1E253520' }}>
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#8B5CF6', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Strategic Interpretation</Text>
-                      <Text style={[styles.summaryText, { fontSize: 12, color: '#A5B4FC' }]} numberOfLines={2}>
-                        {(evt as any).strategicInterpretation}
-                      </Text>
-                    </View>
-                  )}
+                    {/* INTELLIGENCE SUMMARY */}
+                    <Text style={styles.summaryText}>{evt.summary}</Text>
 
-                  {/* Impact on strategy preview (if available) */}
-                  {(evt as any).impactOnStrategy && (
-                    <View style={{ marginTop: 6, paddingTop: 6, borderTopWidth: 1, borderTopColor: '#1E253510' }}>
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#10B981', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Impact on Our Strategy</Text>
-                      <Text style={[styles.summaryText, { fontSize: 12, color: '#6EE7B7' }]} numberOfLines={2}>
-                        {(evt as any).impactOnStrategy}
-                      </Text>
-                    </View>
-                  )}
+                    {/* Before / After diff preview */}
+                    {(evtAny.beforeState || evtAny.afterState) && (
+                      <View style={{ backgroundColor: '#0F172A', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#1E293B', gap: 4 }}>
+                        {evtAny.beforeState && (
+                          <Text style={{ fontSize: 12, color: '#94A3B8' }} numberOfLines={2}>
+                            <Text style={{ fontWeight: '700', color: '#F87171' }}>BEFORE: </Text>
+                            {evtAny.beforeState}
+                          </Text>
+                        )}
+                        {evtAny.afterState && (
+                          <Text style={{ fontSize: 12, color: '#E2E8F0' }} numberOfLines={2}>
+                            <Text style={{ fontWeight: '700', color: '#34D399' }}>AFTER: </Text>
+                            {evtAny.afterState}
+                          </Text>
+                        )}
+                      </View>
+                    )}
 
-                  <View style={styles.cardFooterRow}>
-                    <View style={styles.metaRow}>
-                      <Text style={styles.metaText}>Severity: {evt.severity}</Text>
-                      <Text style={styles.metaText}>Confidence: {Math.round(evt.confidence * 100)}%</Text>
-                      <Text style={styles.metaText}>Observed: {evt.observedAtFormatted || new Date(evt.observedAt).toLocaleDateString()}</Text>
+                    {/* Business Relevance */}
+                    {(evtAny.businessRelevance || evtAny.strategicInterpretation) && (
+                      <View style={{ marginTop: 4, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#1E253540' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          Business Relevance & Strategic Impact
+                        </Text>
+                        <Text style={[styles.summaryText, { fontSize: 12, color: '#A5B4FC' }]} numberOfLines={3}>
+                          {evtAny.businessRelevance || evtAny.strategicInterpretation}
+                        </Text>
+                      </View>
+                    )}
+
+                    {/* Supporting Synthetic Evidence Links */}
+                    {Array.isArray(evtAny.supportingEvidenceLinks) && evtAny.supportingEvidenceLinks.length > 0 && (
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                        {evtAny.supportingEvidenceLinks.map((evLink: any, idx: number) => (
+                          <Pressable
+                            key={evLink.id || idx}
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 6,
+                              backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                              borderWidth: 1,
+                              borderColor: 'rgba(56, 189, 248, 0.3)',
+                              paddingHorizontal: 10,
+                              paddingVertical: 5,
+                              borderRadius: 6,
+                            }}
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              openEvidenceUrl(evLink.url);
+                            }}
+                          >
+                            <Feather name="external-link" size={12} color="#38BDF8" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#7DD3FC' }}>
+                              Evidence: {evLink.label}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+
+                    <View style={styles.cardFooterRow}>
+                      <View style={[styles.metaRow, { flexWrap: 'wrap' }]}>
+                        <Text style={styles.metaText}>ID: {evt.sourceArtifactId}</Text>
+                        <Text style={styles.metaText}>Severity: {evt.severity}</Text>
+                        <Text style={styles.metaText}>Confidence: {Math.round(evt.confidence * 100)}%</Text>
+                        <Text style={styles.metaText}>Observed: {evt.observedAtFormatted || new Date(evt.observedAt).toLocaleDateString()}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        {evtAny.linkedScenarioId && (
+                          <Pressable
+                            style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              gap: 6,
+                              backgroundColor: isApplied ? '#065F46' : '#8B5CF6',
+                              paddingHorizontal: 12,
+                              paddingVertical: 7,
+                              borderRadius: 6,
+                            }}
+                            onPress={(e) => {
+                              e.stopPropagation?.();
+                              if (linkedCase) {
+                                setSelectedCaseId(linkedCase.reasoningCaseId);
+                                setActiveTab('deep_reasoning');
+                              } else {
+                                handleRunDeepReasoning(evt.sourceArtifactId);
+                              }
+                            }}
+                          >
+                            <Feather name="cpu" size={13} color="#FFFFFF" />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+                              {isApplied
+                                ? 'View Applied Deep Reasoning'
+                                : linkedCase
+                                  ? 'Open Deep Reasoning Patch'
+                                  : 'Run Deep Reasoning Investigation'}
+                            </Text>
+                          </Pressable>
+                        )}
+                        <View style={styles.viewDetailAction}>
+                          <Text style={styles.viewDetailActionText}>Event Dossier</Text>
+                          <Feather name="arrow-right" size={14} color="#8B5CF6" />
+                        </View>
+                      </View>
                     </View>
-                    <View style={styles.viewDetailAction}>
-                      <Text style={styles.viewDetailActionText}>Full Investigation</Text>
-                      <Feather name="arrow-right" size={14} color="#8B5CF6" />
-                    </View>
-                  </View>
-                </Pressable>
-              ))}
+                  </Pressable>
+                );
+              })}
             </View>
           )
         ) : activeTab === 'warnings' ? (
@@ -437,8 +660,8 @@ export default function ReasoningScreen() {
           /* 2B. WARNINGS (DISCRETE CURRENT PERFORMANCE INVESTIGATIONS)                */
           /* ========================================================================= */
           (() => {
-            const activeWarnings = warnings.filter(w => !w.isHistorical && (w as any).status !== 'HISTORICAL');
-            const historicalWarnings = warnings.filter(w => w.isHistorical || (w as any).status === 'HISTORICAL');
+            const activeWarnings = warnings.filter(w => !(w as any).isHistorical && (w as any).status !== 'HISTORICAL');
+            const historicalWarnings = warnings.filter(w => (w as any).isHistorical || (w as any).status === 'HISTORICAL');
 
             return (
               <View style={styles.sectionGrid}>
@@ -517,7 +740,7 @@ export default function ReasoningScreen() {
                           <View style={styles.cardHeader}>
                             <View style={{ flex: 1 }}>
                               <Text style={[styles.cardOverline, { color: '#94A3B8' }]}>
-                                HISTORICAL INVESTIGATION • ROOT v56
+                                HISTORICAL INVESTIGATION
                               </Text>
                               <Text style={[styles.cardTitle, { color: '#CBD5E1' }]}>{warn.businessFriendlyTitle}</Text>
                             </View>
@@ -548,172 +771,639 @@ export default function ReasoningScreen() {
           })()
         ) : (
           /* ========================================================================= */
-          /* 2C. DEEP REASONING (COMBINED INVESTIGATION CENTER)                        */
+          /* 2C. DEEP REASONING (COMBINED INVESTIGATION & SURGICAL PATCH CENTER)       */
           /* ========================================================================= */
-          cases.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Feather name="cpu" size={32} color="#6B7280" />
-              <Text style={styles.emptyTitle}>No active Deep Reasoning investigations</Text>
-              <Text style={styles.emptySubtitle}>
-                Deep causal investigations open automatically when confirmed market events and active performance warnings correlate. All 16 confirmed market events are currently being monitored in Events.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.deepReasoningLayout}>
-              {/* Case Selector Tabs */}
-              {cases.length > 1 && (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.caseSelectorScroll}>
-                  {cases.map((c) => (
-                    <Pressable
-                      key={c.reasoningCaseId}
-                      style={[
-                        styles.caseChip,
-                        selectedCase?.reasoningCaseId === c.reasoningCaseId && styles.caseChipActive,
-                      ]}
-                      onPress={() => setSelectedCaseId(c.reasoningCaseId)}
-                    >
-                      <Text style={[
-                        styles.caseChipText,
-                        selectedCase?.reasoningCaseId === c.reasoningCaseId && styles.caseChipTextActive,
-                      ]}>
-                        {c.rootBadgeLabel} ({c.openedAt})
-                      </Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              )}
-
-              {selectedCase && (
-                <View style={styles.sectionGrid}>
-                  {/* Executive Diagnosis Banner */}
-                  <View style={[styles.card, { backgroundColor: '#1E1B4B', borderColor: '#4338CA' }]}>
-                    <View style={styles.cardHeader}>
-                      <View>
-                        <Text style={[styles.cardOverline, { color: '#A5B4FC' }]}>{selectedCase.rootBadgeLabel}</Text>
-                        <Text style={styles.cardTitle}>
-                          {selectedCase.adaptiveDecision?.businessAction || 'Causal Strategy Review'}
-                        </Text>
-                      </View>
-                      <View style={styles.statusPill}>
-                        <Text style={styles.statusPillText}>Status: {selectedCase.status}</Text>
-                      </View>
-                    </View>
-                    <Text style={[styles.summaryText, { color: '#E0E7FF' }]}>
-                      {selectedCase.adaptiveDecision?.actionDescription ||
-                        'Avyron analyzed correlating market and performance signals to evaluate strategic impact.'}
+          <View style={styles.deepReasoningLayout}>
+            {/* Deterministic Analysis Progression Banner */}
+            {investigatingTarget && (
+              <View style={[styles.card, { backgroundColor: '#1E1B4B', borderColor: '#8B5CF6', borderWidth: 2 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  <ActivityIndicator size="small" color="#A78BFA" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#C4B5FD', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                      Running Event-Specific Deep Reasoning Engine ({investigatingTarget})
+                    </Text>
+                    <Text style={{ fontSize: 14, color: '#F8FAFC', marginTop: 4, fontWeight: '600' }}>
+                      {investigationProgressStep || 'Synthesizing market evidence and strategic impact…'}
                     </Text>
                   </View>
+                </View>
+              </View>
+            )}
 
-                  {/* Drillable Triggers: Market Events & Performance Warnings */}
-                  <View style={styles.card}>
-                    <View style={styles.cardHeader}>
-                      <Feather name="crosshair" size={18} color="#8B5CF6" />
-                      <Text style={styles.cardTitle}>Investigated Triggers (Click to Inspect)</Text>
-                    </View>
-                    <View style={styles.triggerGrid}>
-                      <Pressable
-                        style={[styles.triggerBox, styles.clickableTrigger]}
-                        onPress={() => setActiveTriggerDrill('events')}
-                      >
-                        <Text style={styles.triggerCount}>{selectedCase.marketEventCount}</Text>
-                        <Text style={styles.triggerLabel}>Market Event(s) →</Text>
-                      </Pressable>
-
-                      <Pressable
-                        style={[styles.triggerBox, styles.clickableTrigger]}
-                        onPress={() => setActiveTriggerDrill('warnings')}
-                      >
-                        <Text style={[styles.triggerCount, { color: '#EF4444' }]}>{selectedCase.performanceWarningCount}</Text>
-                        <Text style={styles.triggerLabel}>Performance Warning(s) →</Text>
-                      </Pressable>
-
-                      <Pressable
-                        style={[styles.triggerBox, styles.clickableTrigger]}
-                        onPress={() => setActiveTriggerDrill('evidence')}
-                      >
-                        <Text style={[styles.triggerCount, { color: '#10B981' }]}>{selectedCase.evidenceCount}</Text>
-                        <Text style={styles.triggerLabel}>Evidence Items →</Text>
-                      </Pressable>
+            {/* Approval Confirmation Banner */}
+            {lastApprovalConfirmation && (
+              <View style={[styles.card, { backgroundColor: 'rgba(6, 78, 59, 0.45)', borderColor: '#10B981', borderWidth: 1.5 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <Feather name="check-circle" size={20} color="#34D399" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#6EE7B7', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                        STRATEGY PATCH APPROVED & PERSISTED • ACTIVE ROOT v{lastApprovalConfirmation.newStrategyVersion}
+                      </Text>
+                      <Text style={{ fontSize: 16, fontWeight: '700', color: '#F8FAFC', marginTop: 2 }}>
+                        {lastApprovalConfirmation.title}
+                      </Text>
                     </View>
                   </View>
+                  <Pressable onPress={() => setLastApprovalConfirmation(null)} style={{ padding: 4 }}>
+                    <Feather name="x" size={16} color="#A7F3D0" />
+                  </Pressable>
+                </View>
+                {lastApprovalConfirmation.affectedPlanItems.length > 0 && (
+                  <View style={{ marginTop: 6, gap: 4 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#A7F3D0' }}>
+                      Updated Plan Sections, Weekly Actions & "What to do today":
+                    </Text>
+                    {lastApprovalConfirmation.affectedPlanItems.map((item, idx) => (
+                      <Text key={idx} style={{ fontSize: 12, color: '#D1FAE5', lineHeight: 18 }}>
+                        • {item}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
+                  <Pressable
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      backgroundColor: '#10B981',
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      borderRadius: 6,
+                    }}
+                    onPress={() => router.push('/(tabs)/strategy-plan' as any)}
+                  >
+                    <Feather name="layers" size={14} color="#052E16" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#052E16' }}>
+                      Inspect Updated Strategy v{lastApprovalConfirmation.newStrategyVersion} →
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                      borderWidth: 1,
+                      borderColor: '#10B981',
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      borderRadius: 6,
+                    }}
+                    onPress={() => router.push('/(tabs)/execution' as any)}
+                  >
+                    <Feather name="check-square" size={14} color="#6EE7B7" />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#6EE7B7' }}>
+                      View Updated "What to do today" Tasks →
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
 
-                  {/* Hypotheses & Competing Explanations */}
-                  <View style={styles.card}>
-                    <View style={styles.cardHeader}>
-                      <Feather name="git-branch" size={18} color="#8B5CF6" />
-                      <Text style={styles.cardTitle}>Causal Hypotheses & Competing Explanations</Text>
+            {/* Pending Strategic Scenarios Ready for Investigation */}
+            {pendingScenarios.length > 0 && (
+              <View style={[styles.card, { backgroundColor: '#131C31', borderColor: '#3B82F660' }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Feather name="zap" size={18} color="#F59E0B" />
+                    <Text style={styles.cardTitle}>
+                      Strategic Watchtower Signals Pending Deep Reasoning ({pendingScenarios.length})
+                    </Text>
+                  </View>
+                  <View style={[styles.pill, styles.pillPreliminary]}>
+                    <Text style={[styles.pillText, { color: '#FCD34D' }]}>Awaiting User Investigation Click</Text>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 13, color: '#94A3B8', lineHeight: 19 }}>
+                  Click "Run Deep Reasoning Investigation" on any strategic signal below to inspect corroborating evidence, evaluate competing hypotheses, and preview the exact BEFORE / AFTER strategy patch before deciding whether to apply it.
+                </Text>
+                <View style={{ gap: 10, marginTop: 4 }}>
+                  {pendingScenarios.map((sc) => (
+                    <View
+                      key={sc.scenarioId}
+                      style={{
+                        backgroundColor: '#0F172A',
+                        borderRadius: 10,
+                        padding: 14,
+                        borderWidth: 1,
+                        borderColor: '#334155',
+                        gap: 8,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                            {sc.scenarioId} • EVENT {sc.eventId} • {sc.relevantLaneTitle}
+                          </Text>
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: '#F8FAFC', marginTop: 2 }}>
+                            {sc.title}
+                          </Text>
+                        </View>
+                        <Pressable
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                            backgroundColor: '#8B5CF6',
+                            paddingHorizontal: 14,
+                            paddingVertical: 9,
+                            borderRadius: 8,
+                            opacity: investigatingTarget ? 0.6 : 1,
+                          }}
+                          disabled={!!investigatingTarget}
+                          onPress={() => handleRunDeepReasoning(sc.eventId)}
+                        >
+                          <Feather name="cpu" size={14} color="#FFFFFF" />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+                            Run Deep Reasoning Investigation
+                          </Text>
+                        </Pressable>
+                      </View>
+                      <Text style={{ fontSize: 12, color: '#CBD5E1', lineHeight: 18 }}>
+                        {sc.whatChanged}
+                      </Text>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                        <Text style={{ fontSize: 11, color: '#94A3B8' }}>Audience: {sc.relevantAudience}</Text>
+                        <Text style={{ fontSize: 11, color: '#94A3B8' }}>Offering: {sc.relevantOffering}</Text>
+                      </View>
                     </View>
-                    {selectedCase.hypotheses.length === 0 ? (
-                      <Text style={styles.mutedText}>Evaluating primary and alternative causal models.</Text>
-                    ) : (
-                      selectedCase.hypotheses.map((h, i) => (
-                        <View key={h.hypothesisId || i} style={styles.hypothesisCard}>
-                          <View style={styles.hypothesisHeader}>
-                            <Text style={styles.hypothesisType}>
-                              {h.typeLabel || h.type.replace(/_/g, ' ').toUpperCase()}
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {cases.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Feather name="cpu" size={32} color="#8B5CF6" />
+                <Text style={styles.emptyTitle}>No Deep Reasoning Investigations Opened Yet</Text>
+                <Text style={styles.emptySubtitle}>
+                  All 3 actionable strategic scenarios are ready above (and in Watchtower / Events). Click "Run Deep Reasoning Investigation" on any scenario above to run the deterministic causal analysis and preview its BEFORE / AFTER strategy patch.
+                </Text>
+              </View>
+            ) : (
+              <>
+                {/* Case Selector Tabs */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.caseSelectorScroll}>
+                  {cases.map((c) => {
+                    const decAny = c.adaptiveDecision as any;
+                    const isCaseApplied = c.adaptationOutcome != null || decAny?.proposalStatus === 'APPLIED';
+                    return (
+                      <Pressable
+                        key={c.reasoningCaseId}
+                        style={[
+                          styles.caseChip,
+                          selectedCase?.reasoningCaseId === c.reasoningCaseId && styles.caseChipActive,
+                          isCaseApplied && { borderColor: '#10B981' },
+                        ]}
+                        onPress={() => setSelectedCaseId(c.reasoningCaseId)}
+                      >
+                        <Text style={[
+                          styles.caseChipText,
+                          selectedCase?.reasoningCaseId === c.reasoningCaseId && styles.caseChipTextActive,
+                        ]}>
+                          {(c as any).caseTitle || c.adaptiveDecision?.businessAction || c.rootBadgeLabel} ({isCaseApplied ? 'APPLIED' : 'PENDING APPROVAL'})
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+
+                {selectedCase && (() => {
+                  const caseAny: any = selectedCase;
+                  const decAny: any = {
+                    ...caseAny,
+                    ...(selectedCase.adaptiveDecision || {}),
+                    scenarioTitle: caseAny.caseTitle,
+                    affectedLane: caseAny.relevantLaneTitle,
+                    proposedResponseSummary: caseAny.proposedResponse,
+                  };
+                  const isApplied = selectedCase.adaptationOutcome != null || decAny.proposalStatus === 'APPLIED';
+                  return (
+                    <View style={styles.sectionGrid}>
+                      {/* Executive Diagnosis Banner */}
+                      <View style={[styles.card, { backgroundColor: '#1E1B4B', borderColor: isApplied ? '#10B981' : '#4338CA' }]}>
+                        <View style={styles.cardHeader}>
+                          <View style={{ flex: 1, paddingRight: 10 }}>
+                            <Text style={[styles.cardOverline, { color: '#A5B4FC' }]}>
+                              {decAny.scenarioId || selectedCase.rootBadgeLabel} • {decAny.affectedLane || 'STRATEGIC INVESTIGATION'}
                             </Text>
-                            <View style={[
-                              styles.hypoStatusBadge,
-                              h.status === 'VALIDATED' ? styles.hypoValidated : styles.hypoProposed
-                            ]}>
-                              <Text style={styles.hypoStatusText}>{h.status}</Text>
-                            </View>
+                            <Text style={styles.cardTitle}>
+                              {decAny.scenarioTitle || selectedCase.adaptiveDecision?.businessAction || 'Causal Strategy Review'}
+                            </Text>
                           </View>
-                          <Text style={styles.hypothesisExplanation}>{h.explanation}</Text>
-                          <View style={styles.metaRow}>
-                            <Text style={styles.metaText}>Confidence: {Math.round(h.confidence * 100)}%</Text>
-                            <Text style={styles.metaText}>Supporting Evidence: {h.supportingEvidenceCount}</Text>
-                            <Text style={styles.metaText}>Contradicting Evidence: {h.contradictingEvidenceCount}</Text>
+                          <View style={[styles.statusPill, isApplied && { backgroundColor: 'rgba(16, 185, 129, 0.25)' }]}>
+                            <Text style={[styles.statusPillText, isApplied && { color: '#6EE7B7' }]}>
+                              {isApplied ? 'STRATEGY PATCH APPLIED' : 'INVESTIGATION COMPLETE • PATCH READY'}
+                            </Text>
                           </View>
                         </View>
-                      ))
-                    )}
-                  </View>
+                        <Text style={[styles.summaryText, { color: '#E0E7FF' }]}>
+                          {decAny.whatChanged || selectedCase.adaptiveDecision?.actionDescription ||
+                            'Avyron analyzed correlating market and performance signals to evaluate strategic impact.'}
+                        </Text>
 
-                  {/* Adaptive Decision & Recommended Response */}
-                  {selectedCase.adaptiveDecision && (
-                    <View style={styles.card}>
-                      <View style={styles.cardHeader}>
-                        <Feather name="compass" size={18} color="#10B981" />
-                        <Text style={styles.cardTitle}>Recommended Response</Text>
-                      </View>
-                      <View style={styles.decisionHighlight}>
-                        <Text style={styles.decisionAction}>{selectedCase.adaptiveDecision.businessAction}</Text>
-                        <Text style={styles.decisionRationale}>{selectedCase.adaptiveDecision.rationale}</Text>
-                      </View>
-                    </View>
-                  )}
+                        {/* Audience, Offering & Lane Context */}
+                        {(decAny.relevantAudience || decAny.relevantOffering || decAny.affectedLane) && (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+                            {decAny.relevantAudience && (
+                              <View style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#4338CA' }}>
+                                <Text style={{ fontSize: 11, color: '#C7D2FE' }}>Audience: {decAny.relevantAudience}</Text>
+                              </View>
+                            )}
+                            {decAny.relevantOffering && (
+                              <View style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#4338CA' }}>
+                                <Text style={{ fontSize: 11, color: '#C7D2FE' }}>Offering: {decAny.relevantOffering}</Text>
+                              </View>
+                            )}
+                            {decAny.affectedLane && (
+                              <View style={{ backgroundColor: 'rgba(15, 23, 42, 0.65)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#4338CA' }}>
+                                <Text style={{ fontSize: 11, color: '#A5B4FC', fontWeight: '700' }}>Lane: {decAny.affectedLane}</Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
 
-                  {/* Adaptation Outcome Monitoring */}
-                  {selectedCase.adaptationOutcome && (
-                    <View style={[styles.card, { borderColor: '#10B981' }]}>
-                      <View style={styles.cardHeader}>
-                        <Feather name="activity" size={18} color="#10B981" />
-                        <Text style={styles.cardTitle}>Strategy Adaptation Outcome</Text>
+                        {/* Clickable Supporting Evidence Links */}
+                        {Array.isArray(decAny.supportingEvidenceLinks) && decAny.supportingEvidenceLinks.length > 0 && (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+                            {decAny.supportingEvidenceLinks.map((evLink: any, idx: number) => (
+                              <Pressable
+                                key={evLink.id || idx}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                                  borderWidth: 1,
+                                  borderColor: '#38BDF8',
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 6,
+                                  borderRadius: 6,
+                                }}
+                                onPress={() => openEvidenceUrl(evLink.url)}
+                              >
+                                <Feather name="external-link" size={12} color="#38BDF8" />
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: '#E0F2FE' }}>
+                                  Open Evidence Snapshot: {evLink.label || evLink.title}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
+                        )}
                       </View>
-                      <View style={styles.outcomeRow}>
-                        <Text style={styles.detailLabel}>Transition:</Text>
-                        <Text style={styles.detailValue}>
-                          Root v{selectedCase.adaptationOutcome.previousRootVersion} → Root v{selectedCase.adaptationOutcome.newRootVersion}
-                        </Text>
+
+                      {/* Drillable Triggers: Market Events & Performance Warnings */}
+                      <View style={styles.card}>
+                        <View style={styles.cardHeader}>
+                          <Feather name="crosshair" size={18} color="#8B5CF6" />
+                          <Text style={styles.cardTitle}>Investigated Triggers (Click to Inspect)</Text>
+                        </View>
+                        <View style={styles.triggerGrid}>
+                          <Pressable
+                            style={[styles.triggerBox, styles.clickableTrigger]}
+                            onPress={() => setActiveTriggerDrill('events')}
+                          >
+                            <Text style={styles.triggerCount}>{selectedCase.marketEventCount}</Text>
+                            <Text style={styles.triggerLabel}>Market Event(s) →</Text>
+                          </Pressable>
+
+                          <Pressable
+                            style={[styles.triggerBox, styles.clickableTrigger]}
+                            onPress={() => setActiveTriggerDrill('warnings')}
+                          >
+                            <Text style={[styles.triggerCount, { color: '#EF4444' }]}>{selectedCase.performanceWarningCount}</Text>
+                            <Text style={styles.triggerLabel}>Performance Warning(s) →</Text>
+                          </Pressable>
+
+                          <Pressable
+                            style={[styles.triggerBox, styles.clickableTrigger]}
+                            onPress={() => setActiveTriggerDrill('evidence')}
+                          >
+                            <Text style={[styles.triggerCount, { color: '#10B981' }]}>{selectedCase.evidenceCount}</Text>
+                            <Text style={styles.triggerLabel}>Evidence Items →</Text>
+                          </Pressable>
+                        </View>
                       </View>
-                      <View style={styles.outcomeRow}>
-                        <Text style={styles.detailLabel}>Outcome Classification:</Text>
-                        <Text style={[styles.detailValue, { color: '#10B981' }]}>
-                          {selectedCase.adaptationOutcome.outcomeClassification}
-                        </Text>
+
+                      {/* Hypotheses & Competing Explanations */}
+                      <View style={styles.card}>
+                        <View style={styles.cardHeader}>
+                          <Feather name="git-branch" size={18} color="#8B5CF6" />
+                          <Text style={styles.cardTitle}>Causal Hypotheses & Competing Explanations</Text>
+                        </View>
+                        {selectedCase.hypotheses.length === 0 ? (
+                          <Text style={styles.mutedText}>Evaluating primary and alternative causal models.</Text>
+                        ) : (
+                          selectedCase.hypotheses.map((h, i) => (
+                            <View key={h.hypothesisId || i} style={styles.hypothesisCard}>
+                              <View style={styles.hypothesisHeader}>
+                                <Text style={styles.hypothesisType}>
+                                  {h.typeLabel || h.type.replace(/_/g, ' ').toUpperCase()}
+                                </Text>
+                                <View style={[
+                                  styles.hypoStatusBadge,
+                                  (h.status === 'VALIDATED' || h.status === 'SUPPORTED') ? styles.hypoValidated : styles.hypoProposed
+                                ]}>
+                                  <Text style={styles.hypoStatusText}>{h.status}</Text>
+                                </View>
+                              </View>
+                              <Text style={styles.hypothesisExplanation}>{h.explanation}</Text>
+                              <View style={styles.metaRow}>
+                                <Text style={styles.metaText}>Confidence: {Math.round(h.confidence * 100)}%</Text>
+                                <Text style={styles.metaText}>Supporting Evidence: {h.supportingEvidenceCount}</Text>
+                                <Text style={styles.metaText}>Contradicting Evidence: {h.contradictingEvidenceCount}</Text>
+                              </View>
+                            </View>
+                          ))
+                        )}
                       </View>
-                      {selectedCase.adaptationOutcome.summary && (
-                        <Text style={[styles.summaryText, { marginTop: 8 }]}>
-                          {selectedCase.adaptationOutcome.summary}
-                        </Text>
+
+                      {/* Adaptive Decision, Before/After Patch Preview & Approval Control */}
+                      {selectedCase.adaptiveDecision && (
+                        <View style={[styles.card, { borderColor: isApplied ? '#10B981' : '#F59E0B', borderWidth: 1.5 }]}>
+                          <View style={[styles.cardHeader, { justifyContent: 'space-between' }]}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <Feather name="compass" size={18} color={isApplied ? '#10B981' : '#F59E0B'} />
+                              <Text style={styles.cardTitle}>Recommended Strategic Response & Patch Preview</Text>
+                            </View>
+                            <View style={{
+                              paddingHorizontal: 10,
+                              paddingVertical: 4,
+                              borderRadius: 999,
+                              backgroundColor: isApplied ? 'rgba(16, 185, 129, 0.16)' : 'rgba(245, 158, 11, 0.16)',
+                              borderWidth: 1,
+                              borderColor: isApplied ? '#10B981' : '#F59E0B',
+                            }}>
+                              <Text style={{
+                                fontSize: 10,
+                                fontWeight: '700',
+                                color: isApplied ? '#34D399' : '#FBBF24',
+                                letterSpacing: 0.6,
+                              }}>
+                                {decAny.statusBadge || (isApplied ? 'APPROVED & APPLIED' : 'PENDING USER APPROVAL')}
+                              </Text>
+                            </View>
+                          </View>
+
+                          {/* Affected Strategic Assumption & Why Response Is Warranted */}
+                          {decAny.affectedStrategicAssumption && (
+                            <View style={{
+                              padding: 12,
+                              borderRadius: 10,
+                              backgroundColor: 'rgba(139, 92, 246, 0.08)',
+                              borderWidth: 1,
+                              borderColor: 'rgba(139, 92, 246, 0.28)',
+                              gap: 6,
+                            }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#C4B5FD', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                                Affected Strategic Assumption
+                              </Text>
+                              <Text style={{ fontSize: 13, color: '#E2E8F0', lineHeight: 19 }}>
+                                {decAny.affectedStrategicAssumption}
+                              </Text>
+                              {decAny.whyResponseWarranted && (
+                                <>
+                                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#FBBF24', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6 }}>
+                                    Why a Response Is Warranted Now
+                                  </Text>
+                                  <Text style={{ fontSize: 13, color: '#FDE68A', lineHeight: 19 }}>
+                                    {decAny.whyResponseWarranted}
+                                  </Text>
+                                </>
+                              )}
+                            </View>
+                          )}
+
+                          {/* Proposed Response Summary */}
+                          <View style={styles.decisionHighlight}>
+                            <Text style={styles.decisionAction}>{selectedCase.adaptiveDecision.businessAction}</Text>
+                            <Text style={styles.decisionRationale}>{decAny.proposedResponseSummary || selectedCase.adaptiveDecision.rationale}</Text>
+                          </View>
+
+                          {/* Concrete BEFORE / AFTER Strategy Patch Preview */}
+                          {Array.isArray(decAny.beforeAfterPatchPreview) && decAny.beforeAfterPatchPreview.length > 0 && (
+                            <View style={{ gap: 10, marginTop: 4 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '800', color: '#38BDF8', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                                Concrete BEFORE / AFTER Strategy Patch Preview ({decAny.beforeAfterPatchPreview.length} Targeted Changes)
+                              </Text>
+                              {decAny.beforeAfterPatchPreview.map((patch: any, idx: number) => (
+                                <View
+                                  key={idx}
+                                  style={{
+                                    backgroundColor: '#0F172A',
+                                    borderRadius: 10,
+                                    padding: 12,
+                                    borderWidth: 1,
+                                    borderColor: '#334155',
+                                    gap: 8,
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#F8FAFC' }}>
+                                    {idx + 1}. {patch.sectionName || patch.section}
+                                    {patch.fieldLabel ? ` — ${patch.fieldLabel}` : ''}
+                                  </Text>
+                                  {patch.authority && (
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#A5B4FC', letterSpacing: 0.5 }}>
+                                      AUTHORITY: {patch.authority}
+                                    </Text>
+                                  )}
+                                  <View style={{ backgroundColor: 'rgba(239, 68, 68, 0.08)', borderLeftWidth: 3, borderLeftColor: '#EF4444', padding: 8, borderRadius: 6 }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#FCA5A5', textTransform: 'uppercase' }}>BEFORE (Current Plan)</Text>
+                                    <Text style={{ fontSize: 12, color: '#E2E8F0', marginTop: 2, lineHeight: 18 }}>{patch.beforeText ?? patch.before}</Text>
+                                  </View>
+                                  <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.08)', borderLeftWidth: 3, borderLeftColor: '#10B981', padding: 8, borderRadius: 6 }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#6EE7B7', textTransform: 'uppercase' }}>AFTER (Proposed Patch)</Text>
+                                    <Text style={{ fontSize: 12, color: '#ECFDF5', marginTop: 2, lineHeight: 18 }}>{patch.afterText ?? patch.after}</Text>
+                                  </View>
+                                  {patch.rationale && (
+                                    <Text style={{ fontSize: 11, color: '#94A3B8', fontStyle: 'italic' }}>
+                                      Rationale: {patch.rationale}
+                                    </Text>
+                                  )}
+                                </View>
+                              ))}
+                            </View>
+                          )}
+
+                          {/* Strategic Trade-Offs */}
+                          {Array.isArray(decAny.tradeOffs) && decAny.tradeOffs.length > 0 && (
+                            <View style={{
+                              padding: 12,
+                              borderRadius: 10,
+                              backgroundColor: 'rgba(245, 158, 11, 0.07)',
+                              borderWidth: 1,
+                              borderColor: 'rgba(245, 158, 11, 0.25)',
+                              gap: 6,
+                            }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#FBBF24', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                                Explicit Strategic Trade-Offs Evaluated
+                              </Text>
+                              {decAny.tradeOffs.map((t: string, idx: number) => (
+                                <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                                  <Feather name="alert-circle" size={13} color="#FBBF24" style={{ marginTop: 2 }} />
+                                  <Text style={{ flex: 1, fontSize: 12, color: '#FDE68A', lineHeight: 18 }}>{t}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+
+                          {/* Exact Plan Sections & Action Items Changed + What Stays Unchanged */}
+                          {Array.isArray(decAny.affectedPlanItems) && (
+                            <View style={{
+                              padding: 12,
+                              borderRadius: 10,
+                              backgroundColor: 'rgba(15, 23, 42, 0.7)',
+                              borderWidth: 1,
+                              borderColor: '#1E293B',
+                            }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#38BDF8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>
+                                Exact Plan Sections & Weekly Action Items Targeted
+                              </Text>
+                              {(decAny.affectedPlanItems as string[]).map((item, idx) => (
+                                <View key={idx} style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
+                                  <Feather name="check-square" size={14} color="#38BDF8" style={{ marginTop: 2 }} />
+                                  <Text style={{ flex: 1, fontSize: 13, color: '#CBD5E1', lineHeight: 18 }}>{item}</Text>
+                                </View>
+                              ))}
+                              {decAny.unchangedExplanation && (
+                                <View style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#334155' }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
+                                    What Stays Unchanged & Why
+                                  </Text>
+                                  <Text style={{ fontSize: 12, color: '#94A3B8', lineHeight: 18 }}>
+                                    {decAny.unchangedExplanation}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                          )}
+
+                          {!isApplied ? (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
+                              <Pressable
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  backgroundColor: '#10B981',
+                                  paddingHorizontal: 18,
+                                  paddingVertical: 11,
+                                  borderRadius: 8,
+                                  opacity: approvingProposal ? 0.7 : 1,
+                                }}
+                                disabled={approvingProposal}
+                                onPress={() => handleApproveCaseProposal(decAny.proposalId)}
+                              >
+                                {approvingProposal ? (
+                                  <ActivityIndicator size="small" color="#FFFFFF" />
+                                ) : (
+                                  <Feather name="check-circle" size={15} color="#FFFFFF" />
+                                )}
+                                <Text style={{ color: '#FFFFFF', fontSize: 13, fontWeight: '700' }}>
+                                  {approvingProposal ? 'Applying Strategy Patch…' : 'Approve Response & Apply Strategy Patch'}
+                                </Text>
+                              </Pressable>
+
+                              <Pressable
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  backgroundColor: 'rgba(139, 92, 246, 0.14)',
+                                  borderWidth: 1,
+                                  borderColor: 'rgba(139, 92, 246, 0.45)',
+                                  paddingHorizontal: 14,
+                                  paddingVertical: 11,
+                                  borderRadius: 8,
+                                }}
+                                onPress={() => router.push('/(tabs)/strategy-plan' as any)}
+                              >
+                                <Feather name="layers" size={14} color="#C4B5FD" />
+                                <Text style={{ color: '#C4B5FD', fontSize: 13, fontWeight: '600' }}>
+                                  Review Proposal in Strategy Plan →
+                                </Text>
+                              </Pressable>
+                            </View>
+                          ) : (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }}>
+                              <Pressable
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  backgroundColor: 'rgba(16, 185, 129, 0.18)',
+                                  borderWidth: 1,
+                                  borderColor: '#10B981',
+                                  paddingHorizontal: 14,
+                                  paddingVertical: 10,
+                                  borderRadius: 8,
+                                }}
+                                onPress={() => router.push('/(tabs)/strategy-plan' as any)}
+                              >
+                                <Feather name="layers" size={14} color="#34D399" />
+                                <Text style={{ color: '#34D399', fontSize: 13, fontWeight: '700' }}>
+                                  View Updated Strategy Plan →
+                                </Text>
+                              </Pressable>
+                              <Pressable
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 6,
+                                  backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                                  borderWidth: 1,
+                                  borderColor: '#38BDF8',
+                                  paddingHorizontal: 14,
+                                  paddingVertical: 10,
+                                  borderRadius: 8,
+                                }}
+                                onPress={() => router.push('/(tabs)/execution' as any)}
+                              >
+                                <Feather name="check-square" size={14} color="#7DD3FC" />
+                                <Text style={{ color: '#7DD3FC', fontSize: 13, fontWeight: '700' }}>
+                                  View Updated "What to do today" →
+                                </Text>
+                              </Pressable>
+                            </View>
+                          )}
+                        </View>
+                      )}
+
+                      {/* Adaptation Outcome Monitoring */}
+                      {selectedCase.adaptationOutcome && (
+                        <View style={[styles.card, { borderColor: '#10B981' }]}>
+                          <View style={styles.cardHeader}>
+                            <Feather name="activity" size={18} color="#10B981" />
+                            <Text style={styles.cardTitle}>Strategy Adaptation Lineage</Text>
+                          </View>
+                          <View style={styles.outcomeRow}>
+                            <Text style={styles.detailLabel}>Transition:</Text>
+                            <Text style={styles.detailValue}>
+                              Root v{selectedCase.adaptationOutcome.previousRootVersion} → Root v{selectedCase.adaptationOutcome.newRootVersion}
+                            </Text>
+                          </View>
+                          <View style={styles.outcomeRow}>
+                            <Text style={styles.detailLabel}>Monitoring Status:</Text>
+                            <Text style={[styles.detailValue, { color: '#10B981' }]}>
+                              {selectedCase.adaptationOutcome.outcomeClassification}
+                            </Text>
+                          </View>
+                          {selectedCase.adaptationOutcome.summary && (
+                            <Text style={[styles.summaryText, { marginTop: 8 }]}>
+                              {selectedCase.adaptationOutcome.summary}
+                            </Text>
+                          )}
+                        </View>
                       )}
                     </View>
-                  )}
-                </View>
-              )}
-            </View>
-          )
+                  );
+                })()}
+              </>
+            )}
+          </View>
         )}
       </ScrollView>
 
@@ -726,7 +1416,7 @@ export default function ReasoningScreen() {
             <View style={styles.modalHeader}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.cardOverline}>{eventDetail?.competitorName || 'MARKET COMPETITOR'}</Text>
-                <Text style={styles.modalTitle}>{eventDetail?.businessFriendlyType || 'Event Investigation'}</Text>
+                <Text style={styles.modalTitle}>{(eventDetail as any)?.customTitle || eventDetail?.businessFriendlyType || 'Event Investigation'}</Text>
               </View>
               <Pressable style={styles.closeBtn} onPress={() => { setSelectedEventId(null); setEventDetail(null); }}>
                 <Feather name="x" size={20} color="#CBD5E1" />
@@ -747,6 +1437,48 @@ export default function ReasoningScreen() {
                   </View>
                   <Text style={styles.detailBannerText}>Severity: {eventDetail.severity} • Confidence: {Math.round(eventDetail.confidence * 100)}%</Text>
                 </View>
+
+                {/* Deep Reasoning Action CTA if linkedScenarioId */}
+                {(eventDetail as any).linkedScenarioId && (
+                  <View style={{
+                    backgroundColor: '#1E1B4B',
+                    borderRadius: 10,
+                    padding: 14,
+                    borderWidth: 1,
+                    borderColor: '#8B5CF6',
+                    marginBottom: 16,
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#C4B5FD', textTransform: 'uppercase' }}>
+                        Actionable Strategic Signal ({(eventDetail as any).linkedScenarioId})
+                      </Text>
+                      <Text style={{ fontSize: 13, color: '#E0E7FF', marginTop: 2 }}>
+                        Open the event-specific Deep Reasoning investigation to review hypotheses and the BEFORE / AFTER strategy patch.
+                      </Text>
+                    </View>
+                    <Pressable
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 6,
+                        backgroundColor: '#8B5CF6',
+                        paddingHorizontal: 14,
+                        paddingVertical: 10,
+                        borderRadius: 8,
+                      }}
+                      onPress={() => handleRunDeepReasoning(eventDetail.eventId)}
+                    >
+                      <Feather name="cpu" size={14} color="#FFFFFF" />
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#FFFFFF' }}>
+                        Run Deep Reasoning →
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
 
                 {/* 2. What Changed — the intelligence summary */}
                 <View style={styles.detailSection}>
@@ -770,6 +1502,41 @@ export default function ReasoningScreen() {
                         <Text style={styles.diffValue}>{eventDetail.afterState}</Text>
                       </View>
                     )}
+                  </View>
+                )}
+
+                {/* Supporting Synthetic Evidence Links */}
+                {Array.isArray((eventDetail as any).evidenceUrls) && (eventDetail as any).evidenceUrls.length > 0 && (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionTitle}>Supporting Synthetic Evidence (Opens in Evidence Inspector)</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {((eventDetail as any).evidenceUrls as string[]).map((url: string, idx: number) => ({
+                        id: url,
+                        url,
+                        label: `Evidence ${idx + 1}: ${url.split('/').pop() || url}`,
+                      })).map((evLink: any, idx: number) => (
+                        <Pressable
+                          key={evLink.id || idx}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 6,
+                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                            borderWidth: 1,
+                            borderColor: '#38BDF8',
+                            paddingHorizontal: 12,
+                            paddingVertical: 8,
+                            borderRadius: 8,
+                          }}
+                          onPress={() => openEvidenceUrl(evLink.url)}
+                        >
+                          <Feather name="external-link" size={13} color="#38BDF8" />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: '#E0F2FE' }}>
+                            {evLink.label}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
                   </View>
                 )}
 
@@ -900,7 +1667,7 @@ export default function ReasoningScreen() {
                   </View>
                 )}
 
-                {/* 11. Supporting Evidence Sources (backend lineage, not the product) */}
+                {/* 11. Supporting Evidence Sources */}
                 {eventDetail.evidenceItems.length > 0 && (
                   <View style={styles.detailSection}>
                     <Text style={[styles.detailSectionTitle, { color: '#6B7280' }]}>Supporting Source References</Text>

@@ -79,7 +79,8 @@ export function judgeReasoningAnalysis(
   const hasAlternativeCauses = hypotheses.some(
     h => h.hypothesisType === "EXECUTION_OR_DISTRIBUTION_FLUCTUATION" ||
          h.hypothesisType === "FUNNEL_OR_OFFER_FRICTION" ||
-         h.hypothesisType === "STATISTICAL_NOISE"
+         h.hypothesisType === "STATISTICAL_NOISE" ||
+         h.hypothesisType === "MEASUREMENT_OR_TRUTH_GAP"
   );
 
   if (performanceSignals.length > 0 && !hasAlternativeCauses) {
@@ -139,12 +140,26 @@ export function judgeReasoningAnalysis(
     };
   }
 
-  if (reasoningCase.evidenceIds.length === 0 && !hasConfirmedMarketEvent && performanceSignals.length === 0) {
+  const hasOnlyProofGapSignals =
+    performanceSignals.length > 0 &&
+    performanceSignals.every(
+      s => s.signalType === "PROOF_GAP_UNMEASURED_TRUTH" || s.metadata?.isProofGapOnly === true
+    ) &&
+    !hasConfirmedMarketEvent &&
+    !hasPreliminaryMarketEvent;
+
+  if (
+    (reasoningCase.evidenceIds.length === 0 && !hasConfirmedMarketEvent && performanceSignals.length === 0) ||
+    hasOnlyProofGapSignals ||
+    reasoningCase.status === "INSUFFICIENT_EVIDENCE"
+  ) {
     return {
       status: "INSUFFICIENT_EVIDENCE",
-      confidence: 0.3,
+      confidence: hasOnlyProofGapSignals ? 0.35 : 0.3,
       violations: [],
-      rationale: "Evidence insufficient to substantiate causal diagnosis. Failing closed.",
+      rationale: hasOnlyProofGapSignals
+        ? "Campaign-window conversion, sales, and lead telemetry have not been submitted yet (mode=UNKNOWN). Missing baseline business truth is an unmeasured proof gap, not an execution or funnel failure. Maintaining observation without strategy or plan modification."
+        : "Evidence insufficient to substantiate causal diagnosis. Failing closed.",
       overclaimDetected: false,
       alternativeCausesSatisfied: hasAlternativeCauses,
     };

@@ -50,7 +50,7 @@ interface CompetitorData {
     id: string;
     name: string;
     platform: string;
-    profileLink: string;
+    websiteUrl: string;
     isActive: boolean;
     accountId: string;
     campaignId: string;
@@ -283,7 +283,7 @@ export default function MarketDatabaseAdmin() {
               {c.platform} · {c.postCount} posts stored
             </Text>
             <Text style={[styles.competitorLink, { color: colors.primary }]} numberOfLines={1}>
-              {c.profileLink}
+              {c.websiteUrl || c.name}
             </Text>
           </View>
         ))}

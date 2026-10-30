@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { db } from "./db";
-import { publishedPosts, accountState, metaCredentials } from "@shared/schema";
+import { publishedPosts, accountState, metaCredentials, strategicPlans } from "@shared/schema";
 import { eq, sql, and } from "drizzle-orm";
 import { logAudit, type AuditEventType } from "./audit";
 import * as crypto from "crypto";
@@ -8,6 +8,7 @@ import { decryptToken, redactToken } from "./meta-crypto";
 import type { MetaMode } from "./meta-status";
 import { recordMetaApiCall } from "./meta-metrics";
 import { classifyMetaError, classifyNetworkError, recordTemporaryError, recordSuccess, isInBackoff } from "./meta-error-classifier";
+import { evaluateClaimSemanticEntailment } from "./shared/claim-entailment";
 
 const PUBLISH_CHECK_INTERVAL_MS = 2 * 60 * 1000;
 
@@ -411,6 +412,87 @@ async function getServerSidePageToken(accountId: string): Promise<{ token: strin
   }
 }
 
+export interface PublishPreflightResult {
+  canPublish: boolean;
+  reason?: string;
+  blockCode?: "AUTOPILOT_OFF" | "SAFE_MODE" | "PLAN_NOT_ACTIVE" | "PLAN_UNAPPROVED" | "UNPROVEN_CLAIM_RESTRICTION" | "LINEAGE_RESTRICTED";
+}
+
+export async function evaluatePublishPreflight(
+  post: any,
+  acctState: any,
+): Promise<PublishPreflightResult> {
+  if (!acctState?.autopilotOn) {
+    return { canPublish: false, blockCode: "AUTOPILOT_OFF", reason: "Autopilot is disabled for this account" };
+  }
+
+  if (acctState?.state === "SAFE_MODE") {
+    return { canPublish: false, blockCode: "SAFE_MODE", reason: "Account is in SAFE_MODE" };
+  }
+
+  // Plan verification: If post is linked to a plan, the plan must be APPROVED and designated ACTIVE
+  let planCampaignId: string | undefined;
+  if (post.planId) {
+    const [plan] = await db
+      .select({ id: strategicPlans.id, campaignId: strategicPlans.campaignId, status: strategicPlans.status, isDesignatedActive: strategicPlans.isDesignatedActive })
+      .from(strategicPlans)
+      .where(eq(strategicPlans.id, post.planId))
+      .limit(1);
+
+    if (!plan) {
+      return { canPublish: false, blockCode: "PLAN_NOT_ACTIVE", reason: `Plan ${post.planId} not found` };
+    }
+    if (plan.status !== "APPROVED") {
+      return { canPublish: false, blockCode: "PLAN_UNAPPROVED", reason: `Plan ${post.planId} is in status '${plan.status}', not APPROVED` };
+    }
+    if (!plan.isDesignatedActive) {
+      return { canPublish: false, blockCode: "PLAN_NOT_ACTIVE", reason: `Plan ${post.planId} is not the designated active execution plan` };
+    }
+    planCampaignId = plan.campaignId;
+  }
+
+  // Content claim restriction: Ensure post caption assertions are grounded in verified Product Truth
+  if (post.caption) {
+    let verifiedEvidence: string[] = [];
+    const campaignId = post.campaignId || planCampaignId;
+    if (campaignId) {
+      try {
+        const buRes = await db.execute(sql`
+          SELECT business_understanding 
+          FROM business_understanding_snapshots 
+          WHERE campaign_id = ${campaignId} 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        `);
+        if (buRes.rows.length > 0) {
+          const raw = (buRes.rows[0] as any).business_understanding;
+          const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+          const facts = parsed?.campaignOffering?.productTruthFacts || [];
+          verifiedEvidence = facts.map((f: any) => (typeof f === "string" ? f : f.statement || f.fact)).filter(Boolean);
+        }
+      } catch (err: any) {
+        console.warn("[PublishPreflight] Error fetching verified evidence for preflight:", err.message);
+      }
+    }
+
+    // Also support verified evidence passed via post fixture / options
+    if (Array.isArray(post.verifiedEvidence) && post.verifiedEvidence.length > 0) {
+      verifiedEvidence = [...verifiedEvidence, ...post.verifiedEvidence];
+    }
+
+    const entailment = evaluateClaimSemanticEntailment(post.caption, verifiedEvidence);
+    if (!entailment.isGrounded && (entailment.status === "UNSUPPORTED_EXPANSION" || entailment.status === "CONTRADICTED")) {
+      return {
+        canPublish: false,
+        blockCode: "UNPROVEN_CLAIM_RESTRICTION",
+        reason: `Caption asserts unverified capabilities (${entailment.unsupportedProperties.join(", ")}) not supported by Product Truth evidence scope.`,
+      };
+    }
+  }
+
+  return { canPublish: true };
+}
+
 async function checkAndPublishDuePosts() {
   if (isShuttingDown) return;
 
@@ -447,12 +529,16 @@ async function checkAndPublishDuePosts() {
           .limit(1);
 
         const acctState = state[0];
-        if (!acctState?.autopilotOn) {
-          await releaseLock(post.id, lockToken);
-          continue;
-        }
-
-        if (acctState.state === "SAFE_MODE") {
+        const preflight = await evaluatePublishPreflight(post, acctState);
+        if (!preflight.canPublish) {
+          console.warn(`[PublishWorker] PREFLIGHT_BLOCKED | Post ${post.id}: ${preflight.reason}`);
+          await logAudit(accountId, "PUBLISH_FAILED", {
+            details: {
+              postId: post.id,
+              blockCode: preflight.blockCode,
+              reason: preflight.reason,
+            },
+          });
           await releaseLock(post.id, lockToken);
           continue;
         }

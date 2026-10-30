@@ -487,15 +487,25 @@ export function updateConfidenceChain(
   // retained for checkBudgetOverrideZeroConfidence (blocks scale/test budget
   // actions when any engine genuinely emitted 0 combined confidence).
   const floorBeforeThisEngine = ssc.confidenceFloor;
-  ssc.confidenceFloor = Math.min(ssc.confidenceFloor, combinedConfidence);
-  ssc.confidenceChain.push({
+  const entry: ConfidenceChainEntry = {
     engineId,
     dataConfidence,
     engineConfidence,
     combinedConfidence,
     localCombined: combinedConfidence,
     inheritedFloor: floorBeforeThisEngine, // diagnostic record only — no longer a cap
-  });
+  };
+  const existingIdx = ssc.confidenceChain.findIndex(e => e.engineId === engineId);
+  if (existingIdx >= 0) {
+    ssc.confidenceChain[existingIdx] = entry;
+    ssc.confidenceFloor = ssc.confidenceChain.reduce(
+      (min, e) => Math.min(min, e.combinedConfidence),
+      1.0,
+    );
+  } else {
+    ssc.confidenceFloor = Math.min(ssc.confidenceFloor, combinedConfidence);
+    ssc.confidenceChain.push(entry);
+  }
 }
 
 export function addContradiction(

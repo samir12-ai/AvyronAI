@@ -381,28 +381,23 @@ describe("Campaign Isolation - Competitors", () => {
   it("competitors are strictly isolated per campaign", async () => {
     const compA1 = await db.insert(ciCompetitors).values({
       accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_A,
-      name: "Agency Comp 1", platform: "instagram", profileLink: "https://instagram.com/agency1",
-      businessType: "agency", primaryObjective: "leads",
+      name: "Agency Comp 1", platform: "instagram", businessType: "agency", primaryObjective: "leads",
     }).returning();
     const compA2 = await db.insert(ciCompetitors).values({
       accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_A,
-      name: "Agency Comp 2", platform: "instagram", profileLink: "https://instagram.com/agency2",
-      businessType: "agency", primaryObjective: "leads",
+      name: "Agency Comp 2", platform: "instagram", businessType: "agency", primaryObjective: "leads",
     }).returning();
     const compA3 = await db.insert(ciCompetitors).values({
       accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_A,
-      name: "Agency Comp 3", platform: "instagram", profileLink: "https://instagram.com/agency3",
-      businessType: "agency", primaryObjective: "leads",
+      name: "Agency Comp 3", platform: "instagram", businessType: "agency", primaryObjective: "leads",
     }).returning();
     const compB1 = await db.insert(ciCompetitors).values({
       accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_B,
-      name: "Fitness Comp 1", platform: "instagram", profileLink: "https://instagram.com/fitness1",
-      businessType: "fitness", primaryObjective: "sales",
+      name: "Fitness Comp 1", platform: "instagram", businessType: "fitness", primaryObjective: "sales",
     }).returning();
     const compB2 = await db.insert(ciCompetitors).values({
       accountId: ISO_ACCOUNT, campaignId: CAMPAIGN_B,
-      name: "Fitness Comp 2", platform: "instagram", profileLink: "https://instagram.com/fitness2",
-      businessType: "fitness", primaryObjective: "sales",
+      name: "Fitness Comp 2", platform: "instagram", businessType: "fitness", primaryObjective: "sales",
     }).returning();
 
     createdIds.push(compA1[0].id, compA2[0].id, compA3[0].id, compB1[0].id, compB2[0].id);

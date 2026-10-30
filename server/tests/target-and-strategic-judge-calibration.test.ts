@@ -67,10 +67,23 @@ describe("Target Assessment & Strategic Pain Decision Judge Calibration Tests", 
       painClaim: "Data fragmentation and unverified signals lead to severe go-to-market strategy misallocations costing millions in wasted spend.",
       productFitType: "DIRECT_FIT",
       targetCoverageDecision: "RELATED_BUT_UNPROVEN",
-      materialityContext: {
-        evidenceStrength: 0.95,
-        evidenceUids: ["EV-101", "EV-102", "EV-103", "EV-104", "EV-105"],
-        occurrenceCount: 15,
+      materiality: {
+        mode: "GROUNDED",
+        evidence: [
+          {
+            evidenceUid: "EV-101",
+            rawEvidenceUids: ["EV-101", "EV-102"],
+            canonicalEvidenceId: "rev:101",
+            actorType: "CUSTOMER",
+            authorityClass: "DIRECT_CUSTOMER_VOICE",
+            sourceType: "Executive Interview",
+            verbatimText: "Data fragmentation and unverified signals lead to severe go-to-market strategy misallocations costing millions in wasted spend.",
+            boundedExcerpt: '[Executive Interview] "Data fragmentation and unverified signals lead to severe go-to-market strategy misallocations costing millions in wasted spend."',
+          }
+        ],
+        rawEvidenceUids: ["EV-101", "EV-102", "EV-103", "EV-104", "EV-105"],
+        rawCitationCount: 15,
+        uniqueEvidenceCount: 5,
         sourceTypes: ["Executive Interview", "G2 Verified Review", "Industry Survey"]
       },
       accountId,
@@ -102,10 +115,23 @@ describe("Target Assessment & Strategic Pain Decision Judge Calibration Tests", 
       painClaim: "Minor font rendering inconsistencies in competitor reporting exports cause occasional aesthetic annoyance.",
       productFitType: "DIRECT_FIT",
       targetCoverageDecision: "RELATED_BUT_UNPROVEN",
-      materialityContext: {
-        evidenceStrength: 0.2,
-        evidenceUids: ["EV-999"],
-        occurrenceCount: 1,
+      materiality: {
+        mode: "GROUNDED",
+        evidence: [
+          {
+            evidenceUid: "EV-999",
+            rawEvidenceUids: ["EV-999"],
+            canonicalEvidenceId: "rev:999",
+            actorType: "CUSTOMER",
+            authorityClass: "DIRECT_CUSTOMER_VOICE",
+            sourceType: "One-off comment",
+            verbatimText: "Minor font rendering inconsistencies in competitor reporting exports cause occasional aesthetic annoyance.",
+            boundedExcerpt: '[One-off comment] "Minor font rendering inconsistencies in competitor reporting exports cause occasional aesthetic annoyance."',
+          }
+        ],
+        rawEvidenceUids: ["EV-999"],
+        rawCitationCount: 1,
+        uniqueEvidenceCount: 1,
         sourceTypes: ["One-off comment"]
       },
       accountId,
@@ -136,10 +162,23 @@ describe("Target Assessment & Strategic Pain Decision Judge Calibration Tests", 
       painClaim: "Occasional mild delay in downloading monthly dashboard PDF summaries.",
       productFitType: "DIRECT_FIT",
       targetCoverageDecision: "COVERED",
-      materialityContext: {
-        evidenceStrength: 0.25,
-        evidenceUids: ["EV-01"],
-        occurrenceCount: 1,
+      materiality: {
+        mode: "GROUNDED",
+        evidence: [
+          {
+            evidenceUid: "EV-01",
+            rawEvidenceUids: ["EV-01"],
+            canonicalEvidenceId: "rev:01",
+            actorType: "CUSTOMER",
+            authorityClass: "DIRECT_CUSTOMER_VOICE",
+            sourceType: "Minor feedback",
+            verbatimText: "Occasional mild delay in downloading monthly dashboard PDF summaries.",
+            boundedExcerpt: '[Minor feedback] "Occasional mild delay in downloading monthly dashboard PDF summaries."',
+          }
+        ],
+        rawEvidenceUids: ["EV-01"],
+        rawCitationCount: 1,
+        uniqueEvidenceCount: 1,
         sourceTypes: ["Minor feedback"]
       },
       accountId,
@@ -170,10 +209,23 @@ describe("Target Assessment & Strategic Pain Decision Judge Calibration Tests", 
       painClaim: "End-consumer subscribers experience recurring credit card charges after requesting service cancellation.",
       productFitType: "NOT_FIT",
       targetCoverageDecision: "NOT_COVERED",
-      materialityContext: {
-        evidenceStrength: 0.8,
-        evidenceUids: ["EV-B1"],
-        occurrenceCount: 8,
+      materiality: {
+        mode: "GROUNDED",
+        evidence: [
+          {
+            evidenceUid: "EV-B1",
+            rawEvidenceUids: ["EV-B1"],
+            canonicalEvidenceId: "rev:B1",
+            actorType: "CUSTOMER",
+            authorityClass: "DIRECT_CUSTOMER_VOICE",
+            sourceType: "Consumer complaint forum",
+            verbatimText: "End-consumer subscribers experience recurring credit card charges after requesting service cancellation.",
+            boundedExcerpt: '[Consumer complaint forum] "End-consumer subscribers experience recurring credit card charges after requesting service cancellation."',
+          }
+        ],
+        rawEvidenceUids: ["EV-B1"],
+        rawCitationCount: 8,
+        uniqueEvidenceCount: 1,
         sourceTypes: ["Consumer complaint forum"]
       },
       accountId,

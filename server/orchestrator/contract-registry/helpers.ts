@@ -152,8 +152,10 @@ export function classifyTrust(
 
   // 5. Run-id mapping.
   const sourceJobId = prov?.sourceJobId ?? null;
-  const sameJob = sourceJobId !== null && currentJobId !== null && sourceJobId === currentJobId;
-  const diffJob = sourceJobId !== null && currentJobId !== null && sourceJobId !== currentJobId;
+  const sameJob =
+    (sourceJobId !== null && currentJobId !== null && sourceJobId === currentJobId) ||
+    prov?.isOfficialResume === true;
+  const diffJob = !sameJob && sourceJobId !== null && currentJobId !== null && sourceJobId !== currentJobId;
 
   // 5a. No provenance row → produced this run (no _provenance is the
   // orchestrator's "fresh" indicator). Contract is COMPLETE here.
@@ -428,6 +430,7 @@ function extractProvenance(result: EngineStepResult): ProvenanceForTrust | null 
     // consumer also passes its accountId/campaignId.
     sourceAccountId: typeof prov.sourceAccountId === "string" ? prov.sourceAccountId : null,
     sourceCampaignId: typeof prov.sourceCampaignId === "string" ? prov.sourceCampaignId : null,
+    isOfficialResume: prov.isOfficialResume === true,
   };
 }
 

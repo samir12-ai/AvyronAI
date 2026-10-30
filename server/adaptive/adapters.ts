@@ -153,6 +153,9 @@ export function adaptPerformanceContextToSignals(context: any): AdaptiveSignal[]
   }
 
   // Discrete weakest signals / proof gaps
+  const isUnmeasuredBaselineMode =
+    String(context.mode || "").toUpperCase().trim() === "UNKNOWN" &&
+    (!normBottleneck || normBottleneck === "UNKNOWN" || normBottleneck === "NONE" || normBottleneck === "NULL");
   const weakest = Array.isArray(context.weakestSignals) ? context.weakestSignals : [];
   for (let i = 0; i < weakest.length; i++) {
     const rawGap = weakest[i];
@@ -165,18 +168,41 @@ export function adaptPerformanceContextToSignals(context: any): AdaptiveSignal[]
         sourceArtifactId: context.id, // Parent container ID
         entityIds: [context.businessExecutionStateId].filter(Boolean),
         evidenceIds,
-        signalType: "PERFORMANCE_GAP",
+        signalType: isUnmeasuredBaselineMode ? "PROOF_GAP_UNMEASURED_TRUTH" : "PERFORMANCE_GAP",
         summary: rawGap,
-        severity: "HIGH",
-        confidence: confidenceScore,
+        severity: isUnmeasuredBaselineMode ? "LOW" : "HIGH",
+        confidence: isUnmeasuredBaselineMode ? 0.35 : confidenceScore,
         observedAt: context.createdAt instanceof Date ? context.createdAt.toISOString() : (context.createdAt || new Date().toISOString()),
         createdAt: new Date().toISOString(),
         metadata: {
           mode: context.mode,
           gapIndex: i,
+          isProofGapOnly: isUnmeasuredBaselineMode,
         },
       });
     }
+  }
+
+  if (signals.length === 0 && (context.mode === "BUILD" || context.mode === "OPTIMIZE")) {
+    signals.push({
+      signalId: `sig_perf_state_${context.id}`,
+      campaignId: context.campaignId || context.campaign_id,
+      accountId: context.accountId || context.account_id,
+      sourceDomain: "PERFORMANCE",
+      sourceArtifactId: context.id,
+      entityIds: [context.businessExecutionStateId || context.business_execution_state_id].filter(Boolean),
+      evidenceIds,
+      signalType: "PERFORMANCE_STATE_ESTABLISHED",
+      summary: context.currentReality || `Performance Loop state evaluated (${context.mode}).`,
+      severity: "LOW",
+      confidence: confidenceScore,
+      observedAt: context.createdAt instanceof Date ? context.createdAt.toISOString() : (context.createdAt || new Date().toISOString()),
+      createdAt: new Date().toISOString(),
+      metadata: {
+        mode: context.mode,
+        bottleneck: context.primaryBottleneck || "NONE",
+      },
+    });
   }
 
   return signals;
