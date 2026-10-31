@@ -284,6 +284,9 @@ function serveLandingPage({
 
   setStaticSecurityHeaders(res);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.status(200).send(html);
 }
 
@@ -339,7 +342,7 @@ function configureExpoAndLanding(app: express.Application) {
       return serveLandingPage({
         req,
         res,
-        landingPageTemplate,
+        landingPageTemplate: fs.readFileSync(templatePath, "utf-8"),
         appName,
       });
     }
@@ -347,6 +350,13 @@ function configureExpoAndLanding(app: express.Application) {
     next();
   });
 
+  app.use(
+    "/assets/website",
+    express.static(path.resolve(process.cwd(), "assets", "website"), {
+      maxAge: "365d",
+      immutable: true,
+    }),
+  );
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 

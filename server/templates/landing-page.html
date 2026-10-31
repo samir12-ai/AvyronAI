@@ -1,1531 +1,766 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Avyron AI — See the market before it moves.</title>
-  <meta name="description" content="Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth." />
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avyron AI — Your AI marketing strategy team</title>
+<meta name="description" content="Avyron reads your market, listens to your customers and builds your marketing strategy on real evidence. Then it keeps watching and adapts when your market moves.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Avyron AI">
+<meta property="og:title" content="Avyron AI — Your AI marketing strategy team">
+<meta property="og:description" content="Avyron reads your market, listens to your customers and builds your marketing strategy on real evidence. Then it keeps watching and adapts when your market moves.">
+<meta property="og:image" content="/assets/website/hero-dashboard.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#06050B">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23C4B5FD'/%3E%3Cstop offset='.45' stop-color='%238B5CF6'/%3E%3Cstop offset='1' stop-color='%234F46E5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='Arial,sans-serif' font-weight='700' font-size='36' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="/assets/images/icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@500;600;700;800&amp;family=Unbounded:wght@600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#06050B}
+a{color:#C4B5FD;text-decoration:none}
+a:hover{color:#EDE9FE}
+.nl{color:#A9A3C2;transition:color .2s}
+.nl:hover{color:#FFFFFF}
+.bp{transition:transform .25s ease, box-shadow .25s ease}
+.bp:hover{transform:translateY(-2px);box-shadow:0 20px 50px -12px rgba(139,92,246,.8)}
+.bg2{transition:background .25s, border-color .25s}
+.bg2:hover{background:rgba(255,255,255,.06);border-color:rgba(196,181,253,.5)}
+.tile{transition:border-color .35s, transform .35s}
+.tile:hover{border-color:rgba(196,181,253,.32);transform:translateY(-4px)}
+.grad-text{background:linear-gradient(100deg,#EDE9FE 0%,#A78BFA 28%,#F472B6 50%,#A78BFA 72%,#EDE9FE 100%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.floor{background-image:linear-gradient(rgba(167,139,250,.35) 1px,transparent 1px),linear-gradient(90deg,rgba(167,139,250,.35) 1px,transparent 1px);background-size:72px 72px;-webkit-mask-image:linear-gradient(180deg,transparent 0%,#000 45%,#000 100%);mask-image:linear-gradient(180deg,transparent 0%,#000 45%,#000 100%)}
+.dots{background-image:radial-gradient(rgba(255,255,255,.09) 1px,transparent 1px);background-size:22px 22px}
+details summary{list-style:none;cursor:pointer}
+details summary::-webkit-details-marker{display:none}
+details .plus{transition:transform .3s}
+details[open] .plus{transform:rotate(45deg)}
+details[open]{border-color:rgba(196,181,253,.35) !important;background:#110E1C !important}
+.wm{-webkit-text-stroke:1.5px rgba(196,181,253,.35);color:transparent;background:linear-gradient(180deg,rgba(139,92,246,.22),rgba(6,5,11,0) 80%);-webkit-background-clip:text;background-clip:text}
 
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="/assets/images/favicon.png" />
-  <link rel="apple-touch-icon" href="/assets/images/icon.png" />
+@keyframes wordCycle{0%,17%{transform:translateY(0)}21%,38%{transform:translateY(-1.12em)}42%,59%{transform:translateY(-2.24em)}63%,80%{transform:translateY(-3.36em)}84%,100%{transform:translateY(-4.48em)}}
+@keyframes shimmerMove{0%{background-position:120% 0}100%{background-position:-120% 0}}
+@keyframes floorMove{from{background-position:0 0}to{background-position:0 72px}}
+@keyframes aurora1{0%,100%{transform:translate(0,0) rotate(0deg) scale(1)}50%{transform:translate(120px,60px) rotate(25deg) scale(1.2)}}
+@keyframes aurora2{0%,100%{transform:translate(0,0) rotate(0deg) scale(1)}50%{transform:translate(-140px,40px) rotate(-20deg) scale(1.15)}}
+@keyframes aurora3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(60px,-80px) scale(1.25)}}
+@keyframes tiltIn{0%{transform:rotateX(28deg) translateY(80px) scale(.94);opacity:0}100%{transform:rotateX(9deg) translateY(0) scale(1);opacity:1}}
+@keyframes floatY{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
+@keyframes floatY2{0%,100%{transform:translateY(0)}50%{transform:translateY(10px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spinR{to{transform:rotate(-360deg)}}
+@keyframes toast{0%,6%{opacity:0;transform:translateY(-18px) scale(.96)}12%,64%{opacity:1;transform:none}72%,100%{opacity:0;transform:translateY(-10px)}}
+@keyframes chipIn{0%,30%{opacity:0;transform:translateX(16px)}38%,82%{opacity:1;transform:none}90%,100%{opacity:0;transform:translateX(8px)}}
+@keyframes quoteIn{0%,50%{opacity:0;transform:translateY(14px)}58%,92%{opacity:1;transform:none}100%{opacity:0}}
+@keyframes bar{0%,10%{width:12%}55%,100%{width:91%}}
+@keyframes marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes marqueeR{from{transform:translateX(-50%)}to{transform:translateX(0)}}
+@keyframes feed{from{transform:translateY(0)}to{transform:translateY(-50%)}}
+@keyframes blip{0%{transform:scale(.6);opacity:.9}100%{transform:scale(3);opacity:0}}
+@keyframes live{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes q3{0%,4%{opacity:0;transform:translateY(16px)}9%,30%{opacity:1;transform:none}35%,100%{opacity:0;transform:translateY(-12px)}}
+@keyframes draw{0%,8%{stroke-dashoffset:900}55%,100%{stroke-dashoffset:0}}
+@keyframes areaIn{0%,40%{opacity:0}70%,100%{opacity:1}}
+@keyframes popIn{0%,50%{opacity:0;transform:scale(.8)}62%,100%{opacity:1;transform:scale(1)}}
+@keyframes travel{0%{left:4%}100%{left:92%}}
+@keyframes strike{0%,25%{width:0}45%,100%{width:100%}}
+@keyframes rejIn{0%,45%{opacity:0;transform:translateY(6px)}55%,100%{opacity:1;transform:none}}
+@keyframes ring{0%{transform:scale(.85);opacity:.6}100%{transform:scale(2.2);opacity:0}}
+@keyframes rvIn{from{opacity:0;transform:translateY(48px)}to{opacity:1;transform:none}}
+@keyframes swOn{from{opacity:.16}to{opacity:1}}
+@keyframes beamGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 
-  <!-- Open Graph -->
-  <meta property="og:type" content="website" />
-  <meta property="og:url" content="BASE_URL_PLACEHOLDER/" />
-  <meta property="og:title" content="Avyron AI — See the market before it moves." />
-  <meta property="og:description" content="Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth." />
-  <meta property="og:image" content="BASE_URL_PLACEHOLDER/assets/images/og-image.png" />
-  <meta property="og:image:width" content="1200" />
-  <meta property="og:image:height" content="630" />
-  <meta property="og:site_name" content="Avyron AI" />
-
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Avyron AI — See the market before it moves." />
-  <meta name="twitter:description" content="Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth." />
-  <meta name="twitter:image" content="BASE_URL_PLACEHOLDER/assets/images/og-image.png" />
-
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --purple: #7C3AED;
-      --purple-bright: #8B5CF6;
-      --blue: #3B82F6;
-      --blue-bright: #60A5FA;
-      --bg: #07070F;
-      --bg-2: #0D0D1A;
-      --bg-3: #12121F;
-      --bg-card: rgba(255,255,255,0.03);
-      --bg-card-hover: rgba(255,255,255,0.06);
-      --border: rgba(255,255,255,0.07);
-      --border-bright: rgba(124,58,237,0.4);
-      --text: #F0F0FF;
-      --text-secondary: rgba(240,240,255,0.55);
-      --text-muted: rgba(240,240,255,0.3);
-      --glow-purple: rgba(124,58,237,0.18);
-      --glow-blue: rgba(59,130,246,0.12);
-      --max-w: 1160px;
-      --radius: 16px;
-      --radius-lg: 24px;
-    }
-
-    html { scroll-behavior: smooth; }
-
-    body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-      overflow-x: hidden;
-    }
-
-    /* SCROLLBAR */
-    ::-webkit-scrollbar { width: 6px; }
-    ::-webkit-scrollbar-track { background: var(--bg); }
-    ::-webkit-scrollbar-thumb { background: rgba(124,58,237,0.4); border-radius: 3px; }
-
-    /* NAV */
-    nav {
-      position: fixed;
-      top: 0; left: 0; right: 0;
-      z-index: 100;
-      background: rgba(7,7,15,0.7);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      border-bottom: 1px solid var(--border);
-    }
-    .nav-inner {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      padding: 0 32px;
-      height: 68px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .nav-logo {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      text-decoration: none;
-    }
-    .nav-logo-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(59,130,246,0.15));
-      border: 1px solid rgba(124,58,237,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .nav-logo-text {
-      font-size: 18px;
-      font-weight: 800;
-      color: var(--text);
-      letter-spacing: -0.3px;
-    }
-    .nav-logo-text span {
-      background: linear-gradient(135deg, var(--purple-bright), var(--blue-bright));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .nav-links {
-      display: flex;
-      align-items: center;
-      gap: 36px;
-    }
-    .nav-links a {
-      text-decoration: none;
-      color: var(--text-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-    .nav-links a:hover { color: var(--text); }
-
-    /* BUTTONS */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 13px 28px;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 600;
-      text-decoration: none;
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      cursor: pointer;
-      border: none;
-      letter-spacing: -0.1px;
-      white-space: nowrap;
-    }
-    .btn-primary {
-      background: linear-gradient(135deg, var(--purple), #6D28D9);
-      color: #fff;
-      box-shadow: 0 0 0 1px rgba(124,58,237,0.3), 0 4px 20px rgba(124,58,237,0.25);
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 0 0 1px rgba(124,58,237,0.5), 0 8px 32px rgba(124,58,237,0.4);
-    }
-    .btn-ghost {
-      background: transparent;
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-    }
-    .btn-ghost:hover {
-      background: var(--bg-card-hover);
-      color: var(--text);
-      border-color: rgba(255,255,255,0.15);
-    }
-    .btn-sm { padding: 9px 20px; font-size: 13px; border-radius: 10px; }
-    .btn-lg { padding: 16px 36px; font-size: 16px; border-radius: 14px; }
-
-    /* LAYOUT */
-    section { padding: 120px 32px; position: relative; }
-    .container { max-width: var(--max-w); margin: 0 auto; }
-
-    /* SECTION LABELS */
-    .label-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      border-radius: 100px;
-      background: rgba(124,58,237,0.1);
-      border: 1px solid rgba(124,58,237,0.2);
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--purple-bright);
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      margin-bottom: 20px;
-    }
-    .section-title {
-      font-size: clamp(30px, 3.5vw, 44px);
-      font-weight: 800;
-      letter-spacing: -1px;
-      line-height: 1.15;
-      margin-bottom: 16px;
-      color: var(--text);
-    }
-    .section-sub {
-      font-size: 17px;
-      color: var(--text-secondary);
-      max-width: 560px;
-      line-height: 1.7;
-    }
-    .section-header { text-align: center; margin-bottom: 72px; }
-    .section-header .section-sub { margin: 0 auto; }
-
-    /* GLOW ORBS */
-    .orb {
-      position: absolute;
-      border-radius: 50%;
-      pointer-events: none;
-      filter: blur(80px);
-      opacity: 0.35;
-    }
-    .orb-purple { background: var(--purple); }
-    .orb-blue { background: var(--blue); }
-
-    /* HERO */
-    .hero {
-      padding-top: 148px;
-      padding-bottom: 80px;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-    .hero .orb { opacity: 0.2; }
-    .hero-orb-1 { width: 600px; height: 600px; top: -200px; left: 50%; transform: translateX(-60%); }
-    .hero-orb-2 { width: 400px; height: 400px; top: 0; right: -100px; }
-    .hero-grid {
-      position: absolute;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(124,58,237,0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(124,58,237,0.04) 1px, transparent 1px);
-      background-size: 64px 64px;
-      mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 100%);
-      -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 40%, transparent 100%);
-    }
-    .hero-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 18px;
-      border-radius: 100px;
-      background: rgba(124,58,237,0.1);
-      border: 1px solid rgba(124,58,237,0.25);
-      color: var(--purple-bright);
-      font-size: 13px;
-      font-weight: 600;
-      margin-bottom: 32px;
-    }
-    .hero-badge-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--purple-bright);
-      animation: pulse 2s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-    .hero h1 {
-      font-size: clamp(44px, 6.5vw, 80px);
-      font-weight: 900;
-      line-height: 1.04;
-      letter-spacing: -2.5px;
-      margin-bottom: 28px;
-      color: var(--text);
-    }
-    .hero h1 .gradient {
-      background: linear-gradient(135deg, var(--purple-bright) 0%, var(--blue-bright) 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .hero-sub {
-      font-size: clamp(16px, 2vw, 20px);
-      color: var(--text-secondary);
-      max-width: 520px;
-      margin: 0 auto 44px;
-      line-height: 1.7;
-      font-weight: 400;
-    }
-    .hero-ctas {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 14px;
-      flex-wrap: wrap;
-      margin-bottom: 20px;
-    }
-    .hero-note {
-      font-size: 13px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-
-    /* HERO DASHBOARD MOCKUP */
-    .hero-visual {
-      margin-top: 80px;
-      position: relative;
-      max-width: 960px;
-      margin-left: auto;
-      margin-right: auto;
-    }
-    .hero-visual::before {
-      content: '';
-      position: absolute;
-      inset: -2px;
-      border-radius: 30px;
-      background: linear-gradient(135deg, rgba(124,58,237,0.4), rgba(59,130,246,0.2), transparent, rgba(124,58,237,0.15));
-      z-index: 0;
-    }
-    .dash-frame {
-      position: relative;
-      z-index: 1;
-      background: var(--bg-2);
-      border-radius: 28px;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.07);
-      box-shadow: 0 40px 100px rgba(0,0,0,0.6), 0 0 60px rgba(124,58,237,0.08);
-    }
-    .dash-topbar {
-      padding: 14px 20px;
-      background: rgba(255,255,255,0.03);
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .mac-dot {
-      width: 11px; height: 11px;
-      border-radius: 50%;
-    }
-    .mac-dot.r { background: #FF5F57; }
-    .mac-dot.y { background: #FFBD2E; }
-    .mac-dot.g { background: #28CA41; }
-    .dash-url {
-      flex: 1;
-      text-align: center;
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-    .dash-body {
-      padding: 28px;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 16px;
-    }
-    .d-card {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.07);
-      border-radius: 14px;
-      padding: 20px;
-      transition: border-color 0.2s;
-    }
-    .d-card:hover { border-color: rgba(124,58,237,0.3); }
-    .d-card-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 14px;
-    }
-    .d-icon {
-      width: 36px; height: 36px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 16px;
-    }
-    .d-icon.p { background: rgba(124,58,237,0.15); }
-    .d-icon.b { background: rgba(59,130,246,0.15); }
-    .d-icon.g { background: rgba(16,185,129,0.15); }
-    .d-badge {
-      padding: 3px 10px;
-      border-radius: 100px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .d-badge.live { background: rgba(16,185,129,0.15); color: #34D399; }
-    .d-badge.ready { background: rgba(59,130,246,0.15); color: #60A5FA; }
-    .d-card h4 {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-    .d-card p {
-      font-size: 11px;
-      color: var(--text-secondary);
-      line-height: 1.5;
-    }
-    .d-bar {
-      height: 4px;
-      border-radius: 2px;
-      background: rgba(255,255,255,0.08);
-      margin-top: 12px;
-      overflow: hidden;
-    }
-    .d-bar-fill {
-      height: 100%;
-      border-radius: 2px;
-    }
-    .d-bar-fill.p { background: linear-gradient(90deg, var(--purple), var(--blue)); }
-    .d-bar-fill.b { background: var(--blue); }
-    .d-bar-fill.g { background: #10B981; }
-    .d-stat { font-size: 28px; font-weight: 800; color: var(--text); letter-spacing: -1px; }
-    .d-stat-lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-weight: 500; }
-    .d-pipeline {
-      grid-column: 1 / -1;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 18px 20px;
-    }
-    .d-pipeline-lbl {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--text-muted);
-      margin-bottom: 12px;
-    }
-    .d-stages {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .d-stage {
-      flex: 1;
-      padding: 9px 12px;
-      border-radius: 9px;
-      font-size: 12px;
-      font-weight: 600;
-      text-align: center;
-    }
-    .d-stage.done { background: rgba(16,185,129,0.12); color: #34D399; }
-    .d-stage.active { background: linear-gradient(135deg, rgba(124,58,237,0.3), rgba(59,130,246,0.2)); color: var(--text); border: 1px solid rgba(124,58,237,0.3); }
-    .d-stage.idle { background: rgba(255,255,255,0.04); color: var(--text-muted); }
-    .d-arrow { color: var(--text-muted); font-size: 12px; flex-shrink: 0; }
-
-    /* DIVIDER */
-    .divider {
-      padding: 56px 32px;
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-2);
-      text-align: center;
-    }
-    .divider p {
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 2px;
-      color: var(--text-muted);
-      margin-bottom: 28px;
-    }
-    .industry-row {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 48px;
-      flex-wrap: wrap;
-    }
-    .industry-tag {
-      font-size: 15px;
-      font-weight: 700;
-      color: rgba(255,255,255,0.18);
-      letter-spacing: -0.3px;
-    }
-
-    /* HOW IT WORKS */
-    .how-section { background: var(--bg-2); }
-    .steps-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
-    }
-    .step-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 32px 24px;
-      position: relative;
-      transition: all 0.3s;
-      overflow: hidden;
-    }
-    .step-card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 2px;
-      background: linear-gradient(90deg, var(--purple), var(--blue));
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-    .step-card:hover::before { opacity: 1; }
-    .step-card:hover {
-      background: var(--bg-card-hover);
-      border-color: rgba(124,58,237,0.2);
-      transform: translateY(-4px);
-    }
-    .step-num {
-      width: 48px; height: 48px;
-      border-radius: 14px;
-      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(59,130,246,0.1));
-      border: 1px solid rgba(124,58,237,0.25);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      font-weight: 900;
-      color: var(--purple-bright);
-      margin-bottom: 20px;
-    }
-    .step-card h3 {
-      font-size: 17px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      color: var(--text);
-    }
-    .step-card p {
-      font-size: 14px;
-      color: var(--text-secondary);
-      line-height: 1.6;
-    }
-    .step-keyword {
-      display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--purple-bright);
-      margin-bottom: 8px;
-    }
-
-    /* VISUAL SECTIONS */
-    .visual-split {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 80px;
-      align-items: center;
-    }
-    .visual-split.flip { direction: rtl; }
-    .visual-split.flip > * { direction: ltr; }
-    .v-content { max-width: 460px; }
-    .v-content h2 {
-      font-size: clamp(26px, 3vw, 38px);
-      font-weight: 800;
-      letter-spacing: -0.8px;
-      line-height: 1.2;
-      margin-bottom: 16px;
-      color: var(--text);
-    }
-    .v-content p {
-      font-size: 16px;
-      color: var(--text-secondary);
-      line-height: 1.7;
-      margin-bottom: 28px;
-    }
-    .v-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
-    .v-list li {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      font-size: 14px;
-      color: var(--text-secondary);
-      font-weight: 500;
-    }
-    .v-check {
-      width: 20px; height: 20px;
-      border-radius: 6px;
-      background: rgba(124,58,237,0.15);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      margin-top: 1px;
-    }
-    .v-check svg { width: 12px; height: 12px; }
-
-    /* GLASS CARD PANEL */
-    .glass-panel {
-      background: rgba(13,13,26,0.8);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 28px;
-      backdrop-filter: blur(12px);
-      position: relative;
-      overflow: hidden;
-    }
-    .glass-panel::before {
-      content: '';
-      position: absolute;
-      top: -60px; right: -60px;
-      width: 200px; height: 200px;
-      background: radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%);
-      pointer-events: none;
-    }
-
-    /* ENGINE GRID INSIDE PANEL */
-    .eng-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .eng-card {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 14px;
-      transition: border-color 0.2s;
-    }
-    .eng-card:hover { border-color: rgba(124,58,237,0.3); }
-    .eng-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .eng-dot { width: 7px; height: 7px; border-radius: 50%; }
-    .eng-dot.live { background: #10B981; box-shadow: 0 0 6px #10B981; }
-    .eng-dot.proc { background: #F59E0B; box-shadow: 0 0 6px #F59E0B; }
-    .eng-card h5 { font-size: 12px; font-weight: 700; color: var(--text); }
-    .eng-card p { font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; }
-    .eng-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; }
-    .eng-fill { height: 100%; border-radius: 2px; }
-    .eng-fill.p { background: linear-gradient(90deg, var(--purple), var(--blue)); }
-    .eng-fill.b { background: var(--blue); }
-    .eng-fill.g { background: #10B981; }
-
-    /* NARRATIVE TIMELINE */
-    .timeline { display: flex; flex-direction: column; gap: 0; }
-    .t-node {
-      display: flex;
-      align-items: flex-start;
-      gap: 16px;
-      padding: 16px 0;
-      position: relative;
-    }
-    .t-node:not(:last-child)::after {
-      content: '';
-      position: absolute;
-      left: 15px;
-      top: 52px;
-      bottom: -4px;
-      width: 2px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.1), transparent);
-    }
-    .t-dot {
-      width: 32px; height: 32px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 13px;
-      flex-shrink: 0;
-      position: relative;
-      z-index: 1;
-    }
-    .t-dot.prob { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); }
-    .t-dot.caus { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); }
-    .t-dot.intv { background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); }
-    .t-dot.rslt { background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); }
-    .t-content {
-      flex: 1;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px 16px;
-    }
-    .t-label {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 4px;
-    }
-    .t-label.prob { color: #F87171; }
-    .t-label.caus { color: #FCD34D; }
-    .t-label.intv { color: #60A5FA; }
-    .t-label.rslt { color: #34D399; }
-    .t-text { font-size: 13px; color: var(--text); font-weight: 500; }
-
-    /* CONTENT CARDS */
-    .content-stack { display: flex; flex-direction: column; gap: 10px; }
-    .c-card {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 16px;
-      display: flex;
-      gap: 14px;
-      align-items: center;
-      transition: all 0.2s;
-    }
-    .c-card:hover { border-color: rgba(124,58,237,0.3); background: rgba(255,255,255,0.06); }
-    .c-icon {
-      width: 44px; height: 44px;
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-      flex-shrink: 0;
-    }
-    .c-icon.p { background: rgba(124,58,237,0.15); }
-    .c-icon.b { background: rgba(59,130,246,0.15); }
-    .c-icon.a { background: rgba(245,158,11,0.15); }
-    .c-info { flex: 1; }
-    .c-info h4 { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 2px; }
-    .c-info p { font-size: 12px; color: var(--text-secondary); }
-    .c-status {
-      padding: 4px 12px;
-      border-radius: 100px;
-      font-size: 11px;
-      font-weight: 700;
-    }
-    .c-status.ready { background: rgba(16,185,129,0.12); color: #34D399; }
-    .c-status.gen { background: rgba(124,58,237,0.12); color: var(--purple-bright); }
-    .c-status.sched { background: rgba(245,158,11,0.12); color: #FCD34D; }
-
-    /* STATS */
-    .stats-section {
-      background: var(--bg-2);
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-      padding: 80px 32px;
-    }
-    .stats-grid {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 48px;
-      text-align: center;
-    }
-    .stat-num {
-      font-size: clamp(40px, 5vw, 60px);
-      font-weight: 900;
-      letter-spacing: -2px;
-      background: linear-gradient(135deg, var(--text), rgba(240,240,255,0.6));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin-bottom: 8px;
-      line-height: 1;
-    }
-    .stat-lbl {
-      font-size: 14px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    /* FEATURES */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-    }
-    .feat-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 32px 26px;
-      transition: all 0.3s;
-      position: relative;
-      overflow: hidden;
-    }
-    .feat-card::after {
-      content: '';
-      position: absolute;
-      bottom: 0; left: 0; right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(124,58,237,0.4), transparent);
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-    .feat-card:hover::after { opacity: 1; }
-    .feat-card:hover {
-      background: var(--bg-card-hover);
-      border-color: rgba(124,58,237,0.2);
-      transform: translateY(-3px);
-    }
-    .feat-icon {
-      width: 48px; height: 48px;
-      border-radius: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 22px;
-      margin-bottom: 18px;
-    }
-    .feat-icon.p { background: rgba(124,58,237,0.12); }
-    .feat-icon.b { background: rgba(59,130,246,0.12); }
-    .feat-icon.g { background: rgba(16,185,129,0.12); }
-    .feat-icon.a { background: rgba(245,158,11,0.12); }
-    .feat-icon.r { background: rgba(239,68,68,0.12); }
-    .feat-icon.c { background: rgba(6,182,212,0.12); }
-    .feat-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
-    .feat-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.65; }
-
-    /* PRICING */
-    .pricing-section { background: var(--bg-2); }
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-      max-width: 960px;
-      margin: 0 auto;
-    }
-    .p-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 36px 28px;
-      position: relative;
-      transition: all 0.3s;
-      display: flex;
-      flex-direction: column;
-    }
-    .p-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.12); }
-    .p-card.featured {
-      background: rgba(124,58,237,0.06);
-      border-color: rgba(124,58,237,0.35);
-      box-shadow: 0 0 40px rgba(124,58,237,0.1), inset 0 1px 0 rgba(124,58,237,0.2);
-      transform: scale(1.03);
-    }
-    .p-card.featured:hover { transform: scale(1.03) translateY(-4px); }
-    .p-popular {
-      position: absolute;
-      top: -13px; left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, var(--purple), var(--blue));
-      color: #fff;
-      font-size: 11px;
-      font-weight: 700;
-      padding: 5px 18px;
-      border-radius: 100px;
-      letter-spacing: 0.5px;
-      white-space: nowrap;
-    }
-    .p-name {
-      font-size: 14px;
-      font-weight: 700;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-bottom: 8px;
-    }
-    .p-name.featured-text { color: var(--purple-bright); }
-    .p-price {
-      font-size: 52px;
-      font-weight: 900;
-      letter-spacing: -2px;
-      color: var(--text);
-      line-height: 1;
-      margin-bottom: 4px;
-    }
-    .p-period { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
-    .p-desc { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6; }
-    .p-features { list-style: none; flex: 1; margin-bottom: 28px; }
-    .p-features li {
-      font-size: 14px;
-      color: var(--text-secondary);
-      padding: 10px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      line-height: 1.5;
-    }
-    .p-features li:last-child { border-bottom: none; }
-    .p-check {
-      width: 18px; height: 18px;
-      border-radius: 5px;
-      background: rgba(124,58,237,0.15);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      margin-top: 1px;
-    }
-    .p-check svg { width: 10px; height: 10px; }
-
-    /* FINAL CTA */
-    .final-cta {
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-    .final-cta .orb-purple {
-      width: 600px; height: 600px;
-      top: -200px; left: 50%;
-      transform: translateX(-50%);
-      opacity: 0.15;
-    }
-    .final-cta .orb-blue {
-      width: 400px; height: 400px;
-      bottom: -100px; right: -100px;
-      opacity: 0.08;
-    }
-    .cta-box {
-      position: relative;
-      z-index: 1;
-      background: rgba(124,58,237,0.05);
-      border: 1px solid rgba(124,58,237,0.2);
-      border-radius: 32px;
-      padding: 80px 40px;
-      max-width: 720px;
-      margin: 0 auto;
-      backdrop-filter: blur(12px);
-    }
-    .cta-box h2 {
-      font-size: clamp(32px, 4vw, 52px);
-      font-weight: 900;
-      letter-spacing: -1.5px;
-      line-height: 1.1;
-      margin-bottom: 16px;
-      color: var(--text);
-    }
-    .cta-box p { font-size: 17px; color: var(--text-secondary); margin-bottom: 40px; line-height: 1.6; }
-    .cta-btns { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
-    .trust-row {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 28px;
-      margin-top: 32px;
-      flex-wrap: wrap;
-    }
-    .trust-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 13px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-
-    /* FOOTER */
-    footer {
-      padding: 44px 32px;
-      border-top: 1px solid var(--border);
-      background: var(--bg);
-    }
-    .footer-inner {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-    .footer-logo {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      text-decoration: none;
-    }
-    .footer-logo-text {
-      font-size: 16px;
-      font-weight: 800;
-      color: var(--text);
-    }
-    footer p { font-size: 13px; color: var(--text-muted); }
-    .footer-links { display: flex; gap: 24px; }
-    .footer-links a {
-      font-size: 13px;
-      color: var(--text-secondary);
-      text-decoration: none;
-      font-weight: 500;
-      transition: color 0.2s;
-    }
-    .footer-links a:hover { color: var(--purple-bright); }
-
-    /* RESPONSIVE */
-    @media (max-width: 1024px) {
-      .steps-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 900px) {
-      .visual-split { grid-template-columns: 1fr; gap: 40px; }
-      .visual-split.flip { direction: ltr; }
-      .features-grid { grid-template-columns: 1fr 1fr; }
-      .pricing-grid { grid-template-columns: 1fr; max-width: 400px; }
-      .p-card.featured { transform: none; }
-      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 40px; }
-      .dash-body { grid-template-columns: 1fr 1fr; }
-    }
-    @media (max-width: 768px) {
-      section { padding: 80px 20px; }
-      .hero { padding-top: 120px; }
-      .nav-inner { padding: 0 20px; }
-      .nav-links { gap: 16px; }
-      .nav-links a.hide-mobile { display: none; }
-      .features-grid { grid-template-columns: 1fr; }
-      .steps-grid { grid-template-columns: 1fr; }
-      .footer-inner { flex-direction: column; text-align: center; }
-      .industry-row { gap: 28px; }
-      .dash-body { grid-template-columns: 1fr; }
-      .eng-grid { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 480px) {
-      .hero h1 { font-size: 38px; letter-spacing: -1.5px; }
-      .hero-ctas { flex-direction: column; }
-      .cta-btns { flex-direction: column; }
-    }
-  </style>
+.a-words{animation:wordCycle 12s cubic-bezier(.75,0,.25,1) infinite}
+.a-shim{animation:shimmerMove 7s linear infinite}
+.a-floor{animation:floorMove 1.8s linear infinite}
+.a-au1{animation:aurora1 20s ease-in-out infinite}
+.a-au2{animation:aurora2 24s ease-in-out infinite}
+.a-au3{animation:aurora3 28s ease-in-out infinite}
+.a-tilt{animation:tiltIn 1.8s cubic-bezier(.2,.8,.2,1) .2s both}
+.a-float{animation:floatY 9s ease-in-out infinite}
+.a-float2{animation:floatY2 7s ease-in-out infinite}
+.a-spin{animation:spin 6s linear infinite}
+.a-spin-slow{animation:spin 30s linear infinite}
+.a-spinR-slow{animation:spinR 40s linear infinite}
+.a-toast{animation:toast 9s ease-in-out infinite}
+.a-chip{animation:chipIn 9s ease-in-out infinite}
+.a-quote{animation:quoteIn 9s ease-in-out infinite}
+.a-bar{animation:bar 9s ease-in-out infinite}
+.a-mq{animation:marquee 60s linear infinite}
+.a-mqR{animation:marqueeR 70s linear infinite}
+.a-mq-fast{animation:marquee 34s linear infinite}
+.a-feed{animation:feed 20s linear infinite}
+.a-blip{animation:blip 2.4s ease-out infinite}
+.a-live{animation:live 1.6s ease-in-out infinite}
+.a-q1{animation:q3 12s ease-in-out infinite}
+.a-q2{animation:q3 12s ease-in-out infinite;animation-delay:4s}
+.a-q3{animation:q3 12s ease-in-out infinite;animation-delay:8s}
+.a-draw{animation:draw 7s ease-in-out infinite}
+.a-area{animation:areaIn 7s ease-in-out infinite}
+.a-pop{animation:popIn 7s ease-out infinite}
+.a-travel{animation:travel 4s cubic-bezier(.6,0,.4,1) infinite alternate}
+.a-strike{animation:strike 6s ease-in-out infinite}
+.a-rej{animation:rejIn 6s ease-in-out infinite}
+.a-ring{animation:ring 3.2s ease-out infinite}
+.a-ring2{animation:ring 3.2s ease-out 1.6s infinite}
+.q-stack > *{opacity:0}
+.sw{opacity:1}
+@supports (animation-timeline: view()){
+  .rv{animation:rvIn linear both;animation-timeline:view();animation-range:entry 0% entry 55%}
+  .sw{animation:swOn linear both;animation-timeline:view()}
+  .beam-scroll{animation:beamGrow linear both;animation-timeline:view();animation-range:entry 10% cover 55%;transform-origin:left center}
+}
+.motion-off *{animation:none !important}
+.motion-off .q-stack > *:first-child{opacity:1 !important}
+@media (prefers-reduced-motion: reduce){.motion-on *{animation:none !important}.motion-on .q-stack > *:first-child{opacity:1 !important}}
+@media (max-width: 900px){
+  .hide-sm{display:none !important}
+  .bento{grid-template-columns:minmax(0,1fr) !important}
+  .bento > *{grid-column:auto !important}
+  .vs{grid-template-columns:minmax(0,1fr) !important}
+}
+</style>
+<style>html{scroll-behavior:smooth}*{box-sizing:border-box}img{max-width:100%}</style>
 </head>
 <body>
+<div class="motion-on" style="position: relative; overflow: hidden; background: #06050B; color: #F4F2FA; font-family: Inter, system-ui, sans-serif; font-size: 16px; line-height: 1.55">
 
-  <!-- NAV -->
-  <nav>
-    <div class="nav-inner">
-      <a href="/" class="nav-logo">
-        <div class="nav-logo-icon">
-          <svg width="20" height="20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="nav-g" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#8B5CF6"/>
-                <stop offset="100%" stop-color="#3B82F6"/>
-              </linearGradient>
-            </defs>
-            <path d="M50 8L88 82H12L50 8Z" stroke="url(#nav-g)" stroke-width="7" stroke-linejoin="round" fill="none"/>
-            <path d="M32 60L50 26L68 60" stroke="url(#nav-g)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
-        </div>
-        <span class="nav-logo-text">Avyron <span>AI</span></span>
-      </a>
-      <div class="nav-links">
-        <a href="#intelligence" class="hide-mobile">Intelligence</a>
-        <a href="#system" class="hide-mobile">System</a>
-        <a href="#output" class="hide-mobile">Output</a>
-        <a href="/pricing" class="hide-mobile">Pricing</a>
-        <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary btn-sm">Start Free Trial</a>
-      </div>
+  <div style="position: relative; z-index: 6; padding: 11px 24px; text-align: center; font-size: 14px; color: #DDD6FE; background: linear-gradient(90deg, rgba(124,58,237,.28), rgba(79,70,229,.22), rgba(219,39,119,.18)); border-bottom: 1px solid rgba(196,181,253,.18)">
+    <span style="display: inline-block; margin-right: 10px; padding: 2px 10px; border-radius: 999px; background: rgba(255,255,255,.12); font-size: 12px; font-weight: 700; letter-spacing: .06em; color: #FFFFFF">NEW</span>Founding Clients program is open: 20 spots for founders in the UAE. <a href="#founding" style="font-weight: 600; color: #FFFFFF">Apply →</a>
+  </div>
+
+  <header style="position: relative; z-index: 6; max-width: 1280px; margin: 0 auto; padding: 20px 28px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px">
+    <a href="#top" aria-label="Avyron AI home" style="display: flex; align-items: center; gap: 12px; color: #FFFFFF">
+      <span style="width: 38px; height: 38px; border-radius: 11px; background: linear-gradient(135deg, #C4B5FD 0%, #8B5CF6 45%, #4F46E5 100%); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 18px; color: #FFFFFF; box-shadow: inset 0 0 0 1px rgba(255,255,255,.28), 0 10px 28px -8px rgba(139,92,246,.9)">A</span>
+      <span style="font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 17px; letter-spacing: .04em">AVYRON <span style="color: #A78BFA">AI</span></span>
+    </a>
+    <nav class="hide-sm" aria-label="Main" style="display: flex; flex-wrap: wrap; align-items: center; gap: 30px; font-size: 15px; font-weight: 500">
+      <a class="nl" href="#platform">Platform</a>
+      <a class="nl" href="#how">How it works</a>
+      <a class="nl" href="#why">Why Avyron</a>
+      <a class="nl" href="#pricing">Pricing</a>
+      <a class="nl" href="#faq">FAQ</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 10px">
+      <a class="nl hide-sm" href="#founding" style="padding: 0 10px; font-size: 15px; font-weight: 500">Founding Clients</a>
+      <a class="nl" href="/login" style="padding: 0 10px; font-size: 15px; font-weight: 500">Log in</a>
+      <a class="bp" href="#demo" style="display: inline-flex; align-items: center; min-height: 44px; padding: 0 22px; border-radius: 999px; background: #FFFFFF; color: #1E1033; font-weight: 600; font-size: 15px">Book a demo</a>
     </div>
-  </nav>
+  </header>
 
-  <!-- HERO -->
-  <section class="hero">
-    <div class="hero-grid"></div>
-    <div class="orb orb-purple hero-orb-1"></div>
-    <div class="orb orb-blue hero-orb-2"></div>
-    <div class="container" style="position:relative;z-index:1;">
-      <div class="hero-badge">
-        <div class="hero-badge-dot"></div>
-        AI-Powered Market Intelligence
-      </div>
-      <h1>See the market<br/><span class="gradient">before it moves.</span></h1>
-      <p class="hero-sub">Avyron analyzes your market, competitors, and signals — and turns them into strategy, content, and growth.</p>
-      <div class="hero-ctas">
-        <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary btn-lg">
-          Start Free Trial
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+  <section id="top" style="position: relative; z-index: 2; padding: 64px 24px 0; text-align: center">
+    <div aria-hidden="true" style="position: absolute; inset: -200px 0 auto 0; height: 1300px; pointer-events: none; overflow: hidden">
+      <div class="a-au1" style="position: absolute; left: 4%; top: 40px; width: 780px; height: 520px; border-radius: 50%; filter: blur(90px); background: radial-gradient(circle at 40% 50%, rgba(124,58,237,.7), rgba(124,58,237,0) 70%)"></div>
+      <div class="a-au2" style="position: absolute; right: 2%; top: 120px; width: 760px; height: 560px; border-radius: 50%; filter: blur(100px); background: radial-gradient(circle at 60% 40%, rgba(79,70,229,.6), rgba(79,70,229,0) 70%)"></div>
+      <div class="a-au3" style="position: absolute; left: 36%; top: 360px; width: 560px; height: 420px; border-radius: 50%; filter: blur(110px); background: radial-gradient(circle, rgba(236,72,153,.32), rgba(236,72,153,0) 70%)"></div>
+    </div>
+
+    <div style="position: relative; max-width: 1180px; margin: 0 auto">
+      <a href="#founding" class="bg2" style="display: inline-flex; align-items: center; gap: 10px; padding: 7px 8px 7px 16px; border-radius: 999px; border: 1px solid rgba(196,181,253,.25); background: rgba(12,10,22,.6); font-size: 14px; font-weight: 500; color: #DDD6FE">
+        Your AI marketing strategy team
+        <span style="display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: rgba(139,92,246,.25); color: #FFFFFF; font-size: 13px">See it live
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
+        </span>
+      </a>
+
+      <h1 style="margin: 34px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(46px, 7.6vw, 112px); line-height: 1.02; letter-spacing: -0.045em; color: #FFFFFF">
+        <span style="display: block">Stop guessing your</span>
+        <span style="display: block; height: 1.12em; overflow: hidden">
+          <span class="a-words" style="display: flex; flex-direction: column; align-items: center">
+            <span class="grad-text a-shim" style="display: block; height: 1.12em; line-height: 1.12em">next move.</span>
+            <span class="grad-text a-shim" style="display: block; height: 1.12em; line-height: 1.12em">pricing.</span>
+            <span class="grad-text a-shim" style="display: block; height: 1.12em; line-height: 1.12em">positioning.</span>
+            <span class="grad-text a-shim" style="display: block; height: 1.12em; line-height: 1.12em">message.</span>
+            <span class="grad-text a-shim" aria-hidden="true" style="display: block; height: 1.12em; line-height: 1.12em">next move.</span>
+          </span>
+        </span>
+      </h1>
+
+      <p style="margin: 30px auto 0; max-width: 680px; font-size: clamp(17px, 1.5vw, 21px); line-height: 1.6; color: #B6B0CC">Avyron reads your market, listens to your customers and builds your marketing strategy on real evidence. Then it keeps watching, and adapts the moment your market moves.</p>
+
+      <div style="margin-top: 40px; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px">
+        <a class="bp" href="#demo" style="display: inline-flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 30px; border-radius: 999px; background: linear-gradient(135deg, #8B5CF6, #6366F1); color: #FFFFFF; font-weight: 600; font-size: 16px; box-shadow: 0 14px 44px -14px rgba(139,92,246,.95), inset 0 1px 0 rgba(255,255,255,.25)">Get your market analysis
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
         </a>
-        <a href="#system" class="btn btn-ghost btn-lg">See How It Works</a>
+        <a class="bg2" href="#how" style="display: inline-flex; align-items: center; gap: 10px; min-height: 56px; padding: 0 26px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); color: #F4F2FA; font-weight: 600; font-size: 16px">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="m10 8 6 4-6 4V8Z"></path></svg>
+          How it works
+        </a>
       </div>
-      <p class="hero-note">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        7-day free trial &middot; No credit card required
-      </p>
+      <p style="margin: 20px 0 0; font-size: 14px; color: #8E88A8">Strategy before execution. Built in Dubai for founders and growing teams.</p>
+    </div>
 
-      <!-- DASHBOARD MOCKUP -->
-      <div class="hero-visual">
-        <div class="dash-frame">
-          <div class="dash-topbar">
-            <div class="mac-dot r"></div>
-            <div class="mac-dot y"></div>
-            <div class="mac-dot g"></div>
-            <div class="dash-url">avyron.ai — Intelligence Dashboard</div>
-          </div>
-          <div class="dash-body">
-            <div class="d-card">
-              <div class="d-card-head">
-                <div class="d-icon p">🧠</div>
-                <div class="d-badge live">Live</div>
+    <div id="platform" style="position: relative; max-width: 1180px; margin: 84px auto 0; perspective: 2200px">
+      <div class="floor a-floor hide-sm" aria-hidden="true" style="position: absolute; left: -30%; right: -30%; bottom: -120px; height: 520px; transform: perspective(520px) rotateX(64deg); transform-origin: bottom center; opacity: .55"></div>
+      <div aria-hidden="true" style="position: absolute; left: 10%; right: 10%; top: 0; height: 70%; border-radius: 50%; filter: blur(60px); background: radial-gradient(ellipse, rgba(139,92,246,.65), rgba(99,102,241,.2) 50%, rgba(6,5,11,0) 75%)"></div>
+      <div class="a-tilt" style="position: relative; transform-style: preserve-3d">
+        <div class="a-float" style="position: relative">
+          <div style="position: relative; padding: 1.5px; border-radius: 22px; overflow: hidden; background: rgba(255,255,255,.1); box-shadow: 0 80px 160px -50px rgba(0,0,0,1)">
+            <div class="a-spin" aria-hidden="true" style="position: absolute; left: -50%; top: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 290deg, #C4B5FD 325deg, #F472B6 345deg, rgba(0,0,0,0) 360deg)"></div>
+            <div style="position: relative; border-radius: 21px; overflow: hidden; background: #0E0C17; text-align: left">
+              <div style="height: 46px; display: flex; align-items: center; gap: 8px; padding: 0 18px; background: #14111E; border-bottom: 1px solid rgba(255,255,255,.07)">
+                <span style="width: 11px; height: 11px; border-radius: 50%; background: #FF5F57"></span>
+                <span style="width: 11px; height: 11px; border-radius: 50%; background: #FEBC2E"></span>
+                <span style="width: 11px; height: 11px; border-radius: 50%; background: #28C840"></span>
+                <span style="margin: 0 auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 8px; background: #211D30; font-size: 12px; color: #8E88A8">
+                  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+                  app.avyronai.com
+                </span>
               </div>
-              <h4>Market Intelligence</h4>
-              <p>3 competitors · 12 gaps identified</p>
-              <div class="d-bar"><div class="d-bar-fill p" style="width:85%"></div></div>
-            </div>
-            <div class="d-card">
-              <div class="d-card-head">
-                <div class="d-icon b">📊</div>
-                <div class="d-badge ready">Ready</div>
-              </div>
-              <h4>Strategic Narrative</h4>
-              <p>Problem → Cause → Intervention → Result</p>
-              <div class="d-bar"><div class="d-bar-fill b" style="width:100%"></div></div>
-            </div>
-            <div class="d-card">
-              <div class="d-card-head">
-                <div class="d-icon g">⚡</div>
-              </div>
-              <div class="d-stat">94%</div>
-              <div class="d-stat-lbl">System Readiness</div>
-              <div class="d-bar" style="margin-top:10px;"><div class="d-bar-fill g" style="width:94%"></div></div>
-            </div>
-            <div class="d-pipeline">
-              <div class="d-pipeline-lbl">Execution Pipeline</div>
-              <div class="d-stages">
-                <div class="d-stage done">✓ Analysis</div>
-                <span class="d-arrow">→</span>
-                <div class="d-stage done">✓ Strategy</div>
-                <span class="d-arrow">→</span>
-                <div class="d-stage active">◉ Content</div>
-                <span class="d-arrow">→</span>
-                <div class="d-stage idle">Publish</div>
-              </div>
+              <img src="/assets/website/hero-dashboard.jpg" alt="Avyron dashboard: active strategy, confirmed market changes, performance and today's priority actions" style="display: block; width: 100%; height: auto">
             </div>
           </div>
         </div>
       </div>
-    </div>
-  </section>
 
-  <!-- INDUSTRY DIVIDER -->
-  <div class="divider">
-    <p>Built for modern teams across every industry</p>
-    <div class="industry-row">
-      <span class="industry-tag">Startups</span>
-      <span class="industry-tag">E-Commerce</span>
-      <span class="industry-tag">SaaS</span>
-      <span class="industry-tag">Agencies</span>
-      <span class="industry-tag">Creators</span>
-      <span class="industry-tag">Consultants</span>
-    </div>
-  </div>
-
-  <!-- HOW AVYRON WORKS -->
-  <section class="how-section" id="system">
-    <div class="container">
-      <div class="section-header">
-        <div class="label-pill">How Avyron Works</div>
-        <h2 class="section-title">An AI reasoning engine for your market</h2>
-        <p class="section-sub">Four intelligent phases that take you from raw market data to a fully executed marketing system.</p>
-      </div>
-      <div class="steps-grid">
-        <div class="step-card">
-          <div class="step-num">1</div>
-          <span class="step-keyword">Scan</span>
-          <h3>Market + Competitors</h3>
-          <p>Avyron scans your competitive landscape, captures audience signals, and identifies market gaps your competitors are missing.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-num">2</div>
-          <span class="step-keyword">Understand</span>
-          <h3>Positioning + Insights</h3>
-          <p>15 specialized engines transform raw data into strategic positioning, differentiation pillars, and a clear causal narrative.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-num">3</div>
-          <span class="step-keyword">Generate</span>
-          <h3>Strategy + Content</h3>
-          <p>From the intelligence layer, Avyron generates aligned posts, reels, stories, scripts, and execution plans — all connected.</p>
-        </div>
-        <div class="step-card">
-          <div class="step-num">4</div>
-          <span class="step-keyword">Optimize</span>
-          <h3>Continuous Iteration</h3>
-          <p>Performance data feeds back into the system. Avyron iterates your strategy automatically, improving with every cycle.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- VISUAL 1: INTELLIGENCE -->
-  <section id="intelligence">
-    <div class="container">
-      <div class="visual-split">
-        <div class="v-content">
-          <div class="label-pill">Strategic Intelligence</div>
-          <h2>Build your strategy with AI-powered engines</h2>
-          <p>15 specialized engines analyze your market, competitors, and audience to build a complete strategic foundation — automatically and continuously.</p>
-          <ul class="v-list">
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Market Intelligence & competitor analysis
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Positioning, differentiation & offer engines
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Funnel, awareness & persuasion mapping
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Statistical validation & budget intelligence
-            </li>
-          </ul>
-        </div>
-        <div class="glass-panel">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:14px;">Active Engines</div>
-          <div class="eng-grid">
-            <div class="eng-card">
-              <div class="eng-head"><div class="eng-dot live"></div><h5>Market Intel</h5></div>
-              <p>3 competitors · 12 gaps</p>
-              <div class="eng-bar"><div class="eng-fill p" style="width:92%"></div></div>
-            </div>
-            <div class="eng-card">
-              <div class="eng-head"><div class="eng-dot live"></div><h5>Positioning</h5></div>
-              <p>Score: 8.4/10</p>
-              <div class="eng-bar"><div class="eng-fill b" style="width:84%"></div></div>
-            </div>
-            <div class="eng-card">
-              <div class="eng-head"><div class="eng-dot live"></div><h5>Funnel Engine</h5></div>
-              <p>5 stages mapped</p>
-              <div class="eng-bar"><div class="eng-fill g" style="width:100%"></div></div>
-            </div>
-            <div class="eng-card">
-              <div class="eng-head"><div class="eng-dot proc"></div><h5>Persuasion</h5></div>
-              <p>Building argument chains...</p>
-              <div class="eng-bar"><div class="eng-fill p" style="width:67%"></div></div>
-            </div>
+      <div class="hide-sm a-float2" style="position: absolute; left: -48px; top: 16%; width: 330px; text-align: left; z-index: 3">
+        <div class="a-toast" style="padding: 16px 18px; border-radius: 18px; background: rgba(24,20,40,.88); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 30px 70px -20px rgba(0,0,0,1); backdrop-filter: blur(14px)">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, #C4B5FD, #8B5CF6 45%, #4F46E5); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 14px; color: #FFFFFF">A</span>
+            <span style="font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #C4B5FD">WATCHTOWER</span>
+            <span style="margin-left: auto; font-size: 12px; color: #8E88A8">now</span>
           </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
-            <span style="font-size:12px;color:var(--text-muted);">System Readiness</span>
-            <span style="font-size:13px;font-weight:700;color:#34D399;">94% Active</span>
+          <div style="margin-top: 12px; font-weight: 600; font-size: 16px; color: #FFFFFF">Competitor cut their price by 22%</div>
+          <div style="margin-top: 4px; font-size: 14px; color: #B6B0CC">$32 → $25 · Confirmed · High impact</div>
+        </div>
+      </div>
+
+      <div class="hide-sm a-float" style="position: absolute; right: -52px; top: 40%; width: 300px; text-align: left; z-index: 3">
+        <div class="a-chip" style="padding: 18px; border-radius: 18px; background: rgba(24,20,40,.88); border: 1px solid rgba(196,181,253,.32); box-shadow: 0 30px 70px -20px rgba(0,0,0,1); backdrop-filter: blur(14px)">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="width: 28px; height: 28px; border-radius: 50%; background: rgba(52,211,153,.16); display: flex; align-items: center; justify-content: center; color: #6EE7B7">
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"></path></svg>
+            </span>
+            <span style="font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #6EE7B7">STRATEGY ADAPTED</span>
+          </div>
+          <div style="margin-top: 12px; font-weight: 600; font-size: 15px; color: #FFFFFF">Counter with proof, not a discount</div>
+          <div style="margin-top: 14px; display: flex; justify-content: space-between; font-size: 12px; color: #8E88A8"><span>Evidence confidence</span><span style="color: #DDD6FE">91%</span></div>
+          <div style="margin-top: 6px; height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden">
+            <div class="a-bar" style="height: 100%; width: 91%; border-radius: 999px; background: linear-gradient(90deg, #8B5CF6, #F472B6)"></div>
           </div>
         </div>
       </div>
+
+      <div class="hide-sm a-float2" style="position: absolute; left: 8%; bottom: -36px; width: 360px; text-align: left; z-index: 3">
+        <div class="a-quote" style="padding: 16px 18px; border-radius: 18px; background: rgba(24,20,40,.88); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 30px 70px -20px rgba(0,0,0,1); backdrop-filter: blur(14px)">
+          <div style="font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #F9A8D4">CUSTOMER VOICE · LINKED SOURCE</div>
+          <div style="margin-top: 8px; font-size: 15px; font-style: italic; color: #F4F2FA">“The box weighed 400g, but almost half of it was syrup.”</div>
+          <div style="margin-top: 8px; font-size: 12px; color: #8E88A8">Competitor review · sample data</div>
+        </div>
+      </div>
     </div>
   </section>
 
-  <!-- VISUAL 2: NARRATIVE -->
-  <section style="background:var(--bg-2);" id="narrative">
-    <div class="container">
-      <div class="visual-split flip">
-        <div class="v-content">
-          <div class="label-pill">AI Reasoning Layer</div>
-          <h2>Connect everything into one clear story</h2>
-          <p>Raw analysis becomes a coherent causal chain — market problem, root cause, your intervention, and the measurable result. One narrative that drives all messaging.</p>
-          <ul class="v-list">
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Causal chain from problem to outcome
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Drives all content and messaging decisions
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Validated by integrity & coherence engines
-            </li>
-          </ul>
+  <section aria-label="Live market signals" style="position: relative; z-index: 2; margin-top: 140px; border-top: 1px solid rgba(255,255,255,.06); border-bottom: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.015); overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent)">
+    <div class="a-mq-fast" style="display: flex; align-items: center; gap: 44px; width: max-content; padding: 22px 0; font-size: 15px; color: #B6B0CC; white-space: nowrap">
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FDA4AF"></span>Price change detected</span>
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FCD34D"></span>New competitor offer</span>
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #C4B5FD"></span>Recurring complaint found</span>
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6EE7B7"></span>Strategy updated</span>
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #93C5FD"></span>Messaging shift spotted</span>
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F9A8D4"></span>Buyer question trending</span>
+      <span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6EE7B7"></span>Test result measured</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FDA4AF"></span>Price change detected</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FCD34D"></span>New competitor offer</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #C4B5FD"></span>Recurring complaint found</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6EE7B7"></span>Strategy updated</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #93C5FD"></span>Messaging shift spotted</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F9A8D4"></span>Buyer question trending</span>
+      <span aria-hidden="true" style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6EE7B7"></span>Test result measured</span>
+    </div>
+  </section>
+
+  <section style="position: relative; z-index: 2; max-width: 1080px; margin: 0 auto; padding: 170px 24px 0; text-align: center">
+    <p style="margin: 0 0 28px; font-size: 13px; font-weight: 700; letter-spacing: .16em; color: #A78BFA">THE REAL PROBLEM</p>
+    <p style="margin: 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 700; font-size: clamp(30px, 4.2vw, 58px); line-height: 1.16; letter-spacing: -0.03em; color: #FFFFFF">
+      <span class="sw" style="animation-range: entry 40% cover 22%">Most</span> <span class="sw" style="animation-range: entry 45% cover 24%">businesses</span> <span class="sw" style="animation-range: entry 50% cover 26%">don't</span> <span class="sw" style="animation-range: entry 55% cover 28%">lose</span> <span class="sw" style="animation-range: entry 60% cover 30%">to</span> <span class="sw" style="animation-range: entry 65% cover 32%">better</span> <span class="sw" style="animation-range: entry 70% cover 34%">products.</span> <span class="sw" style="animation-range: entry 75% cover 36%">They</span> <span class="sw" style="animation-range: entry 80% cover 38%">lose</span> <span class="sw" style="animation-range: entry 85% cover 40%">to</span> <span class="sw" style="animation-range: entry 90% cover 42%">competitors</span> <span class="sw" style="animation-range: entry 95% cover 44%">who</span> <span class="sw grad-text" style="animation-range: entry 100% cover 46%">know</span> <span class="sw grad-text" style="animation-range: cover 30% cover 48%">their</span> <span class="sw grad-text" style="animation-range: cover 32% cover 50%">market</span> <span class="sw grad-text" style="animation-range: cover 34% cover 52%">better.</span>
+    </p>
+  </section>
+
+  <section id="how" style="position: relative; z-index: 2; max-width: 1280px; margin: 0 auto; padding: 170px 28px 0">
+    <div class="rv" style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 24px">
+      <div style="max-width: 640px">
+        <p style="margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .16em; color: #A78BFA">HOW IT WORKS</p>
+        <h2 style="margin: 16px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(36px, 4.4vw, 62px); line-height: 1.04; letter-spacing: -0.04em; color: #FFFFFF">From market noise to a plan you can run.</h2>
+      </div>
+      <p style="margin: 0; max-width: 420px; font-size: 17px; color: #B6B0CC">Four engines work in sequence. Each one builds on the evidence the one before it found.</p>
+    </div>
+    <div style="position: relative; margin-top: 56px">
+      <div aria-hidden="true" class="hide-sm" style="position: absolute; left: 0; right: 0; top: 27px; height: 2px; background: rgba(255,255,255,.07)"></div>
+      <div aria-hidden="true" class="hide-sm beam-scroll" style="position: absolute; left: 0; right: 0; top: 27px; height: 2px; background: linear-gradient(90deg, #8B5CF6, #F472B6, #6366F1)"></div>
+      <ol style="position: relative; margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 28px">
+        <li class="rv">
+          <span style="display: inline-flex; width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; background: #0E0C17; border: 1px solid rgba(196,181,253,.45); font-family: 'Inter Tight', Inter, sans-serif; font-weight: 700; color: #EDE9FE; box-shadow: 0 0 0 6px #06050B, 0 0 30px -4px rgba(139,92,246,.8)">01</span>
+          <h3 style="margin: 22px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 22px; font-weight: 700; color: #FFFFFF">Read the market</h3>
+          <p style="margin: 8px 0 0; font-size: 15px; color: #B6B0CC">Competitors, their offers, prices and positioning, pulled from websites, reviews and social.</p>
+        </li>
+        <li class="rv">
+          <span style="display: inline-flex; width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; background: #0E0C17; border: 1px solid rgba(196,181,253,.45); font-family: 'Inter Tight', Inter, sans-serif; font-weight: 700; color: #EDE9FE; box-shadow: 0 0 0 6px #06050B, 0 0 30px -4px rgba(139,92,246,.8)">02</span>
+          <h3 style="margin: 22px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 22px; font-weight: 700; color: #FFFFFF">Hear your customers</h3>
+          <p style="margin: 8px 0 0; font-size: 15px; color: #B6B0CC">The real buying pain, objections and desires, with every quote linked to its source.</p>
+        </li>
+        <li class="rv">
+          <span style="display: inline-flex; width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; background: #0E0C17; border: 1px solid rgba(196,181,253,.45); font-family: 'Inter Tight', Inter, sans-serif; font-weight: 700; color: #EDE9FE; box-shadow: 0 0 0 6px #06050B, 0 0 30px -4px rgba(139,92,246,.8)">03</span>
+          <h3 style="margin: 22px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 22px; font-weight: 700; color: #FFFFFF">Build the strategy</h3>
+          <p style="margin: 8px 0 0; font-size: 15px; color: #B6B0CC">Positioning, offer, buyer journey and budget per channel, each claim backed by evidence.</p>
+        </li>
+        <li class="rv">
+          <span style="display: inline-flex; width: 56px; height: 56px; border-radius: 50%; align-items: center; justify-content: center; background: #0E0C17; border: 1px solid rgba(196,181,253,.45); font-family: 'Inter Tight', Inter, sans-serif; font-weight: 700; color: #EDE9FE; box-shadow: 0 0 0 6px #06050B, 0 0 30px -4px rgba(139,92,246,.8)">04</span>
+          <h3 style="margin: 22px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 22px; font-weight: 700; color: #FFFFFF">Watch and adapt</h3>
+          <p style="margin: 8px 0 0; font-size: 15px; color: #B6B0CC">Watchtower spots changes, the Performance Loop measures results, and the plan updates.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section style="position: relative; z-index: 2; max-width: 1280px; margin: 0 auto; padding: 150px 28px 0">
+    <div class="rv" style="text-align: center; max-width: 760px; margin: 0 auto">
+      <p style="margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .16em; color: #A78BFA">THE PLATFORM</p>
+      <h2 style="margin: 16px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(36px, 4.4vw, 62px); line-height: 1.04; letter-spacing: -0.04em; color: #FFFFFF">One system that thinks before it acts.</h2>
+    </div>
+
+    <div class="bento" style="margin-top: 60px; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 18px">
+
+      <article class="tile rv" style="grid-column: span 4; position: relative; overflow: hidden; min-height: 400px; padding: 34px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16; display: flex; flex-wrap: wrap; gap: 28px; align-items: center">
+        <div class="dots" aria-hidden="true" style="position: absolute; inset: 0; opacity: .6"></div>
+        <div style="position: relative; flex: 1 1 260px">
+          <p style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #A78BFA">MARKET INTELLIGENCE</p>
+          <h3 style="margin: 14px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 30px; font-weight: 700; line-height: 1.12; letter-spacing: -0.02em; color: #FFFFFF">See every competitor on one radar.</h3>
+          <p style="margin: 14px 0 0; font-size: 15px; color: #B6B0CC">What they sell, at what price, who they target and how they position, with a confidence score on the data behind it.</p>
+          <div style="margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px">
+            <span style="padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; color: #DDD6FE">Offers</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; color: #DDD6FE">Pricing</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; color: #DDD6FE">Positioning</span>
+            <span style="padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.06); font-size: 13px; color: #DDD6FE">Playbook</span>
+          </div>
         </div>
-        <div class="glass-panel">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:16px;">Strategic Narrative</div>
-          <div class="timeline">
-            <div class="t-node">
-              <div class="t-dot prob">🔴</div>
-              <div class="t-content">
-                <div class="t-label prob">Market Problem</div>
-                <div class="t-text">Fragmented marketing with no connected system</div>
-              </div>
-            </div>
-            <div class="t-node">
-              <div class="t-dot caus">🟡</div>
-              <div class="t-content">
-                <div class="t-label caus">Root Cause</div>
-                <div class="t-text">Tools don't connect strategy to execution</div>
-              </div>
-            </div>
-            <div class="t-node">
-              <div class="t-dot intv">🔵</div>
-              <div class="t-content">
-                <div class="t-label intv">Intervention</div>
-                <div class="t-text">AI system connecting all marketing layers</div>
-              </div>
-            </div>
-            <div class="t-node">
-              <div class="t-dot rslt">🟢</div>
-              <div class="t-content">
-                <div class="t-label rslt">Result</div>
-                <div class="t-text">Complete marketing machine, live in minutes</div>
-              </div>
-            </div>
+        <div aria-hidden="true" style="position: relative; flex: 0 0 300px; height: 300px; margin: 0 auto">
+          <div style="position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(196,181,253,.22); background: radial-gradient(circle, rgba(139,92,246,.12), rgba(13,11,22,0) 70%)"></div>
+          <div style="position: absolute; inset: 50px; border-radius: 50%; border: 1px solid rgba(196,181,253,.18)"></div>
+          <div style="position: absolute; inset: 100px; border-radius: 50%; border: 1px solid rgba(196,181,253,.15)"></div>
+          <div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(196,181,253,.12)"></div>
+          <div style="position: absolute; top: 50%; left: 0; right: 0; height: 1px; background: rgba(196,181,253,.12)"></div>
+          <div class="a-spin" style="position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(from 0deg, rgba(167,139,250,0) 0deg, rgba(167,139,250,0) 300deg, rgba(167,139,250,.45) 358deg, rgba(167,139,250,0) 360deg)"></div>
+          <div style="position: absolute; left: 50%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 4px; background: linear-gradient(135deg, #C4B5FD, #8B5CF6)"></div>
+          <div style="position: absolute; left: 68%; top: 22%">
+            <span class="a-blip" style="position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: rgba(253,164,175,.6)"></span>
+            <span style="position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: #FDA4AF"></span>
+            <span style="position: absolute; left: 12px; top: -10px; padding: 2px 8px; border-radius: 6px; background: rgba(24,20,40,.95); font-size: 11px; font-weight: 600; color: #FDA4AF; white-space: nowrap">Competitor A · price cut</span>
+          </div>
+          <div style="position: absolute; left: 24%; top: 64%">
+            <span class="a-blip" style="position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: rgba(252,211,77,.55); animation-delay: .8s"></span>
+            <span style="position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: #FCD34D"></span>
+            <span style="position: absolute; left: 12px; top: -10px; padding: 2px 8px; border-radius: 6px; background: rgba(24,20,40,.95); font-size: 11px; font-weight: 600; color: #FCD34D; white-space: nowrap">Competitor B · new offer</span>
+          </div>
+          <div style="position: absolute; left: 78%; top: 72%">
+            <span class="a-blip" style="position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border-radius: 50%; background: rgba(147,197,253,.55); animation-delay: 1.6s"></span>
+            <span style="position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: #93C5FD"></span>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile rv" style="grid-column: span 2; position: relative; overflow: hidden; min-height: 400px; padding: 30px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: linear-gradient(180deg, #120E20, #0D0B16)">
+        <p style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #F9A8D4">CUSTOMER VOICE</p>
+        <h3 style="margin: 14px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; color: #FFFFFF">Hear what buyers actually say.</h3>
+        <div class="q-stack" style="position: relative; height: 190px; margin-top: 26px">
+          <div class="a-q1" style="position: absolute; inset: 0; padding: 18px; border-radius: 16px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08)">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #FDA4AF">REVIEW</div>
+            <div style="margin-top: 10px; font-size: 16px; font-style: italic; color: #F4F2FA">“Almost half the weight was syrup at the bottom.”</div>
+            <div style="margin-top: 10px; font-size: 12px; color: #8E88A8">Linked source · sample data</div>
+          </div>
+          <div class="a-q2" style="position: absolute; inset: 0; padding: 18px; border-radius: 16px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08)">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #FCD34D">FORUM</div>
+            <div style="margin-top: 10px; font-size: 16px; font-style: italic; color: #F4F2FA">“Fast delivery, but too sweet after two pieces.”</div>
+            <div style="margin-top: 10px; font-size: 12px; color: #8E88A8">Linked source · sample data</div>
+          </div>
+          <div class="a-q3" style="position: absolute; inset: 0; padding: 18px; border-radius: 16px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08)">
+            <div style="font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #93C5FD">REVIEW</div>
+            <div style="margin-top: 10px; font-size: 16px; font-style: italic; color: #F4F2FA">“Shipped five days and arrived crushed.”</div>
+            <div style="margin-top: 10px; font-size: 12px; color: #8E88A8">Linked source · sample data</div>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile rv" style="grid-column: span 2; position: relative; overflow: hidden; min-height: 380px; padding: 30px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16">
+        <p style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #A78BFA">NO GENERIC ADVICE</p>
+        <h3 style="margin: 14px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; color: #FFFFFF">If it fits any business, it's rejected.</h3>
+        <div style="margin-top: 28px; padding: 18px; border-radius: 16px; background: rgba(251,113,133,.06); border: 1px solid rgba(251,113,133,.25)">
+          <div style="position: relative; display: inline-block; font-size: 17px; color: #B6B0CC">“Post more often on social media.”
+            <span class="a-strike" style="position: absolute; left: 0; top: 52%; height: 2px; width: 100%; background: #FB7185"></span>
+          </div>
+          <div class="a-rej" style="margin-top: 10px; font-size: 12px; font-weight: 700; letter-spacing: .06em; color: #FDA4AF">REJECTED · COULD APPLY TO ANY COMPETITOR</div>
+        </div>
+        <div style="margin-top: 12px; padding: 18px; border-radius: 16px; background: rgba(139,92,246,.1); border: 1px solid rgba(196,181,253,.3)">
+          <div style="font-size: 16px; color: #FFFFFF">“Show the gram breakdown your cheaper rival hides.”</div>
+          <div style="margin-top: 10px; display: flex; gap: 6px">
+            <span style="padding: 2px 8px; border-radius: 6px; background: rgba(196,181,253,.16); font-size: 11px; font-weight: 700; color: #DDD6FE">RC1</span>
+            <span style="padding: 2px 8px; border-radius: 6px; background: rgba(196,181,253,.16); font-size: 11px; font-weight: 700; color: #DDD6FE">RC2</span>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile rv" style="grid-column: span 4; position: relative; overflow: hidden; min-height: 380px; padding: 34px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px">
+          <div style="max-width: 380px">
+            <p style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #6EE7B7">PERFORMANCE LOOP</p>
+            <h3 style="margin: 14px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 30px; font-weight: 700; line-height: 1.12; letter-spacing: -0.02em; color: #FFFFFF">Measure what works. Keep what wins.</h3>
+            <p style="margin: 12px 0 0; font-size: 15px; color: #B6B0CC">Every action gets a hypothesis, a baseline and a follow-up, so the next move is based on results.</p>
+          </div>
+          <div class="a-pop" style="align-self: flex-start; padding: 12px 16px; border-radius: 14px; background: rgba(52,211,153,.1); border: 1px solid rgba(110,231,183,.3)">
+            <div style="font-family: 'Inter Tight', Inter, sans-serif; font-size: 26px; font-weight: 800; color: #6EE7B7">+50%</div>
+            <div style="font-size: 12px; color: #A7F3D0">Click-through · sample data</div>
+          </div>
+        </div>
+        <svg role="img" aria-label="Line chart: the follow-up period rises above the baseline" viewBox="0 0 720 170" preserveAspectRatio="none" style="display: block; width: 100%; height: 170px; margin-top: 18px">
+          <defs>
+            <linearGradient id="perfArea" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0" stop-color="#8B5CF6" stop-opacity=".45"></stop>
+              <stop offset="1" stop-color="#8B5CF6" stop-opacity="0"></stop>
+            </linearGradient>
+            <linearGradient id="perfLine" x1="0" x2="1" y1="0" y2="0">
+              <stop offset="0" stop-color="#A78BFA"></stop>
+              <stop offset="1" stop-color="#F472B6"></stop>
+            </linearGradient>
+          </defs>
+          <line x1="0" y1="42" x2="720" y2="42" stroke="rgba(255,255,255,.06)"></line>
+          <line x1="0" y1="86" x2="720" y2="86" stroke="rgba(255,255,255,.06)"></line>
+          <line x1="0" y1="130" x2="720" y2="130" stroke="rgba(255,255,255,.06)"></line>
+          <path d="M0 128 C 80 124, 140 130, 220 122 S 340 126, 400 118" fill="none" stroke="rgba(255,255,255,.28)" stroke-width="2" stroke-dasharray="6 6"></path>
+          <path class="a-area" d="M400 118 C 460 104, 520 70, 580 58 S 680 30, 720 22 L 720 170 L 400 170 Z" fill="url(#perfArea)"></path>
+          <path class="a-draw" d="M0 128 C 80 124, 140 130, 220 122 S 340 126, 400 118 C 460 104, 520 70, 580 58 S 680 30, 720 22" fill="none" stroke="url(#perfLine)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="900" stroke-dashoffset="0"></path>
+          <line x1="400" y1="8" x2="400" y2="170" stroke="rgba(196,181,253,.35)" stroke-dasharray="3 5"></line>
+        </svg>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: #8E88A8"><span>Baseline</span><span style="color: #C4B5FD">Strategy change</span><span>Follow-up</span></div>
+      </article>
+
+      <article class="tile rv" style="grid-column: span 3; position: relative; overflow: hidden; min-height: 300px; padding: 32px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16">
+        <p style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #93C5FD">BUYER JOURNEY</p>
+        <h3 style="margin: 14px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; color: #FFFFFF">The right message at every stage.</h3>
+        <div style="position: relative; margin-top: 42px; height: 90px">
+          <div aria-hidden="true" style="position: absolute; left: 4%; right: 8%; top: 22px; height: 2px; background: linear-gradient(90deg, #93C5FD, #A78BFA, #F472B6); opacity: .5"></div>
+          <span class="a-travel" aria-hidden="true" style="position: absolute; top: 15px; width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 0 18px 4px rgba(196,181,253,.9)"></span>
+          <div style="position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+            <div><span style="display: block; width: 46px; height: 46px; border-radius: 14px; background: #161227; border: 1px solid rgba(147,197,253,.4)"></span><div style="margin-top: 10px; font-size: 14px; font-weight: 600; color: #FFFFFF">Attract</div><div style="font-size: 12px; color: #8E88A8">Stop the scroll</div></div>
+            <div><span style="display: block; width: 46px; height: 46px; border-radius: 14px; background: #161227; border: 1px solid rgba(196,181,253,.45)"></span><div style="margin-top: 10px; font-size: 14px; font-weight: 600; color: #FFFFFF">Prove</div><div style="font-size: 12px; color: #8E88A8">Remove doubt</div></div>
+            <div><span style="display: block; width: 46px; height: 46px; border-radius: 14px; background: #161227; border: 1px solid rgba(244,114,182,.45)"></span><div style="margin-top: 10px; font-size: 14px; font-weight: 600; color: #FFFFFF">Convert</div><div style="font-size: 12px; color: #8E88A8">Make it easy to buy</div></div>
+          </div>
+        </div>
+      </article>
+
+      <article class="tile rv" style="grid-column: span 3; position: relative; overflow: hidden; min-height: 300px; padding: 32px 32px 0; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+          <p style="margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; color: #A78BFA">WATCHTOWER</p>
+          <span style="display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; background: rgba(52,211,153,.1); font-size: 11px; font-weight: 700; color: #6EE7B7"><span class="a-live" style="width: 7px; height: 7px; border-radius: 50%; background: #34D399"></span>LIVE</span>
+        </div>
+        <h3 style="margin: 14px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; color: #FFFFFF">Your market moves. You know first.</h3>
+        <div style="position: relative; height: 160px; margin-top: 20px; overflow: hidden; -webkit-mask-image: linear-gradient(180deg, transparent, #000 18%, #000 80%, transparent); mask-image: linear-gradient(180deg, transparent, #000 18%, #000 80%, transparent)">
+          <div class="a-feed" style="display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #15121F"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FDA4AF"></span><span style="font-size: 14px; color: #FFFFFF">Competitor A cut entry price 22%</span><span style="margin-left: auto; font-size: 11px; color: #8E88A8">2h</span></div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #15121F"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FCD34D"></span><span style="font-size: 14px; color: #FFFFFF">Competitor B launched a gift desk</span><span style="margin-left: auto; font-size: 11px; color: #8E88A8">9h</span></div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #15121F"><span style="width: 8px; height: 8px; border-radius: 50%; background: #C4B5FD"></span><span style="font-size: 14px; color: #FFFFFF">34 buyers asked the same question</span><span style="margin-left: auto; font-size: 11px; color: #8E88A8">1d</span></div>
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(139,92,246,.14)"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6EE7B7"></span><span style="font-size: 14px; color: #FFFFFF">Strategy update ready to review</span><span style="margin-left: auto; font-size: 11px; color: #C4B5FD">new</span></div>
+            <div aria-hidden="true" style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #15121F"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FDA4AF"></span><span style="font-size: 14px; color: #FFFFFF">Competitor A cut entry price 22%</span><span style="margin-left: auto; font-size: 11px; color: #8E88A8">2h</span></div>
+            <div aria-hidden="true" style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #15121F"><span style="width: 8px; height: 8px; border-radius: 50%; background: #FCD34D"></span><span style="font-size: 14px; color: #FFFFFF">Competitor B launched a gift desk</span><span style="margin-left: auto; font-size: 11px; color: #8E88A8">9h</span></div>
+            <div aria-hidden="true" style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: #15121F"><span style="width: 8px; height: 8px; border-radius: 50%; background: #C4B5FD"></span><span style="font-size: 14px; color: #FFFFFF">34 buyers asked the same question</span><span style="margin-left: auto; font-size: 11px; color: #8E88A8">1d</span></div>
+            <div aria-hidden="true" style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: rgba(139,92,246,.14)"><span style="width: 8px; height: 8px; border-radius: 50%; background: #6EE7B7"></span><span style="font-size: 14px; color: #FFFFFF">Strategy update ready to review</span><span style="margin-left: auto; font-size: 11px; color: #C4B5FD">new</span></div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section aria-label="Product screens" style="position: relative; z-index: 2; margin-top: 160px">
+    <div class="rv" style="max-width: 1280px; margin: 0 auto; padding: 0 28px; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px">
+      <h2 style="margin: 0; max-width: 620px; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(34px, 4vw, 56px); line-height: 1.05; letter-spacing: -0.04em; color: #FFFFFF">Real screens. Real reasoning.</h2>
+      <p style="margin: 0; max-width: 380px; font-size: 16px; color: #8E88A8">Inside Avyron, shown with a sample business and demo data.</p>
+    </div>
+    <div style="margin-top: 50px; perspective: 1800px">
+      <div style="transform: rotateX(10deg) rotateZ(-2deg); display: flex; flex-direction: column; gap: 20px">
+        <div style="overflow: hidden">
+          <div class="a-mq" style="display: flex; gap: 20px; width: max-content">
+            <img src="/assets/website/hero-dashboard.jpg" alt="Dashboard" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/strategy.jpg" alt="Strategy plan" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/watchtower.jpg" alt="Watchtower" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/mi-overview.jpg" alt="Market intelligence" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/hero-dashboard.jpg" alt="" aria-hidden="true" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/strategy.jpg" alt="" aria-hidden="true" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/watchtower.jpg" alt="" aria-hidden="true" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/mi-overview.jpg" alt="" aria-hidden="true" style="display: block; width: 560px; height: 316px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+          </div>
+        </div>
+        <div style="overflow: hidden">
+          <div class="a-mqR" style="display: flex; gap: 20px; width: max-content">
+            <img src="/assets/website/customer-voice.jpg" alt="Customer voice" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/performance.jpg" alt="Performance loop" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/audience-pain.jpg" alt="Audience buying pain" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/strategy.jpg" alt="" aria-hidden="true" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: center; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/customer-voice.jpg" alt="" aria-hidden="true" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/performance.jpg" alt="" aria-hidden="true" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/audience-pain.jpg" alt="" aria-hidden="true" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: top left; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
+            <img src="/assets/website/strategy.jpg" alt="" aria-hidden="true" style="display: block; width: 520px; height: 300px; object-fit: cover; object-position: center; border-radius: 18px; border: 1px solid rgba(255,255,255,.1)">
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- VISUAL 3: OUTPUT -->
-  <section id="output">
-    <div class="container">
-      <div class="visual-split">
-        <div class="v-content">
-          <div class="label-pill">Execution Engine</div>
-          <h2>Turn insights into real content and results</h2>
-          <p>Generate posts, reels, stories, carousels, and AI videos — all strategy-aligned and ready to publish. Schedule, track, and iterate automatically.</p>
-          <ul class="v-list">
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              AI content generation (text, image, video)
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Content calendar & scheduling system
-            </li>
-            <li>
-              <span class="v-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>
-              Performance tracking & auto-iteration
-            </li>
-          </ul>
-        </div>
-        <div class="glass-panel">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:14px;">Content Queue</div>
-          <div class="content-stack">
-            <div class="c-card">
-              <div class="c-icon p">📝</div>
-              <div class="c-info">
-                <h4>Instagram Post</h4>
-                <p>Strategy-aligned caption generated</p>
-              </div>
-              <div class="c-status ready">Ready</div>
-            </div>
-            <div class="c-card">
-              <div class="c-icon b">🎬</div>
-              <div class="c-info">
-                <h4>AI Video Reel</h4>
-                <p>30s video with motion graphics</p>
-              </div>
-              <div class="c-status gen">Generating</div>
-            </div>
-            <div class="c-card">
-              <div class="c-icon a">📸</div>
-              <div class="c-info">
-                <h4>Story Sequence</h4>
-                <p>3-part story arc for engagement</p>
-              </div>
-              <div class="c-status sched">Scheduled</div>
-            </div>
+  <section id="why" style="position: relative; z-index: 2; max-width: 1280px; margin: 0 auto; padding: 170px 28px 0">
+    <div class="rv" style="text-align: center; max-width: 800px; margin: 0 auto">
+      <p style="margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .16em; color: #A78BFA">WHY AVYRON</p>
+      <h2 style="margin: 16px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(36px, 4.4vw, 62px); line-height: 1.04; letter-spacing: -0.04em; color: #FFFFFF">Most AI marketing tools are execution machines. Avyron is the strategist.</h2>
+    </div>
+    <div class="vs rv" style="position: relative; margin-top: 60px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px">
+      <div style="padding: 36px; border-radius: 26px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12">
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: .1em; color: #8E88A8">EXECUTION TOOLS</div>
+        <ul style="margin: 24px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 18px; font-size: 17px; color: #8E88A8">
+          <li style="display: flex; gap: 12px"><span aria-hidden="true" style="color: #5E5878">—</span>You tell them what to post</li>
+          <li style="display: flex; gap: 12px"><span aria-hidden="true" style="color: #5E5878">—</span>Same advice for every business</li>
+          <li style="display: flex; gap: 12px"><span aria-hidden="true" style="color: #5E5878">—</span>No view of your competitors</li>
+          <li style="display: flex; gap: 12px"><span aria-hidden="true" style="color: #5E5878">—</span>Don't notice when the market changes</li>
+        </ul>
+      </div>
+      <div style="position: relative; padding: 1.5px; border-radius: 26px; overflow: hidden; background: rgba(196,181,253,.25)">
+        <div class="a-spin" aria-hidden="true" style="position: absolute; left: -50%; top: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 280deg, #C4B5FD 320deg, #F472B6 345deg, rgba(0,0,0,0) 360deg); animation-duration: 8s"></div>
+        <div style="position: relative; height: 100%; box-sizing: border-box; padding: 36px; border-radius: 25px; background: linear-gradient(160deg, #1A1330, #0E0B19 60%)">
+          <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; letter-spacing: .1em; color: #C4B5FD">
+            <span style="width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(135deg, #C4B5FD, #8B5CF6 45%, #4F46E5); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-size: 12px; color: #FFFFFF">A</span>
+            AVYRON · STRATEGIC THINKING SYSTEM
           </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- STATS -->
-  <div class="stats-section">
-    <div class="stats-grid">
-      <div>
-        <div class="stat-num">15</div>
-        <div class="stat-lbl">AI Engines</div>
-      </div>
-      <div>
-        <div class="stat-num">1</div>
-        <div class="stat-lbl">Unified System</div>
-      </div>
-      <div>
-        <div class="stat-num">5min</div>
-        <div class="stat-lbl">To Full Strategy</div>
-      </div>
-      <div>
-        <div class="stat-num">24/7</div>
-        <div class="stat-lbl">Always Running</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- FEATURES -->
-  <section id="features">
-    <div class="container">
-      <div class="section-header">
-        <div class="label-pill">Full Capability Set</div>
-        <h2 class="section-title">A full system, not another tool</h2>
-        <p class="section-sub">Every capability you need to run marketing at scale — integrated, automated, and always improving.</p>
-      </div>
-      <div class="features-grid">
-        <div class="feat-card">
-          <div class="feat-icon p">🧠</div>
-          <h3>Market Intelligence</h3>
-          <p>Deep competitor analysis, market gaps, and audience signals — updated continuously with our 6-layer pipeline.</p>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon b">🎯</div>
-          <h3>Strategic Positioning</h3>
-          <p>Find your unique angle, differentiation pillars, and competitive advantage with statistical validation.</p>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon g">📊</div>
-          <h3>Narrative Engine</h3>
-          <p>Transform raw data into a clear causal story that drives all your messaging and content decisions.</p>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon a">✍️</div>
-          <h3>Content Studio</h3>
-          <p>Generate posts, reels, stories, and carousels — all strategy-aligned and ready to publish.</p>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon r">🎬</div>
-          <h3>AI Video Creation</h3>
-          <p>Create professional marketing videos with AI-powered generation — no editing skills required.</p>
-        </div>
-        <div class="feat-card">
-          <div class="feat-icon c">🔄</div>
-          <h3>Auto-Iteration</h3>
-          <p>The system learns from performance data and continuously optimizes your strategy for better results.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- PRICING -->
-  <section class="pricing-section" id="pricing">
-    <div class="container">
-      <div class="section-header">
-        <div class="label-pill">Pricing</div>
-        <h2 class="section-title">Simple plans, full system access</h2>
-        <p class="section-sub">Start with a 7-day free trial. Upgrade when you're ready to scale.</p>
-      </div>
-      <div class="pricing-grid">
-        <!-- LAUNCH -->
-        <div class="p-card">
-          <p class="p-name">Launch</p>
-          <p class="p-price">$80</p>
-          <p class="p-period">one-time payment</p>
-          <p class="p-desc">Full system for a single campaign. Everything you need to launch.</p>
-          <ul class="p-features">
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Complete strategic analysis</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Strategy + narrative + plan</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>AI content generation</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>One campaign</li>
+          <ul style="margin: 24px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 18px; font-size: 17px; color: #FFFFFF">
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none"><path d="m5 12 5 5L20 7"></path></svg>Tells you what to say, to whom, and why</li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none"><path d="m5 12 5 5L20 7"></path></svg>Strategy built on your market's evidence</li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none"><path d="m5 12 5 5L20 7"></path></svg>Maps every competitor and their moves</li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none"><path d="m5 12 5 5L20 7"></path></svg>Watches and adapts as things change</li>
           </ul>
-          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-ghost" style="width:100%;justify-content:center;">Get Started</a>
-        </div>
-        <!-- SCALE -->
-        <div class="p-card featured">
-          <div class="p-popular">Most Popular</div>
-          <p class="p-name featured-text">Scale</p>
-          <p class="p-price">$250</p>
-          <p class="p-period">per month</p>
-          <p class="p-desc">For teams scaling their marketing operation with full system access.</p>
-          <ul class="p-features">
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Everything in Launch</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Unlimited campaigns</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>2 AI video credits/month</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Competitive intelligence updates</li>
-          </ul>
-          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary" style="width:100%;justify-content:center;">Start Free Trial</a>
-        </div>
-        <!-- DOMINION -->
-        <div class="p-card">
-          <p class="p-name">Dominion</p>
-          <p class="p-price">$500</p>
-          <p class="p-period">per month</p>
-          <p class="p-desc">Maximum intelligence power for high-growth teams and agencies.</p>
-          <ul class="p-features">
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Everything in Scale</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Priority processing</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>5 AI video credits/month</li>
-            <li><span class="p-check"><svg viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>Advanced analytics</li>
-          </ul>
-          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-ghost" style="width:100%;justify-content:center;">Get Started</a>
         </div>
       </div>
-      <div style="text-align:center;margin-top:32px;">
-        <a href="/pricing" style="font-size:14px;color:var(--purple-bright);text-decoration:none;font-weight:600;">View full pricing details →</a>
+      <span class="hide-sm" aria-hidden="true" style="position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; background: #06050B; border: 1px solid rgba(196,181,253,.35); display: flex; align-items: center; justify-content: center; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: 15px; color: #C4B5FD">VS</span>
+    </div>
+  </section>
+
+  <section id="pricing" style="position: relative; z-index: 2; max-width: 1280px; margin: 0 auto; padding: 170px 28px 0">
+    <div class="rv" style="text-align: center; max-width: 780px; margin: 0 auto">
+      <p style="margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .16em; color: #A78BFA">PRICING</p>
+      <h2 style="margin: 16px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(36px, 4.4vw, 62px); line-height: 1.04; letter-spacing: -0.04em; color: #FFFFFF">Simple plans. Launch prices.</h2>
+      <p style="margin: 18px auto 0; max-width: 620px; font-size: 17px; color: #B6B0CC">Every plan includes the full system: market intelligence, strategy, Watchtower and the Performance Loop. Bigger plans give you more of it.</p>
+      <div style="margin-top: 24px; display: inline-flex; align-items: center; gap: 10px; padding: 8px 16px; border-radius: 999px; background: rgba(244,114,182,.1); border: 1px solid rgba(244,114,182,.3); font-size: 14px; font-weight: 600; color: #F9A8D4">
+        <span class="a-live" style="width: 8px; height: 8px; border-radius: 50%; background: #F472B6"></span>
+        Launch prices for your first 3 months
+      </div>
+    </div>
+
+    <div style="margin-top: 56px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; align-items: stretch">
+
+      <article class="rv" style="display: flex; flex-direction: column; padding: 36px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16">
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: .14em; color: #A78BFA">STARTER</div>
+        <p style="margin: 10px 0 0; font-size: 15px; color: #B6B0CC">For founders running one product or offer.</p>
+        <div style="margin-top: 28px; display: flex; align-items: center; gap: 12px">
+          <span style="font-size: 20px; font-weight: 600; color: #6F6989; text-decoration: line-through">$199</span>
+          <span style="padding: 4px 10px; border-radius: 999px; background: rgba(244,114,182,.12); border: 1px solid rgba(244,114,182,.32); font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #F9A8D4">LAUNCH PRICE</span>
+        </div>
+        <div style="margin-top: 6px; display: flex; align-items: baseline; gap: 8px">
+          <span style="font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: 64px; line-height: 1; letter-spacing: -0.04em; color: #FFFFFF">$70</span>
+          <span style="font-size: 16px; color: #8E88A8">/ month</span>
+        </div>
+        <p style="margin: 10px 0 0; font-size: 14px; color: #8E88A8">≈ AED 257 · then $199 / month</p>
+        <a class="bg2" href="/signup?plan=starter" style="margin-top: 28px; display: flex; align-items: center; justify-content: center; min-height: 52px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); color: #F4F2FA; font-weight: 600; font-size: 16px">Start with Starter</a>
+        <ul style="margin: 30px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 15px; color: #DDD6FE">
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span><b style="color: #FFFFFF">1 campaign</b> a month · 1 brand</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Track <b style="color: #FFFFFF">5 competitors</b></span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Market intelligence + customer voice</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Full strategy plan + daily tasks</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Watchtower <b style="color: #FFFFFF">weekly</b></span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Performance Loop + monthly report</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>2 Deep Reasoning checks a month</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>1 user</span></li>
+        </ul>
+      </article>
+
+      <div class="rv" style="position: relative; padding: 1.5px; border-radius: 26px; overflow: hidden; background: rgba(196,181,253,.25)">
+        <div class="a-spin" aria-hidden="true" style="position: absolute; left: -50%; top: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 280deg, #C4B5FD 320deg, #F472B6 345deg, rgba(0,0,0,0) 360deg); animation-duration: 8s"></div>
+        <article style="position: relative; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; padding: 36px; border-radius: 25px; background: linear-gradient(165deg, #1A1330, #0E0B19 65%)">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px">
+            <div style="font-size: 13px; font-weight: 700; letter-spacing: .14em; color: #C4B5FD">GROWTH</div>
+            <span style="padding: 5px 12px; border-radius: 999px; background: linear-gradient(135deg, #8B5CF6, #6366F1); font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #FFFFFF">MOST POPULAR</span>
+          </div>
+          <p style="margin: 10px 0 0; font-size: 15px; color: #B6B0CC">For growing businesses with several products or audiences.</p>
+          <div style="margin-top: 28px; display: flex; align-items: center; gap: 12px">
+            <span style="font-size: 20px; font-weight: 600; color: #6F6989; text-decoration: line-through">$599</span>
+            <span style="padding: 4px 10px; border-radius: 999px; background: rgba(244,114,182,.12); border: 1px solid rgba(244,114,182,.32); font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #F9A8D4">LAUNCH PRICE</span>
+          </div>
+          <div style="margin-top: 6px; display: flex; align-items: baseline; gap: 8px">
+            <span style="font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: 64px; line-height: 1; letter-spacing: -0.04em; color: #FFFFFF">$200</span>
+            <span style="font-size: 16px; color: #8E88A8">/ month</span>
+          </div>
+          <p style="margin: 10px 0 0; font-size: 14px; color: #8E88A8">≈ AED 735 · then $599 / month</p>
+          <a class="bp" href="/signup?plan=growth" style="margin-top: 28px; display: flex; align-items: center; justify-content: center; min-height: 52px; border-radius: 999px; background: linear-gradient(135deg, #8B5CF6, #6366F1); color: #FFFFFF; font-weight: 600; font-size: 16px; box-shadow: 0 14px 40px -14px rgba(139,92,246,.95)">Start with Growth</a>
+          <ul style="margin: 30px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 15px; color: #DDD6FE">
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span><b style="color: #FFFFFF">3 campaigns</b> a month · 1 brand</span></li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Track <b style="color: #FFFFFF">10 competitors</b></span></li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Everything in Starter</span></li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Watchtower <b style="color: #FFFFFF">daily</b></span></li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>10 Deep Reasoning checks a month</span></li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>3 users</span></li>
+            <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4B5FD" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Monthly 30-min call with the founder</span></li>
+          </ul>
+        </article>
+      </div>
+
+      <article class="rv" style="display: flex; flex-direction: column; padding: 36px; border-radius: 26px; border: 1px solid rgba(255,255,255,.09); background: #0D0B16">
+        <div style="font-size: 13px; font-weight: 700; letter-spacing: .14em; color: #A78BFA">AGENCY</div>
+        <p style="margin: 10px 0 0; font-size: 15px; color: #B6B0CC">For agencies and consultants managing several clients.</p>
+        <div style="margin-top: 28px; display: flex; align-items: center; gap: 12px">
+          <span style="font-size: 20px; font-weight: 600; color: #6F6989; text-decoration: line-through">$1,999</span>
+          <span style="padding: 4px 10px; border-radius: 999px; background: rgba(244,114,182,.12); border: 1px solid rgba(244,114,182,.32); font-size: 11px; font-weight: 700; letter-spacing: .08em; color: #F9A8D4">LAUNCH PRICE</span>
+        </div>
+        <div style="margin-top: 6px; display: flex; align-items: baseline; gap: 8px">
+          <span style="font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: 64px; line-height: 1; letter-spacing: -0.04em; color: #FFFFFF">$655</span>
+          <span style="font-size: 16px; color: #8E88A8">/ month</span>
+        </div>
+        <p style="margin: 10px 0 0; font-size: 14px; color: #8E88A8">≈ AED 2,405 · then $1,999 / month</p>
+        <a class="bg2" href="#demo" style="margin-top: 28px; display: flex; align-items: center; justify-content: center; min-height: 52px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); color: #F4F2FA; font-weight: 600; font-size: 16px">Talk to us</a>
+        <ul style="margin: 30px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; font-size: 15px; color: #DDD6FE">
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span><b style="color: #FFFFFF">10 campaigns</b> a month · up to 10 brands</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Track <b style="color: #FFFFFF">10 competitors</b> per brand</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Everything in Growth</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>30 Deep Reasoning checks a month</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>Monthly report per brand</span></li>
+          <li style="display: flex; gap: 12px"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#A78BFA" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex: none; margin-top: 2px"><path d="m5 12 5 5L20 7"></path></svg><span>10 users</span></li>
+        </ul>
+      </article>
+    </div>
+
+    <div class="rv" style="margin-top: 22px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 28px; border-radius: 20px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12">
+      <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-size: 16px; color: #DDD6FE">
+        <span style="font-weight: 600; color: #FFFFFF">Need one more campaign?</span>
+        <span style="color: #6F6989; text-decoration: line-through">$149</span>
+        <span style="font-weight: 700; color: #FFFFFF">$70</span>
+        <span style="color: #8E88A8">per extra campaign during launch</span>
+      </div>
+      <span style="font-size: 14px; color: #8E88A8">Prices in USD, billed monthly. Cancel anytime.</span>
+    </div>
+  </section>
+
+  <section id="founding" style="position: relative; z-index: 2; max-width: 1280px; margin: 0 auto; padding: 170px 28px 0">
+    <div class="rv" style="position: relative; overflow: hidden; border-radius: 32px; border: 1px solid rgba(196,181,253,.28); background: #0D0A18; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 0">
+      <div aria-hidden="true" style="position: absolute; right: -10%; top: -40%; width: 70%; height: 180%; background: radial-gradient(ellipse, rgba(139,92,246,.35), rgba(13,10,24,0) 65%)"></div>
+      <div style="position: relative; padding: clamp(36px, 5vw, 64px)">
+        <span style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: rgba(244,114,182,.12); border: 1px solid rgba(244,114,182,.3); font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #F9A8D4"><span class="a-live" style="width: 7px; height: 7px; border-radius: 50%; background: #F472B6"></span>LIMITED · 20 SPOTS</span>
+        <h2 style="margin: 22px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(36px, 4.2vw, 58px); line-height: 1.04; letter-spacing: -0.04em; color: #FFFFFF">Become a Founding Client.</h2>
+        <p style="margin: 18px 0 0; max-width: 480px; font-size: 17px; color: #B6B0CC">We're working closely with our first 20 businesses in the UAE. You get the full platform and a direct line to the founder. We get your honest feedback.</p>
+        <a class="bp" href="#demo" style="margin-top: 32px; display: inline-flex; align-items: center; gap: 10px; min-height: 54px; padding: 0 28px; border-radius: 999px; background: #FFFFFF; color: #1E1033; font-weight: 700; font-size: 16px">Apply for a spot
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
+        </a>
+      </div>
+      <div style="position: relative; padding: clamp(36px, 5vw, 64px); border-left: 1px solid rgba(255,255,255,.06)">
+        <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 22px">
+          <li style="display: flex; gap: 16px">
+            <span style="flex: none; width: 44px; height: 44px; border-radius: 12px; background: rgba(139,92,246,.16); display: flex; align-items: center; justify-content: center; color: #C4B5FD"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="4"></circle></svg></span>
+            <div><div style="font-weight: 600; font-size: 17px; color: #FFFFFF">A strategy built on your market</div><div style="margin-top: 4px; font-size: 15px; color: #B6B0CC">Your competitors, your customers, your plan, ready before we meet.</div></div>
+          </li>
+          <li style="display: flex; gap: 16px">
+            <span style="flex: none; width: 44px; height: 44px; border-radius: 12px; background: rgba(139,92,246,.16); display: flex; align-items: center; justify-content: center; color: #C4B5FD"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
+            <div><div style="font-weight: 600; font-size: 17px; color: #FFFFFF">A weekly 15-minute review</div><div style="margin-top: 4px; font-size: 15px; color: #B6B0CC">Directly with the founder: what changed, what to do next.</div></div>
+          </li>
+          <li style="display: flex; gap: 16px">
+            <span style="flex: none; width: 44px; height: 44px; border-radius: 12px; background: rgba(139,92,246,.16); display: flex; align-items: center; justify-content: center; color: #C4B5FD"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span>
+            <div><div style="font-weight: 600; font-size: 17px; color: #FFFFFF">Launch pricing</div><div style="margin-top: 4px; font-size: 15px; color: #B6B0CC">Plans from $70 a month for your first 3 months.</div></div>
+          </li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <!-- FINAL CTA -->
-  <section class="final-cta">
-    <div class="orb orb-purple"></div>
-    <div class="orb orb-blue"></div>
-    <div class="container" style="position:relative;z-index:1;">
-      <div class="cta-box">
-        <div class="label-pill" style="margin-bottom:24px;">Ready to start?</div>
-        <h2>The market doesn't wait.<br/>Neither should you.</h2>
-        <p>Start your free trial and get a complete AI-powered marketing system up and running in minutes.</p>
-        <div class="cta-btns">
-          <a href="BASE_URL_PLACEHOLDER/login" class="btn btn-primary btn-lg">
-            Start Free Trial
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-          </a>
-          <a href="/pricing" class="btn btn-ghost btn-lg">See Pricing</a>
+  <section id="faq" style="position: relative; z-index: 2; max-width: 880px; margin: 0 auto; padding: 170px 28px 0">
+    <h2 class="rv" style="margin: 0; text-align: center; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(34px, 4vw, 56px); line-height: 1.05; letter-spacing: -0.04em; color: #FFFFFF">Questions, answered.</h2>
+    <div style="margin-top: 48px; display: flex; flex-direction: column; gap: 12px">
+      <details style="border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12; padding: 0 24px">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; font-size: 18px; font-weight: 600; color: #FFFFFF">How is Avyron different from ChatGPT?<span class="plus" aria-hidden="true" style="flex: none; font-size: 26px; font-weight: 300; color: #A78BFA">+</span></summary>
+        <p style="margin: 0 0 22px; font-size: 16px; color: #B6B0CC">ChatGPT answers from general knowledge. Avyron collects evidence about your specific market, your competitors and your customers, builds the strategy from it, links each claim to its source, and keeps watching for changes.</p>
+      </details>
+      <details style="border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12; padding: 0 24px">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; font-size: 18px; font-weight: 600; color: #FFFFFF">Do I need a marketing team to use it?<span class="plus" aria-hidden="true" style="flex: none; font-size: 26px; font-weight: 300; color: #A78BFA">+</span></summary>
+        <p style="margin: 0 0 22px; font-size: 16px; color: #B6B0CC">No. Avyron is built for businesses that don't have one. It tells you what to do each day in plain language. If you do have a team, it gives them a clear strategy to execute.</p>
+      </details>
+      <details style="border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12; padding: 0 24px">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; font-size: 18px; font-weight: 600; color: #FFFFFF">Where does the data come from?<span class="plus" aria-hidden="true" style="flex: none; font-size: 26px; font-weight: 300; color: #A78BFA">+</span></summary>
+        <p style="margin: 0 0 22px; font-size: 16px; color: #B6B0CC">Public sources: competitor websites, reviews, social media and online communities. When a source is missing or limited, Avyron says so instead of guessing.</p>
+      </details>
+      <details style="border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12; padding: 0 24px">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; font-size: 18px; font-weight: 600; color: #FFFFFF">Which businesses is it for?<span class="plus" aria-hidden="true" style="flex: none; font-size: 26px; font-weight: 300; color: #A78BFA">+</span></summary>
+        <p style="margin: 0 0 22px; font-size: 16px; color: #B6B0CC">Founders, growing businesses and agencies, from local brands to B2B software companies, especially those competing against bigger players.</p>
+      </details>
+      <details style="border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12; padding: 0 24px">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; font-size: 18px; font-weight: 600; color: #FFFFFF">Does it spend my ad budget automatically?<span class="plus" aria-hidden="true" style="flex: none; font-size: 26px; font-weight: 300; color: #A78BFA">+</span></summary>
+        <p style="margin: 0 0 22px; font-size: 16px; color: #B6B0CC">No. Avyron recommends where to spend and why. Nothing is spent and no strategy changes without your approval.</p>
+      </details>
+      <details style="border-radius: 18px; border: 1px solid rgba(255,255,255,.08); background: #0B0A12; padding: 0 24px">
+        <summary style="display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 68px; font-size: 18px; font-weight: 600; color: #FFFFFF">What counts as a campaign?<span class="plus" aria-hidden="true" style="flex: none; font-size: 26px; font-weight: 300; color: #A78BFA">+</span></summary>
+        <p style="margin: 0 0 22px; font-size: 16px; color: #B6B0CC">One full strategy for one product or offer: market analysis, customer voice, positioning, offer, buyer journey and channels. Watchtower and the Performance Loop keep it up to date for the month.</p>
+      </details>
+    </div>
+  </section>
+
+  <section id="demo" style="position: relative; z-index: 2; padding: 190px 24px 0; text-align: center">
+    <div class="rv" style="position: relative; max-width: 1000px; margin: 0 auto">
+      <div aria-hidden="true" style="position: relative; width: 240px; height: 240px; margin: 0 auto">
+        <div class="a-spin-slow" style="position: absolute; inset: 0; border-radius: 50%; border: 1px dashed rgba(196,181,253,.3)">
+          <span style="position: absolute; left: 50%; top: -5px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: #C4B5FD; box-shadow: 0 0 14px 3px rgba(196,181,253,.8)"></span>
         </div>
-        <div class="trust-row">
-          <span class="trust-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            7-day free trial
-          </span>
-          <span class="trust-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-            No credit card required
-          </span>
-          <span class="trust-item">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5;"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-            Live in minutes
-          </span>
+        <div class="a-spinR-slow" style="position: absolute; inset: 34px; border-radius: 50%; border: 1px solid rgba(244,114,182,.25)">
+          <span style="position: absolute; left: -4px; top: 50%; width: 8px; height: 8px; margin-top: -4px; border-radius: 50%; background: #F472B6; box-shadow: 0 0 12px 3px rgba(244,114,182,.8)"></span>
         </div>
+        <span class="a-ring" style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; border: 2px solid rgba(196,181,253,.55)"></span>
+        <span class="a-ring2" style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; border: 2px solid rgba(244,114,182,.4)"></span>
+        <span style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; background: linear-gradient(135deg, #C4B5FD 0%, #8B5CF6 45%, #4F46E5 100%); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 46px; color: #FFFFFF; box-shadow: inset 0 0 0 1px rgba(255,255,255,.3), 0 30px 90px -10px rgba(139,92,246,1)">A</span>
+      </div>
+      <h2 style="margin: 44px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(40px, 6vw, 86px); line-height: 1.0; letter-spacing: -0.045em; color: #FFFFFF">Your strategy team.<br><span class="grad-text a-shim">Without hiring one.</span></h2>
+      <p style="margin: 26px auto 0; max-width: 560px; font-size: 18px; color: #B6B0CC">See Avyron run on your own market in a 30-minute session. We prepare the analysis before we meet.</p>
+      <div style="margin-top: 40px; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px">
+        <a class="bp" href="#demo" style="display: inline-flex; align-items: center; gap: 10px; min-height: 58px; padding: 0 34px; border-radius: 999px; background: linear-gradient(135deg, #8B5CF6, #6366F1); color: #FFFFFF; font-weight: 600; font-size: 17px; box-shadow: 0 16px 50px -14px rgba(139,92,246,1), inset 0 1px 0 rgba(255,255,255,.25)">Book a demo
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg>
+        </a>
+        <a class="bg2" href="#founding" style="display: inline-flex; align-items: center; min-height: 58px; padding: 0 28px; border-radius: 999px; border: 1px solid rgba(255,255,255,.16); color: #F4F2FA; font-weight: 600; font-size: 17px">Founding Clients</a>
       </div>
     </div>
   </section>
 
-  <!-- FOOTER -->
-  <footer>
-    <div class="footer-inner">
-      <a href="/" class="footer-logo">
-        <div class="nav-logo-icon">
-          <svg width="16" height="16" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="foot-g" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" stop-color="#8B5CF6"/>
-                <stop offset="100%" stop-color="#3B82F6"/>
-              </linearGradient>
-            </defs>
-            <path d="M50 8L88 82H12L50 8Z" stroke="url(#foot-g)" stroke-width="7" stroke-linejoin="round" fill="none"/>
-            <path d="M32 60L50 26L68 60" stroke="url(#foot-g)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-          </svg>
+  <footer style="position: relative; z-index: 2; margin-top: 160px; border-top: 1px solid rgba(255,255,255,.07)">
+    <div style="max-width: 1280px; margin: 0 auto; padding: 56px 28px 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 36px">
+      <div style="max-width: 360px">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span style="width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, #C4B5FD 0%, #8B5CF6 45%, #4F46E5 100%); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 16px; color: #FFFFFF">A</span>
+          <span style="font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 16px; letter-spacing: .04em; color: #FFFFFF">AVYRON <span style="color: #A78BFA">AI</span></span>
         </div>
-        <span class="footer-logo-text">Avyron AI</span>
-      </a>
-      <p>&copy; 2026 Avyron AI. All rights reserved.</p>
-      <div class="footer-links">
-        <a href="/pricing">Pricing</a>
-        <a href="/data-deletion">Privacy</a>
-        <a href="BASE_URL_PLACEHOLDER/login">Sign In</a>
+        <p style="margin: 16px 0 0; font-size: 14px; color: #8E88A8">The strategic thinking system for businesses without a marketing team. Built in Dubai.</p>
       </div>
+      <nav aria-label="Footer" style="display: flex; flex-wrap: wrap; gap: 64px; font-size: 14px">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <span style="font-weight: 600; color: #FFFFFF">Product</span>
+          <a class="nl" href="#platform">Platform</a>
+          <a class="nl" href="#how">How it works</a>
+          <a class="nl" href="#why">Why Avyron</a>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <span style="font-weight: 600; color: #FFFFFF">Company</span>
+          <a class="nl" href="#founding">Founding Clients</a>
+          <a class="nl" href="#faq">FAQ</a>
+          <a class="nl" href="#demo">Book a demo</a>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <span style="font-weight: 600; color: #FFFFFF">Follow</span>
+          <a class="nl" href="https://www.instagram.com/avyron_ai">Instagram</a>
+          <a class="nl" href="https://avyronai.com">avyronai.com</a>
+        </div>
+      </nav>
+    </div>
+    <div aria-hidden="true" class="wm" style="max-width: 1400px; margin: 40px auto 0; padding: 0 16px; text-align: center; font-family: Unbounded, Inter, sans-serif; font-weight: 800; font-size: clamp(72px, 17vw, 250px); line-height: .9; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden">AVYRON</div>
+    <div style="max-width: 1280px; margin: 0 auto; padding: 24px 28px 40px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; font-size: 13px; color: #6F6989">
+      <span>© 2026 Avyron AI</span>
+      <span>Product images show a sample business with demo data.</span>
     </div>
   </footer>
-
+</div>
 </body>
 </html>
