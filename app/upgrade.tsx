@@ -75,8 +75,8 @@ export default function UpgradeScreen() {
         paddingBottom: Platform.OS === 'web' ? 60 : insets.bottom + 40,
       }]}>
         <View style={styles.topSection}>
-          <View style={styles.logo}>
-            <AvyronLogo size={46} />
+          <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><AvyronLogo size={36} /><Text style={{ fontSize: 24, fontWeight: '700', color: '#FFFFFF', letterSpacing: -0.5 }}>Avyron</Text></View>
           </View>
           <View style={styles.expiredBadge}>
             <Ionicons name="time-outline" size={14} color="#F59E0B" />
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
-  logo: {
+  logo: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     width: 64,
     height: 64,
     borderRadius: 18,

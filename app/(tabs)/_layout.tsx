@@ -8,6 +8,7 @@ import { useAppShellController, AppShellController, ShellMonitoringState } from 
 import { AccountSwitcherModal } from '@/components/AccountSwitcherModal';
 import { DemoControlPanel } from '@/components/demo/DemoControlPanel';
 import { CampaignBar } from '@/components/CampaignSelector';
+import AvyronLogo from '@/components/AvyronLogo';
 
 const NAV_ITEMS = [
   { name: 'index', label: 'Dashboard', icon: 'grid' },
@@ -320,7 +321,10 @@ export default function AppShellLayout() {
     return (
       <View style={{ flex: 1, backgroundColor: ShellTheme.colors.appBackground }}>
         <View style={[styles.mobileHeader, { paddingTop: Math.max(insets.top, 16) }]}>
-          <Text style={styles.brandText}>AVYRON <Text style={styles.brandAccent}>AI</Text></Text>
+          <View style={styles.brandRow}>
+            <AvyronLogo size={26} />
+            <Text style={styles.brandText}>Avyron</Text>
+          </View>
           <Pressable onPress={() => setMenuOpen(true)} style={styles.hamburger}>
             <Feather name="menu" size={24} color={ShellTheme.colors.textPrimary} />
           </Pressable>
@@ -369,11 +373,13 @@ export default function AppShellLayout() {
         <View style={styles.brandContainer}>
           {isDesktop ? (
             <View style={styles.brandRow}>
-              <View style={styles.brandIconBlock}><Text style={styles.brandIconText}>A</Text></View>
-              <Text style={styles.brandText}>AVYRON <Text style={styles.brandAccent}>AI</Text></Text>
+              <AvyronLogo size={28} />
+              <Text style={styles.brandText}>Avyron</Text>
             </View>
           ) : (
-            <Text style={styles.brandTextIcon}>A</Text>
+            <View style={{ alignSelf: 'center' }}>
+              <AvyronLogo size={28} />
+            </View>
           )}
         </View>
         <SidebarContent controller={controller} isCollapsed={!isDesktop} onNavigate={() => {}} />
@@ -444,9 +450,10 @@ const styles = StyleSheet.create({
   },
   brandText: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: 1,
+    letterSpacing: -0.5,
+    marginLeft: 10,
   },
   brandAccent: {
     color: '#8B5CF6',

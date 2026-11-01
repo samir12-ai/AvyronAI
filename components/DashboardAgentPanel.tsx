@@ -14,6 +14,7 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useCampaign } from '@/context/CampaignContext';
 import { authFetch, getApiUrl } from '@/lib/query-client';
+import AvyronLogo from '@/components/AvyronLogo';
 
 interface ChatMessage {
   id: string;
@@ -169,8 +170,8 @@ export function DashboardAgentPanel({ userName = 'there' }: { userName?: string 
       {/* Header */}
       <View style={styles.aiPanelHeader}>
         <View style={styles.aiPanelTitleRow}>
-          <Feather name="zap" size={16} color="#A78BFA" />
-          <Text style={styles.aiPanelTitle}>AVYRON AI</Text>
+          <AvyronLogo size={18} />
+          <Text style={styles.aiPanelTitle}>Avyron</Text>
           <View style={styles.statusBadge}>
             <PulsingDot />
             <Text style={styles.statusBadgeText} numberOfLines={1}>

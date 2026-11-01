@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AvyronLogo from '@/components/AvyronLogo';
 
 interface GlobalHeaderProps {
   title?: string;
@@ -13,9 +14,8 @@ export function GlobalHeader({ title, rightElement }: GlobalHeaderProps) {
   return (
     <View style={[styles.header, { paddingTop: Math.max(insets.top, 16) }]}>
       <View style={styles.brandRow}>
-        <Text style={styles.brandName}>
-          AVYRON <Text style={styles.brandSub}>AI</Text>
-        </Text>
+        <AvyronLogo size={28} />
+        <Text style={styles.brandName}>Avyron</Text>
         {title && <Text style={styles.title}>{title}</Text>}
       </View>
       {rightElement && <View style={styles.rightSection}>{rightElement}</View>}
@@ -37,13 +37,13 @@ const styles = StyleSheet.create({
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   brandName: {
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: 1,
+    letterSpacing: -0.5,
   },
   brandSub: {
     color: '#8B5CF6',

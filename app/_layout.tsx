@@ -32,7 +32,7 @@ function LoadingScreen() {
       <View style={loadingStyles.logo}>
         <AvyronLogo size={56} />
       </View>
-      <Text style={loadingStyles.title}>Avyron AI</Text>
+      <Text style={loadingStyles.title}>Avyron</Text>
       <ActivityIndicator size="large" color="#7C3AED" style={loadingStyles.spinner} />
       <Text style={loadingStyles.subtitle}>Loading your workspace...</Text>
     </View>

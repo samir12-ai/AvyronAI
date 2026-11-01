@@ -757,7 +757,7 @@ export default function SetupScreen() {
       <View style={[styles.header, { paddingTop: Platform.OS === 'web' ? 24 : insets.top + 12 }]}>
         <View style={styles.logoRow}>
           <AvyronLogo size={28} />
-          <Text style={styles.logoTitle}>AVYRON</Text>
+          <Text style={styles.logoTitle}>Avyron</Text>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{isNewCampaignMode ? 'NEW PRODUCT CAMPAIGN' : 'SETUP'}</Text>
           </View>
@@ -2013,13 +2013,13 @@ const styles = StyleSheet.create({
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   logoTitle: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '700',
     color: '#FFFFFF',
-    letterSpacing: 1,
+    letterSpacing: -0.5,
   },
   badge: {
     backgroundColor: '#2E1065',
