@@ -357,6 +357,11 @@ function configureExpoAndLanding(app: express.Application) {
       immutable: true,
     }),
   );
+  app.get("/favicon.ico", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    return res.sendFile(path.resolve(process.cwd(), "assets", "images", "favicon.png"));
+  });
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
 

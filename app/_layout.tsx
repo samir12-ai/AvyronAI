@@ -152,6 +152,17 @@ export default function RootLayout() {
   // run and redirect to login / tabs.
   const [fontsTimedOut, setFontsTimedOut] = React.useState(false);
   useEffect(() => {
+    if (typeof document !== "undefined" && document.head) {
+      const svgIcon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237C3AED'/%3E%3Cstop offset='.5' stop-color='%236D28D9'/%3E%3Cstop offset='1' stop-color='%233B82F6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='22' fill='%2307040E'/%3E%3Cpath d='M 14,84 L 44,14 L 56,14 L 38,51 L 32,84 Z' fill='url(%23g)'/%3E%3Cpath d='M 86,84 L 56,14 L 44,14 L 62,51 L 68,84 Z' fill='url(%23g)'/%3E%3C/svg%3E";
+      document.querySelectorAll("link[rel*='icon']").forEach((el) => el.remove());
+      const link = document.createElement("link");
+      link.rel = "icon";
+      link.type = "image/svg+xml";
+      link.href = svgIcon;
+      document.head.appendChild(link);
+    }
+  }, []);
+  useEffect(() => {
     if (fontsLoaded || fontError) return;
     const t = setTimeout(() => setFontsTimedOut(true), 3000);
     return () => clearTimeout(t);

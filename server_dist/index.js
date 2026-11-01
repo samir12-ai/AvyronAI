@@ -197082,6 +197082,11 @@ function configureExpoAndLanding(app2) {
       immutable: true
     })
   );
+  app2.get("/favicon.ico", (_req, res) => {
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    return res.sendFile(path9.resolve(process.cwd(), "assets", "images", "favicon.png"));
+  });
   app2.use("/assets", express3.static(path9.resolve(process.cwd(), "assets")));
   app2.use(express3.static(path9.resolve(process.cwd(), "static-build")));
   if (process.env.NODE_ENV === "production" && process.env.SYNTHETIC_AUDIT_MODE === "1") {
