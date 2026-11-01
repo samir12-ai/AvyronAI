@@ -12,7 +12,7 @@
 <meta property="og:image" content="/assets/website/hero-dashboard.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#06050B">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23C4B5FD'/%3E%3Cstop offset='.45' stop-color='%238B5CF6'/%3E%3Cstop offset='1' stop-color='%234F46E5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='44' font-family='Arial,sans-serif' font-weight='700' font-size='36' fill='white' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237C3AED'/%3E%3Cstop offset='.5' stop-color='%236D28D9'/%3E%3Cstop offset='1' stop-color='%233B82F6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='22' fill='%2307040E'/%3E%3Cpath d='M 14,84 L 44,14 L 56,14 L 38,51 L 32,84 Z' fill='url(%23g)'/%3E%3Cpath d='M 86,84 L 56,14 L 44,14 L 62,51 L 68,84 Z' fill='url(%23g)'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="/assets/images/icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous">
@@ -131,9 +131,19 @@ details[open]{border-color:rgba(196,181,253,.35) !important;background:#110E1C !
   </div>
 
   <header style="position: relative; z-index: 6; max-width: 1280px; margin: 0 auto; padding: 20px 28px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px">
-    <a href="#top" aria-label="Avyron AI home" style="display: flex; align-items: center; gap: 12px; color: #FFFFFF">
-      <span style="width: 38px; height: 38px; border-radius: 11px; background: linear-gradient(135deg, #C4B5FD 0%, #8B5CF6 45%, #4F46E5 100%); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 18px; color: #FFFFFF; box-shadow: inset 0 0 0 1px rgba(255,255,255,.28), 0 10px 28px -8px rgba(139,92,246,.9)">A</span>
-      <span style="font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 17px; letter-spacing: .04em">AVYRON <span style="color: #A78BFA">AI</span></span>
+    <a href="#top" aria-label="Avyron home" style="display: flex; align-items: center; gap: 10px; color: #FFFFFF">
+      <svg aria-hidden="true" width="32" height="32" viewBox="0 0 100 100" style="flex: none">
+        <defs>
+          <linearGradient id="avyronGradHdr" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#7C3AED" stop-opacity="1"></stop>
+            <stop offset="0.5" stop-color="#6D28D9" stop-opacity="1"></stop>
+            <stop offset="1" stop-color="#3B82F6" stop-opacity="1"></stop>
+          </linearGradient>
+        </defs>
+        <path d="M 4,90 L 42,5 L 56,5 L 34,50 L 27,90 Z" fill="url(#avyronGradHdr)"></path>
+        <path d="M 96,90 L 58,5 L 44,5 L 66,50 L 73,90 Z" fill="url(#avyronGradHdr)"></path>
+      </svg>
+      <span style="font-family: Inter, system-ui, -apple-system, sans-serif; font-weight: 700; font-size: 22px; letter-spacing: -0.5px; color: #FFFFFF">Avyron</span>
     </a>
     <nav class="hide-sm" aria-label="Main" style="display: flex; flex-wrap: wrap; align-items: center; gap: 30px; font-size: 15px; font-weight: 500">
       <a class="nl" href="#platform">Platform</a>
@@ -217,7 +227,9 @@ details[open]{border-color:rgba(196,181,253,.35) !important;background:#110E1C !
       <div class="hide-sm a-float2" style="position: absolute; left: -48px; top: 16%; width: 330px; text-align: left; z-index: 3">
         <div class="a-toast" style="padding: 16px 18px; border-radius: 18px; background: rgba(24,20,40,.88); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 30px 70px -20px rgba(0,0,0,1); backdrop-filter: blur(14px)">
           <div style="display: flex; align-items: center; gap: 10px">
-            <span style="width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, #C4B5FD, #8B5CF6 45%, #4F46E5); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 14px; color: #FFFFFF">A</span>
+            <span style="width: 30px; height: 30px; border-radius: 9px; background: rgba(124,58,237,.14); border: 1px solid rgba(124,58,237,.35); display: flex; align-items: center; justify-content: center">
+              <svg aria-hidden="true" width="20" height="20" viewBox="0 0 100 100"><path d="M 4,90 L 42,5 L 56,5 L 34,50 L 27,90 Z" fill="url(#avyronGradHdr)"></path><path d="M 96,90 L 58,5 L 44,5 L 66,50 L 73,90 Z" fill="url(#avyronGradHdr)"></path></svg>
+            </span>
             <span style="font-size: 12px; font-weight: 700; letter-spacing: .08em; color: #C4B5FD">WATCHTOWER</span>
             <span style="margin-left: auto; font-size: 12px; color: #8E88A8">now</span>
           </div>
@@ -524,7 +536,7 @@ details[open]{border-color:rgba(196,181,253,.35) !important;background:#110E1C !
         <div class="a-spin" aria-hidden="true" style="position: absolute; left: -50%; top: -50%; width: 200%; height: 200%; background: conic-gradient(from 0deg, rgba(0,0,0,0) 0deg, rgba(0,0,0,0) 280deg, #C4B5FD 320deg, #F472B6 345deg, rgba(0,0,0,0) 360deg); animation-duration: 8s"></div>
         <div style="position: relative; height: 100%; box-sizing: border-box; padding: 36px; border-radius: 25px; background: linear-gradient(160deg, #1A1330, #0E0B19 60%)">
           <div style="display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 700; letter-spacing: .1em; color: #C4B5FD">
-            <span style="width: 24px; height: 24px; border-radius: 7px; background: linear-gradient(135deg, #C4B5FD, #8B5CF6 45%, #4F46E5); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-size: 12px; color: #FFFFFF">A</span>
+            <svg aria-hidden="true" width="22" height="22" viewBox="0 0 100 100" style="flex: none"><path d="M 4,90 L 42,5 L 56,5 L 34,50 L 27,90 Z" fill="url(#avyronGradHdr)"></path><path d="M 96,90 L 58,5 L 44,5 L 66,50 L 73,90 Z" fill="url(#avyronGradHdr)"></path></svg>
             AVYRON · STRATEGIC THINKING SYSTEM
           </div>
           <ul style="margin: 24px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 18px; font-size: 17px; color: #FFFFFF">
@@ -713,7 +725,9 @@ details[open]{border-color:rgba(196,181,253,.35) !important;background:#110E1C !
         </div>
         <span class="a-ring" style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; border: 2px solid rgba(196,181,253,.55)"></span>
         <span class="a-ring2" style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; border: 2px solid rgba(244,114,182,.4)"></span>
-        <span style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; background: linear-gradient(135deg, #C4B5FD 0%, #8B5CF6 45%, #4F46E5 100%); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 46px; color: #FFFFFF; box-shadow: inset 0 0 0 1px rgba(255,255,255,.3), 0 30px 90px -10px rgba(139,92,246,1)">A</span>
+        <span style="position: absolute; left: 70px; top: 70px; width: 100px; height: 100px; border-radius: 30px; background: linear-gradient(160deg, #151026 0%, #090612 100%); display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 0 1px rgba(167,139,250,.35), 0 30px 90px -10px rgba(124,58,237,.95)">
+          <svg aria-hidden="true" width="58" height="58" viewBox="0 0 100 100"><path d="M 4,90 L 42,5 L 56,5 L 34,50 L 27,90 Z" fill="url(#avyronGradHdr)"></path><path d="M 96,90 L 58,5 L 44,5 L 66,50 L 73,90 Z" fill="url(#avyronGradHdr)"></path></svg>
+        </span>
       </div>
       <h2 style="margin: 44px 0 0; font-family: 'Inter Tight', Inter, sans-serif; font-weight: 800; font-size: clamp(40px, 6vw, 86px); line-height: 1.0; letter-spacing: -0.045em; color: #FFFFFF">Your strategy team.<br><span class="grad-text a-shim">Without hiring one.</span></h2>
       <p style="margin: 26px auto 0; max-width: 560px; font-size: 18px; color: #B6B0CC">See Avyron run on your own market in a 30-minute session. We prepare the analysis before we meet.</p>
@@ -729,9 +743,12 @@ details[open]{border-color:rgba(196,181,253,.35) !important;background:#110E1C !
   <footer style="position: relative; z-index: 2; margin-top: 160px; border-top: 1px solid rgba(255,255,255,.07)">
     <div style="max-width: 1280px; margin: 0 auto; padding: 56px 28px 0; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 36px">
       <div style="max-width: 360px">
-        <div style="display: flex; align-items: center; gap: 12px">
-          <span style="width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, #C4B5FD 0%, #8B5CF6 45%, #4F46E5 100%); display: flex; align-items: center; justify-content: center; font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 16px; color: #FFFFFF">A</span>
-          <span style="font-family: Unbounded, Inter, sans-serif; font-weight: 700; font-size: 16px; letter-spacing: .04em; color: #FFFFFF">AVYRON <span style="color: #A78BFA">AI</span></span>
+        <div style="display: flex; align-items: center; gap: 10px">
+          <svg aria-hidden="true" width="30" height="30" viewBox="0 0 100 100" style="flex: none">
+            <path d="M 4,90 L 42,5 L 56,5 L 34,50 L 27,90 Z" fill="url(#avyronGradHdr)"></path>
+            <path d="M 96,90 L 58,5 L 44,5 L 66,50 L 73,90 Z" fill="url(#avyronGradHdr)"></path>
+          </svg>
+          <span style="font-family: Inter, system-ui, -apple-system, sans-serif; font-weight: 700; font-size: 20px; letter-spacing: -0.5px; color: #FFFFFF">Avyron</span>
         </div>
         <p style="margin: 16px 0 0; font-size: 14px; color: #8E88A8">The strategic thinking system for businesses without a marketing team. Built in Dubai.</p>
       </div>
