@@ -73,9 +73,18 @@ export default function WhatToDoTodayScreen() {
                 color={task.channelRole === 'PRIMARY' ? '#A78BFA' : '#94A3B8'}
               />
               <Text style={[styles.channelPillText, task.channelRole === 'PRIMARY' && styles.channelPillTextPrimary]}>
-                {task.channel} {task.channelRole === 'PRIMARY' && '• PRIMARY'}
+                {task.channel}{(task as any).channelMode ? ` (${(task as any).channelMode})` : ''} {task.channelRole === 'PRIMARY' ? '• PRIMARY' : `• ${task.channelRole}`}
               </Text>
             </View>
+
+            {(task as any).laneTitle ? (
+              <View style={styles.effortPill}>
+                <Feather name="users" size={11} color="#A78BFA" />
+                <Text style={[styles.effortPillText, { color: '#C4B5FD' }]} numberOfLines={1}>
+                  {(task as any).laneTitle}{(task as any).funnelStage ? ` • ${(task as any).funnelStage}` : ''}
+                </Text>
+              </View>
+            ) : null}
 
             {task.estimatedEffort && (
               <View style={styles.effortPill}>
@@ -164,7 +173,7 @@ export default function WhatToDoTodayScreen() {
               color={isPrimary ? '#A78BFA' : '#94A3B8'}
             />
             <Text style={[styles.channelCardName, isPrimary && styles.channelCardNamePrimary]}>
-              {cp.channel}
+              {cp.channel}{(cp as any).channelMode ? ` (${(cp as any).channelMode})` : ''}{typeof (cp as any).allocationPct === 'number' && (cp as any).allocationPct > 0 ? ` • ${(cp as any).allocationPct}%` : ''}
             </Text>
           </View>
           <View style={[styles.roleBadge, isPrimary ? styles.roleBadgePrimary : styles.roleBadgeSupporting]}>
@@ -291,7 +300,7 @@ export default function WhatToDoTodayScreen() {
           <View style={styles.primaryChannelBadge}>
             <Feather name="star" size={12} color="#A78BFA" />
             <Text style={styles.primaryChannelBadgeText}>
-              Primary Anchor: {data?.primaryChannel}
+              Primary Anchor: {data?.primaryChannel}{(data as any)?.primaryChannelMode ? ` (${(data as any).primaryChannelMode})` : ''}
             </Text>
           </View>
         </View>

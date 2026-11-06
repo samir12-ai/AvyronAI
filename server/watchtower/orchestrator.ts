@@ -483,6 +483,28 @@ export function classifyWatchtowerChanges(
     prevMeta !== null &&
     currMeta !== null &&
     Boolean(prevMeta.hasPublicationTimestamps) !== Boolean(currMeta.hasPublicationTimestamps);
+  const windowDurationMismatch =
+    prevMeta !== null &&
+    currMeta !== null &&
+    typeof prevMeta.windowDays === "number" &&
+    typeof currMeta.windowDays === "number" &&
+    prevMeta.windowDays !== currMeta.windowDays;
+  // Guard against cumulative stored-post counts without publication-timestamp windows:
+  // If frequency_meta explicitly lacks publication timestamps, or if translated snapshots
+  // (_translation_sources / acquisition_id / countMeaning) lack verified timestamp windows,
+  // an increased stored-post count alone is insufficient to claim a posting frequency shift.
+  const isRealEnvelopePayload =
+    Array.isArray(previous._translation_sources) ||
+    Array.isArray(current._translation_sources) ||
+    typeof previous.acquisition_id === "string" ||
+    typeof current.acquisition_id === "string";
+  const isStoredPostCountOnly =
+    prevMeta?.hasPublicationTimestamps === false ||
+    currMeta?.hasPublicationTimestamps === false ||
+    previous.countMeaning === "stored_posts" ||
+    current.countMeaning === "stored_posts" ||
+    (isRealEnvelopePayload &&
+      (prevMeta?.hasPublicationTimestamps !== true || currMeta?.hasPublicationTimestamps !== true));
   // Also guard against legacy snapshots where frequency was raw DB row count (no frequency_meta)
   // being compared against a 30d window frequency or another cumulative cap.
   const legacyVsWindowMismatch =
@@ -498,6 +520,8 @@ export function classifyWatchtowerChanges(
     !isSampleCapped &&
     !isSmallerSampleCap &&
     !methodMismatch &&
+    !windowDurationMismatch &&
+    !isStoredPostCountOnly &&
     !legacyVsWindowMismatch
   ) {
     const delta = currFreq - prevFreq;
@@ -614,20 +638,50 @@ export function classifyWatchtowerChanges(
 
   // 4. pricing_change (pricing = pricing_anchors / plans for competitor_website entities)
   // Require both snapshots to have non-empty pricing before claiming removals (empty/partial crawl guard).
+  // Distinguish actual base-price / pricing-model changes from promotional discount banners or pure CTA label tweaks.
   const prevPricing = normalizeStringArray(previous.pricing || previous.pricingAnchors);
   const currPricing = normalizeStringArray(current.pricing || current.pricingAnchors);
   if (prevPricing.length > 0 && currPricing.length > 0) {
-    const prevPricingSet = new Set(prevPricing);
-    const currPricingSet = new Set(currPricing);
+    const stripPricingCta = (s: string) => s.split("|")[0].trim().replace(/\s+/g, " ");
+    const isPromoBannerItem = (s: string) =>
+      /\b(\d+%\s*off|discount|promo|promotional|anniversary\s+special|limited[\s-]time|coupon|seasonal\s+sale)\b/i.test(s) &&
+      !/\$\d/.test(stripPricingCta(s));
+
+    const prevCoreMap = new Map<string, string>();
+    for (const p of prevPricing) prevCoreMap.set(stripPricingCta(p), p);
+    const currCoreMap = new Map<string, string>();
+    for (const p of currPricing) currCoreMap.set(stripPricingCta(p), p);
+
     const currFullText = [...currPricing, ...currOffers, ...currPatterns].join(" || ");
-    const addedPricing = currPricing.filter((p) => !prevPricingSet.has(p));
-    const removedPricing = prevPricing.filter((p) => !currPricingSet.has(p) && !currFullText.includes(p));
+    const currCoreFullText = [...Array.from(currCoreMap.keys()), ...currOffers, ...currPatterns].join(" || ");
+
+    const addedPricing = currPricing.filter((p) => !prevCoreMap.has(stripPricingCta(p)));
+    const removedPricing = prevPricing.filter((p) => {
+      const core = stripPricingCta(p);
+      return !currCoreMap.has(core) && !currFullText.includes(p) && !currCoreFullText.includes(core);
+    });
+
     if (addedPricing.length > 0 || removedPricing.length > 0) {
+      const addedBasePricing = addedPricing.filter((p) => !isPromoBannerItem(p));
+      const removedBasePricing = removedPricing.filter((p) => !isPromoBannerItem(p));
+      const isPromoOnly = addedBasePricing.length === 0 && removedBasePricing.length === 0;
       const totalChanged = addedPricing.length + removedPricing.length;
+      const totalBaseChanged = addedBasePricing.length + removedBasePricing.length;
+
       changes.push({
         kind: "pricing_change",
-        severity: totalChanged >= 2 ? "major" : "medium",
+        severity: isPromoOnly ? "mild" : totalBaseChanged >= 2 ? "major" : "medium",
         evidence: [
+          ...(isPromoOnly
+            ? [
+                `promotional discount banner change only (base tier pricing unchanged): ${[
+                  ...addedPricing,
+                  ...removedPricing,
+                ]
+                  .slice(0, 3)
+                  .join(" | ")}`,
+              ]
+            : []),
           ...(addedPricing.length > 0
             ? [`added pricing/plans: ${addedPricing.slice(0, 3).join(" | ")}`]
             : []),

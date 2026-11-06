@@ -71,11 +71,28 @@ const loadingStyles = StyleSheet.create({
 });
 
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, user, isAccessActive, isAddingAccount } = useAuth();
+  const { isAuthenticated, isLoading, user, isAccessActive, isAddingAccount, login } = useAuth();
+  const [devAutoLoggingIn, setDevAutoLoggingIn] = React.useState(false);
+
+  useEffect(() => {
+    if (isLoading || devAutoLoggingIn) return;
+    if (typeof window !== "undefined" && (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1")) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("campaign")?.toLowerCase() === "songai" && user?.email !== "avyrontest@gmail.com") {
+        setDevAutoLoggingIn(true);
+        login("avyrontest@gmail.com", "songai123").finally(() => setDevAutoLoggingIn(false));
+      }
+    }
+  }, [isLoading, user, login, devAutoLoggingIn]);
   const segments = useSegments();
 
   useEffect(() => {
-    if (isLoading) return;
+    const wantsSongaiOnLocal =
+      typeof window !== "undefined" &&
+      (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") &&
+      new URLSearchParams(window.location.search).get("campaign")?.toLowerCase() === "songai" &&
+      user?.email !== "avyrontest@gmail.com";
+    if (isLoading || devAutoLoggingIn || wantsSongaiOnLocal) return;
 
     const inAuthGroup = segments[0] === 'login' || segments[0] === 'signup';
     const inIntro = segments[0] === 'intro';

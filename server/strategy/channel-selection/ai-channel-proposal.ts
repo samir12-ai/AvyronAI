@@ -87,7 +87,8 @@ function buildProposerPrompt(input: {
   audiencePains: string[];
   awarenessStage: string;
   persuasionMode: string;
-  budgetMax: number;
+  budgetMax: number | null;
+  budgetCurrency: string;
   ownedChannels: OwnedChannelContext[];
   competitorPlatforms: CompetitorPlatformData[];
   marketVoiceEvidence: MarketVoiceChannelEvidence[];
@@ -105,6 +106,7 @@ function buildProposerPrompt(input: {
     awarenessStage,
     persuasionMode,
     budgetMax,
+    budgetCurrency,
     ownedChannels,
     competitorPlatforms,
     marketVoiceEvidence,
@@ -112,6 +114,11 @@ function buildProposerPrompt(input: {
     priorDecisions,
     feedback,
   } = input;
+
+  const budgetLine =
+    budgetMax != null && budgetMax > 0
+      ? `${budgetMax.toLocaleString("en-US")} ${budgetCurrency}/month (User-Confirmed Campaign Budget)`
+      : "Not specified (evaluate organic-first validation without inventing a fake dollar budget)";
 
   const ownedText = ownedChannels.length > 0
     ? ownedChannels
@@ -159,7 +166,7 @@ For THIS specific business, offering, audience, existing assets, market dynamics
 - Validated Customer Pains: ${audiencePains.join("; ")}
 - Target Readiness Stage: ${awarenessStage}
 - Persuasion Mode: ${persuasionMode}
-- Campaign Test Budget: $${budgetMax}
+- Campaign Budget: ${budgetLine}
 
 ═══ 3. OWNED BUSINESS ASSETS (EXISTING DISTRIBUTION TRUTH) ═══
 ${ownedText}
@@ -181,11 +188,12 @@ ${priorsText}
 ${retryBlock}
 ═══ CORE STRATEGIC PRINCIPLES ═══
 1. Reason dynamically from first principles: Evaluate channels against product discovery dynamics (visual vs search-driven vs relationship-driven), audience attention patterns, owned asset advantage, and competitor proof.
-2. Distinguish Organic vs Paid roles: E.g., Organic for owned audience activation / proof / brand building, Paid for scale / discovery.
-3. Assign clear funnel roles: 'awareness' (discovery/reach), 'nurture' (education/trust), 'conversion' (intent capture/sales).
-4. Identify 1 PRIMARY channel (highest strategic priority and fit), 1 SECONDARY channel (supporting entry/nurture), and optional SUPPORTING channels.
-5. List at least 3-5 explicitly REJECTED high-relevance alternatives with concrete strategic justification for why they are not optimal for this campaign stage.
-6. NO generic clichés or unevidenced market share claims ("80% of users are on X").
+2. Distinguish Platform vs Mode (Organic vs Paid): Explicitly separate organic distribution (e.g. 'Instagram Organic', 'TikTok Organic', 'YouTube Organic') from paid media (e.g. 'Meta / Instagram Paid Ads', 'TikTok Paid Ads', 'YouTube Paid Ads', 'Google Search Ads'). Rejecting a paid advertising format (e.g. 'YouTube Paid Ads' with channelType 'video_paid') must specify the paid mode and must not conflate paid ad economics with organic content viability.
+3. Ground all budget reasoning strictly in the confirmed Campaign Budget (${budgetLine}): Never invent or cite an arbitrary "$500 test budget" or "$0 budget constraint" when a user-confirmed budget is provided. Explain how the confirmed budget supports organic content production, creative proof assets, or controlled paid validation, and why specific high-CAC or low-intent paid channels are rejected or gated under that confirmed budget.
+4. Assign clear funnel roles: 'awareness' (discovery/reach), 'nurture' (education/trust), 'conversion' (intent capture/sales).
+5. Identify 1 PRIMARY channel (highest strategic priority and fit), 1 SECONDARY channel (supporting entry/nurture), and optional SUPPORTING channels.
+6. List at least 3-5 explicitly REJECTED high-relevance alternatives with concrete strategic justification for why they are not optimal for this campaign stage.
+7. NO generic clichés or unevidenced market share claims ("80% of users are on X").
 
 Return ONLY valid JSON matching this schema:
 {
@@ -250,7 +258,9 @@ export async function runChannelSelectionWithAIProposal(
   const audiencePains: string[] = (audience.audiencePains || []).map((p: any) => typeof p === "string" ? p : (p.name || p.label || p.pain || p.id || JSON.stringify(p)));
   const awarenessStage = awareness?.targetReadinessStage || "problem_aware";
   const persuasionMode = persuasion?.persuasionMode || "trust_building";
-  const budgetMax = budget?.testBudgetMax || 500;
+  const rawBudget = (budget as any)?.monthlyBudget ?? budget?.testBudgetMax ?? null;
+  const budgetMax = typeof rawBudget === "number" && rawBudget > 0 ? rawBudget : null;
+  const budgetCurrency = (budget as any)?.currency || "USD";
   const priorDecisions = strategicContext?.priorDecisions || [];
 
   let proposalOutput: DynamicChannelProposalOutput | null = null;
@@ -270,6 +280,7 @@ export async function runChannelSelectionWithAIProposal(
       awarenessStage,
       persuasionMode,
       budgetMax,
+      budgetCurrency,
       ownedChannels,
       competitorPlatforms,
       marketVoiceEvidence,
@@ -378,6 +389,7 @@ export async function runChannelSelectionWithAIProposal(
       competitorPlatforms,
       marketVoiceEvidence,
       budgetMax,
+      budgetCurrency,
       priorDecisions,
       accountId,
     });
@@ -481,7 +493,7 @@ export async function runChannelSelectionWithAIProposal(
     riskNotes: primaryRec.risks,
     rejectionReason: null,
     estimatedCac: null,
-    recommendedBudgetAllocation: primaryRec.channelNature === "organic" ? 0 : Math.round(budgetMax * 0.7),
+    recommendedBudgetAllocation: primaryRec.channelNature === "organic" ? 0 : Math.round((budgetMax ?? 0) * 0.7),
     objectiveFit: { awarenessFit: 0.9, nurtureFit: 0.7, conversionFit: 0.6 },
     decisionGate: { outcome: "recommended", reason: primaryRec.reasoning, violations: [] },
     differentiation: CHANNEL_DIFFERENTIATION_PROFILES[primaryRec.channelName.toLowerCase().replace(/\s+/g, "_")] || null,
@@ -503,7 +515,7 @@ export async function runChannelSelectionWithAIProposal(
     riskNotes: secondaryRec.risks,
     rejectionReason: null,
     estimatedCac: null,
-    recommendedBudgetAllocation: secondaryRec.channelNature === "organic" ? 0 : Math.round(budgetMax * 0.3),
+    recommendedBudgetAllocation: secondaryRec.channelNature === "organic" ? 0 : Math.round((budgetMax ?? 0) * 0.3),
     objectiveFit: { awarenessFit: 0.85, nurtureFit: 0.5, conversionFit: 0.4 },
     decisionGate: { outcome: "support_channel", reason: secondaryRec.reasoning, violations: [] },
     differentiation: CHANNEL_DIFFERENTIATION_PROFILES[secondaryRec.channelName.toLowerCase().replace(/\s+/g, "_")] || null,
@@ -643,7 +655,7 @@ export async function runChannelSelectionWithAIProposal(
     engineVersion: 5,
     funnelReconstruction,
     conversionChannelAssigned,
-    channelMode: "INTELLIGENT",
+    channelMode: "INTELLIGENT" as any,
     channelModeReasoning: "Dynamic LLM strategy with hostile judge evaluation",
     decisionGateScoring: {
       funnelIntegrityScore: 0.9,

@@ -3452,6 +3452,56 @@ export async function synthesizePlan(
       throw new Error(`CONTRACT_INVARIANT_FAILURE: FunnelEngine failed to produce whyThisJourney for lane ${laneId}`);
     }
 
+    const resolvedJourneyName = funnelObj.journeyName || funnelObj.funnelName || funnelObj.name || "Buyer Conversion Journey";
+    const resolvedProductUrl =
+      (bizData as any)?.websiteUrl ||
+      (bizData as any)?.rootUrl ||
+      (bizData as any)?.productUrl ||
+      undefined;
+
+    const builtStages = rawStages.map((s: any) => {
+      const rawProofs = s.proof || s.proofPlacements || (s.proofs ? s.proofs.map((p: any) => typeof p === 'string' ? p : p.proofName || p.claim || JSON.stringify(p)) : []);
+      const structuredProofs = Array.isArray(rawProofs) ? rawProofs.map(sanitizeProofItem) : [];
+      const stageKey = String(s.stageId || s.id || s.stageName || s.name || "").toLowerCase();
+      const derivedCta = (s.cta && s.cta !== "Learn More")
+        ? s.cta
+        : (s.callToAction && s.callToAction !== "Learn More")
+          ? s.callToAction
+          : stageKey.includes("entry") ? "Explore How It Works"
+          : stageKey.includes("education") ? "Review Process & Capabilities"
+          : stageKey.includes("engagement") ? "Start Your Configuration"
+          : stageKey.includes("consideration") ? "Compare Verified Examples"
+          : stageKey.includes("decision") ? "Review Options & Terms"
+          : stageKey.includes("conversion") ? "Complete Your Order"
+          : "Explore Next Step";
+      const resolvedGoal = s.goal || s.conversionGoal || s.objective || s.purpose || "";
+      const rawCoreMessage = s.coreMessage || s.message || s.primaryMessage || "";
+      const resolvedCoreMessage = (rawCoreMessage && rawCoreMessage !== resolvedGoal)
+        ? rawCoreMessage
+        : (s.valueProposition || (s.contentStrategy ? `${s.stageName || s.name || "Stage"}: ${s.contentStrategy}` : (rawCoreMessage || resolvedGoal)));
+      const contentAction = s.contentAction || s.action || s.contentType || s.contentStrategy || "";
+      return {
+        stageId: s.stageId || s.id || (s.name || "stage").toLowerCase().replace(/\s+/g, "_"),
+        stageName: s.stageName || s.name || s.stage || "Funnel Stage",
+        goal: resolvedGoal,
+        buyerState: s.buyerState || s.mindset || (s.stageName ? `Evaluating ${s.stageName}` : "Evaluating Stage"),
+        coreMessage: resolvedCoreMessage,
+        contentAction,
+        conversionAction: s.conversionAction || contentAction || derivedCta,
+        destinationUrl: s.destinationUrl || resolvedProductUrl,
+        proof: structuredProofs,
+        cta: derivedCta,
+      };
+    });
+
+    const primaryConversionStage =
+      builtStages.find((st: any) => st.stageId === "decision" || st.stageId === "conversion") ||
+      builtStages[builtStages.length - 1];
+    const stageFlowSummary = builtStages.map((st: any) => `${st.stageName}: ${st.cta}`).join(" -> ");
+    const resolvedConversionPath =
+      funnelObj.conversionPath ||
+      `${resolvedJourneyName}${resolvedProductUrl ? ` (${resolvedProductUrl})` : ""}${stageFlowSummary ? ` [${stageFlowSummary}]` : ""}`;
+
     return {
       laneId,
       laneLabel,
@@ -3459,44 +3509,18 @@ export async function synthesizePlan(
       segmentIds,
       sourceFunnelSnapshotId,
       sourcePersuasionSnapshotId,
-      journeyName: funnelObj.journeyName || funnelObj.funnelName || funnelObj.name || "Buyer Conversion Journey",
+      journeyName: resolvedJourneyName,
       journeyType: funnelObj.journeyType || funnelObj.funnelType || funnelObj.modelType || "Standard",
       whyThisJourney,
+      conversionPath: resolvedConversionPath,
+      ctaPrimary: primaryConversionStage?.cta || builtStages[0]?.cta,
+      conversionAction: primaryConversionStage?.conversionAction || resolvedJourneyName,
+      destinationUrl: resolvedProductUrl,
       entryTrigger: funnelObj.entryTrigger || {
         mechanismType: "Primary Problem Agitation",
         purpose: "Capture qualified buyer attention and establish initial category relevance."
       },
-      stages: rawStages.map((s: any) => {
-        const rawProofs = s.proof || s.proofPlacements || (s.proofs ? s.proofs.map((p: any) => typeof p === 'string' ? p : p.proofName || p.claim || JSON.stringify(p)) : []);
-        const structuredProofs = Array.isArray(rawProofs) ? rawProofs.map(sanitizeProofItem) : [];
-        const stageKey = String(s.stageId || s.id || s.stageName || s.name || "").toLowerCase();
-        const derivedCta = (s.cta && s.cta !== "Learn More")
-          ? s.cta
-          : (s.callToAction && s.callToAction !== "Learn More")
-            ? s.callToAction
-            : stageKey.includes("entry") ? "Explore How It Works"
-            : stageKey.includes("education") ? "Review Process & Capabilities"
-            : stageKey.includes("engagement") ? "Start Your Configuration"
-            : stageKey.includes("consideration") ? "Compare Verified Examples"
-            : stageKey.includes("decision") ? "Review Options & Terms"
-            : stageKey.includes("conversion") ? "Complete Your Order"
-            : "Explore Next Step";
-        const resolvedGoal = s.goal || s.conversionGoal || s.objective || s.purpose || "";
-        const rawCoreMessage = s.coreMessage || s.message || s.primaryMessage || "";
-        const resolvedCoreMessage = (rawCoreMessage && rawCoreMessage !== resolvedGoal)
-          ? rawCoreMessage
-          : (s.valueProposition || (s.contentStrategy ? `${s.stageName || s.name || "Stage"}: ${s.contentStrategy}` : (rawCoreMessage || resolvedGoal)));
-        return {
-          stageId: s.stageId || s.id || (s.name || "stage").toLowerCase().replace(/\s+/g, "_"),
-          stageName: s.stageName || s.name || s.stage || "Funnel Stage",
-          goal: resolvedGoal,
-          buyerState: s.buyerState || s.mindset || (s.stageName ? `Evaluating ${s.stageName}` : "Evaluating Stage"),
-          coreMessage: resolvedCoreMessage,
-          contentAction: s.contentAction || s.action || s.contentType || s.contentStrategy || "",
-          proof: structuredProofs,
-          cta: derivedCta,
-        };
-      }),
+      stages: builtStages,
       persuasionStrategy: persuasionStrategyObj,
     };
   };
@@ -3851,25 +3875,89 @@ export async function synthesizePlan(
     
     // Extract approved channels authoritatively from channel selection or active strategy root
     const chanRes = results.get("channel_selection")?.output || results.get("channel_selection") || null;
-    const approvedPrimary = chanRes?.proposedPrimary || activeStrategyRoot?.approvedChannels?.[0] || "Primary Strategic Channel";
-    const approvedSecondary = chanRes?.secondary || activeStrategyRoot?.approvedChannels?.[1] || "Secondary Strategic Channel";
-    const approvedChannelsList = [approvedPrimary, approvedSecondary].filter(Boolean);
+    const approvedPrimary =
+      chanRes?.primaryChannel?.channelName ||
+      chanRes?.aiChannelProposal?.proposedPrimary ||
+      chanRes?.proposedPrimary ||
+      activeStrategyRoot?.approvedChannels?.[0] ||
+      "Primary Strategic Channel";
+    const approvedSecondary =
+      chanRes?.secondaryChannel?.channelName ||
+      chanRes?.aiChannelProposal?.secondary ||
+      chanRes?.secondary ||
+      activeStrategyRoot?.approvedChannels?.[1] ||
+      null;
+    const supportingRecs: Array<{ channelName: string; role: string }> = [];
+    const dynRecs = Array.isArray(chanRes?.aiChannelProposal?.dynamicRecommendations)
+      ? chanRes.aiChannelProposal.dynamicRecommendations
+      : [];
+    for (const dr of dynRecs) {
+      const name = String(dr?.channelName || dr?.channel || "").trim();
+      const tier = String(dr?.tier || "").toUpperCase();
+      if (
+        name &&
+        name !== approvedPrimary &&
+        name !== approvedSecondary &&
+        (tier === "SUPPORTING" || !tier)
+      ) {
+        supportingRecs.push({
+          channelName: name,
+          role:
+            dr?.strategicRole ||
+            dr?.whyRecommended ||
+            "Supporting middle-of-funnel nurture and organic proof reinforcement",
+        });
+      }
+    }
+    const approvedChannelsList = [
+      approvedPrimary,
+      approvedSecondary,
+      ...supportingRecs.map((s) => s.channelName),
+    ].filter(Boolean) as string[];
     const approvedChannelsStr = approvedChannelsList.join(", ");
 
-    // Ensure channels array is populated with strategic roles
+    // Ensure channels array is populated with strategic roles (including SUPPORTING organic nurture channels)
     if (!Array.isArray(dist.channels) || dist.channels.length === 0) {
       dist.channels = [
         {
           channel: approvedPrimary,
-          role: chanRes?.primaryRole || "Top-of-funnel awareness, proof demonstration, and market positioning",
+          role:
+            chanRes?.primaryChannel?.strategicRole ||
+            chanRes?.primaryRole ||
+            "Top-of-funnel awareness, proof demonstration, and market positioning",
           tier: "PRIMARY",
         },
-        ...(approvedSecondary ? [{
-          channel: approvedSecondary,
-          role: chanRes?.secondaryRole || "Middle-of-funnel consideration, lead nurturing, and relationship building",
-          tier: "SECONDARY",
-        }] : []),
+        ...(approvedSecondary
+          ? [
+              {
+                channel: approvedSecondary,
+                role:
+                  chanRes?.secondaryChannel?.strategicRole ||
+                  chanRes?.secondaryRole ||
+                  "Middle-of-funnel consideration, lead nurturing, and relationship building",
+                tier: "SECONDARY",
+              },
+            ]
+          : []),
+        ...supportingRecs.map((sr) => ({
+          channel: sr.channelName,
+          role: sr.role,
+          tier: "SUPPORTING",
+        })),
       ];
+    } else if (supportingRecs.length > 0) {
+      const existingNames = new Set(
+        dist.channels.map((c: any) => String(c?.channel || c?.channelName || "").toLowerCase()),
+      );
+      for (const sr of supportingRecs) {
+        if (!existingNames.has(sr.channelName.toLowerCase())) {
+          dist.channels.push({
+            channel: sr.channelName,
+            role: sr.role,
+            tier: "SUPPORTING",
+          });
+        }
+      }
     }
 
     // Preserve realistic organic & content validation cadence when organic/content production channels are active
@@ -4125,84 +4213,30 @@ export async function synthesizePlan(
 
   // 1. Assemble authoritative budget allocation from Budget Governor & Settings FIRST so final validation inspects the complete plan
   const bgOutput = budgetGovResult?.output;
+  const chanSelOutput = results.get("channel_selection")?.output || results.get("channel_selection") || null;
   const isBudgetUnconfirmed = bgOutput?.budgetConfirmation === "unconfirmed" || (!bgOutput?.budgetConfirmation && budgetSettings);
   const totalBudgetNum = bgOutput?.totalMonthlyBudget ?? (budgetSettings?.monthlyBudget ? Number(budgetSettings.monthlyBudget) : 0);
   const budgetCurrency = bgOutput?.currency || budgetSettings?.currency || "USD";
   const budgetVersion = bgOutput?.budgetSettingsVersion ?? budgetSettings?.version ?? 1;
-  const formattedBudgetLabel = `${Number(totalBudgetNum || 0).toLocaleString("en-US")} ${budgetCurrency}`;
 
-  if (bgOutput && Array.isArray(bgOutput.allocations) && bgOutput.allocations.length > 0) {
-    const denominators = reconcileBudgetDenominators(totalBudgetNum, budgetCurrency, bgOutput.allocations);
-    const paidAllocations = denominators.reconciledAllocations.filter((a: any) => !a.isOrganic);
-    const organicAllocations = denominators.reconciledAllocations.filter((a: any) => a.isOrganic);
-    const carveOutPct = Number(bgOutput?.commercialStrategy?.learningBudgetCarveOutPct ?? 20);
-    const paidMediaTotal = Number(denominators.paidMediaSpend || 0);
-    const contentAndOrganicTotal = Number((denominators.contentProductionBudget || 0) + (denominators.organicEffortAllocation || 0));
-    const initialTestDollarAmount = paidMediaTotal > 0
-      ? Math.round((paidMediaTotal * carveOutPct) / 100)
-      : Math.round((Number(totalBudgetNum || 0) * carveOutPct) / 100);
-    const targetValidationChannelsLabel = paidAllocations.length > 0
-      ? paidAllocations.map((a: any) => a.channelName || a.channelId).join(", ")
-      : denominators.reconciledAllocations.map((a: any) => a.channelName || a.channelId).join(", ") || "approved channels";
-    synthesized.budgetAllocation = {
-      totalBudget: `${totalBudgetNum} ${budgetCurrency}`.trim(),
-      currency: budgetCurrency,
+  if ((bgOutput && Array.isArray(bgOutput.allocations) && bgOutput.allocations.length > 0) || budgetSettings) {
+    synthesized.budgetAllocation = buildCanonicalBudgetAuthorityModel({
       totalMonthlyBudget: totalBudgetNum,
-      period: "monthly",
+      currency: budgetCurrency,
       budgetSettingsVersion: budgetVersion,
       budgetConfirmation: isBudgetUnconfirmed ? "unconfirmed" : "user_confirmed",
-      isAssumption: isBudgetUnconfirmed,
-      provenance: isBudgetUnconfirmed
-        ? `Unconfirmed budget setting (${formattedBudgetLabel}). Does not authorize paid ad spend until confirmed.`
-        : `User-confirmed budget setting (${formattedBudgetLabel}).`,
-      budgetDenominators: denominators,
-      testingAndScalingGuidance: {
-        governorRole: "recommendation_component",
-        spendAction: bgOutput.spendAction || bgOutput.action || "hold",
-        spendPace: bgOutput?.commercialStrategy?.spendPace || "cautious",
-        learningBudgetCarveOutPct: carveOutPct,
-        initialValidationTestBudget: initialTestDollarAmount,
-        initialTestingPlan: `Use the user-confirmed ${formattedBudgetLabel}/month budget envelope (${paidMediaTotal.toLocaleString("en-US")} ${budgetCurrency} paid media + ${contentAndOrganicTotal.toLocaleString("en-US")} ${budgetCurrency} content/organic production), deploying an initial ${carveOutPct}% validation carve-out (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency}) on ${targetValidationChannelsLabel} to acquire baseline engagement-to-conversion benchmarks.`,
-        scalingHoldCondition: `Hold full-scale expansion beyond the initial ${carveOutPct}% validation test budget (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency}) until initial live testing establishes baseline click-through, engagement completion, and purchase conversion rates.`,
-        paidMediaAllocationSummary: paidAllocations.map((a: any) => `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount || 0).toLocaleString("en-US")} ${budgetCurrency}/mo)`).join("; "),
-        organicProductionAllocationSummary: organicAllocations.map((a: any) => `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount || 0).toLocaleString("en-US")} ${budgetCurrency}/mo production/organic effort)`).join("; "),
-      },
-      channels: denominators.reconciledAllocations.map((a: any) => ({
-        channelId: a.channelId,
-        channelName: a.channelName,
-        sharePercentage: a.sharePercentage,
-        monthlyAmount: a.monthlyAmount,
-        why: a.why,
-        isOrganic: a.isOrganic,
-        proposedUse: a.proposedUse,
-        spendCategory: a.spendCategory,
-      })),
-      breakdown: denominators.reconciledAllocations.map((a: any) => ({
-        category: a.channelName || a.channelId,
-        percentage: a.sharePercentage,
-        monthlyAmount: a.monthlyAmount,
-        purpose: a.proposedUse || a.why || "Channel marketing allocation",
-        isOrganic: a.isOrganic,
-        spendCategory: a.spendCategory,
-      })),
-    };
-  } else if (budgetSettings) {
-    const denominators = reconcileBudgetDenominators(totalBudgetNum, budgetCurrency, []);
-    synthesized.budgetAllocation = {
-      totalBudget: `${totalBudgetNum} ${budgetCurrency}`.trim(),
-      currency: budgetCurrency,
-      totalMonthlyBudget: totalBudgetNum,
-      period: "monthly",
-      budgetSettingsVersion: budgetVersion,
-      budgetConfirmation: isBudgetUnconfirmed ? "unconfirmed" : "user_confirmed",
-      isAssumption: isBudgetUnconfirmed,
-      provenance: isBudgetUnconfirmed
-        ? `Unconfirmed budget setting (${formattedBudgetLabel}). Does not authorize paid ad spend until confirmed.`
-        : `User-confirmed budget setting (${formattedBudgetLabel}).`,
-      budgetDenominators: denominators,
-      channels: [],
-      breakdown: [],
-    };
+      budgetGovernorOutput: bgOutput || null,
+      channelSelectionOutput: chanSelOutput || null,
+      weeklyCadence: synthesized.contentDistribution
+        ? {
+            reelsPerWeek: Number(synthesized.contentDistribution.reelsPerWeek || 2),
+            postsPerWeek: Number(synthesized.contentDistribution.postsPerWeek || 2),
+            storiesPerDay: Number(synthesized.contentDistribution.storiesPerDay || 1),
+            carouselsPerWeek: Number(synthesized.contentDistribution.carouselsPerWeek || 1),
+            videosPerWeek: Number(synthesized.contentDistribution.videosPerWeek || 1),
+          }
+        : undefined,
+    });
   }
 
   // Extract Positioning epistemic status and attach to synthesized plan BEFORE BLL translation
@@ -4723,15 +4757,26 @@ export function reconcileBudgetDenominators(
     monthlyAmount?: number;
     why?: string;
     isOrganic?: boolean;
+    isMonetaryProductionSpend?: boolean;
     proposedUse?: string;
   }>,
+  options?: {
+    spendAction?: string;
+    learningBudgetCarveOutPct?: number;
+  },
 ): {
   totalCampaignBudget: number;
   currency: string;
   paidMediaSpend: number;
+  paidMediaBudget: number;
   contentProductionBudget: number;
   organicEffortAllocation: number;
+  contentAndOrganicBudget: number;
   unallocatedReserve: number;
+  conditionalFullBudgetAllocation: number;
+  initialTestingAllowance: number;
+  heldInReserveUnderHold: number;
+  monetaryProductionCosts: number;
   reconcilesToTotal: boolean;
   reconciledAllocations: Array<{
     channelId: string;
@@ -4752,6 +4797,7 @@ export function reconcileBudgetDenominators(
   let paidMediaSpend = 0;
   let contentProductionBudget = 0;
   let organicEffortAllocation = 0;
+  let monetaryProductionCosts = 0;
 
   const reconciledAllocations = rawList.map((a) => {
     const scaledAmt = rawSum > 0
@@ -4760,6 +4806,9 @@ export function reconcileBudgetDenominators(
     const sharePct = safeTotal > 0 ? Math.round((scaledAmt / safeTotal) * 100) : Number(a.sharePercentage || 0);
     const isOrg = Boolean(a.isOrganic);
     const useLower = `${a.proposedUse || ""} ${a.why || ""}`.toLowerCase();
+    const isExplicitMonetaryProduction =
+      a.isMonetaryProductionSpend === true ||
+      (isOrg && /\b(paid creator fee|freelance editor fee|studio rental fee|out-of-pocket production cost)\b/.test(useLower));
     const isContentProd = isOrg && /\b(production|creator|video|editing|asset|studio)\b/.test(useLower);
     const spendCategory: "PAID_MEDIA" | "CONTENT_PRODUCTION" | "ORGANIC_EXECUTION" = !isOrg
       ? "PAID_MEDIA"
@@ -4767,9 +4816,14 @@ export function reconcileBudgetDenominators(
         ? "CONTENT_PRODUCTION"
         : "ORGANIC_EXECUTION";
 
-    if (spendCategory === "PAID_MEDIA") paidMediaSpend += scaledAmt;
-    else if (spendCategory === "CONTENT_PRODUCTION") contentProductionBudget += scaledAmt;
-    else organicEffortAllocation += scaledAmt;
+    if (spendCategory === "PAID_MEDIA") {
+      paidMediaSpend += scaledAmt;
+    } else if (spendCategory === "CONTENT_PRODUCTION") {
+      contentProductionBudget += scaledAmt;
+      if (isExplicitMonetaryProduction) monetaryProductionCosts += scaledAmt;
+    } else {
+      organicEffortAllocation += scaledAmt;
+    }
 
     return {
       ...a,
@@ -4782,6 +4836,13 @@ export function reconcileBudgetDenominators(
 
   const allocatedSum = paidMediaSpend + contentProductionBudget + organicEffortAllocation;
   const unallocatedReserve = Math.max(0, safeTotal - allocatedSum);
+  const carveOutPct = Math.max(0, Math.min(100, Number(options?.learningBudgetCarveOutPct ?? 20)));
+  const initialTestingAllowance =
+    paidMediaSpend > 0
+      ? Math.round((paidMediaSpend * carveOutPct) / 100)
+      : Math.round((safeTotal * carveOutPct) / 100);
+  const isHold = String(options?.spendAction || "hold").toLowerCase() === "hold";
+  const heldInReserveUnderHold = isHold ? Math.max(0, safeTotal - initialTestingAllowance) : unallocatedReserve;
 
   return {
     totalCampaignBudget: safeTotal,
@@ -4792,8 +4853,559 @@ export function reconcileBudgetDenominators(
     organicEffortAllocation,
     contentAndOrganicBudget: contentProductionBudget + organicEffortAllocation,
     unallocatedReserve,
+    conditionalFullBudgetAllocation: allocatedSum,
+    initialTestingAllowance,
+    heldInReserveUnderHold,
+    monetaryProductionCosts,
     reconcilesToTotal: allocatedSum + unallocatedReserve === safeTotal,
     reconciledAllocations,
+  };
+}
+
+export interface CanonicalBudgetAuthorityInput {
+  totalMonthlyBudget: number;
+  currency?: string;
+  budgetSettingsVersion?: number;
+  budgetSettingsId?: string | null;
+  budgetConfirmation?: "user_confirmed" | "unconfirmed";
+  budgetGovernorOutput?: any | null;
+  channelSelectionOutput?: any | null;
+  actualSpendTelemetry?: {
+    amount: number | null;
+    recordedCheckInAdSpend?: number | null;
+    status: "UNKNOWN_UNCONNECTED" | "RECORDED_ZERO_SPEND" | "MEASURED";
+    detail?: string;
+  } | null;
+  weeklyCadence?: {
+    reelsPerWeek: number;
+    postsPerWeek: number;
+    storiesPerDay: number;
+    carouselsPerWeek: number;
+    videosPerWeek: number;
+  };
+}
+
+export function buildCanonicalBudgetAuthorityModel(input: CanonicalBudgetAuthorityInput): Record<string, any> {
+  const bgOutput = input.budgetGovernorOutput || null;
+  const csOutput = input.channelSelectionOutput || null;
+  const budgetCurrency = input.currency || bgOutput?.currency || "USD";
+  const totalBudgetNum = Number(
+    input.totalMonthlyBudget ?? bgOutput?.totalMonthlyBudget ?? 0,
+  );
+  const budgetVersion = Number(input.budgetSettingsVersion ?? bgOutput?.budgetSettingsVersion ?? 1);
+  const isBudgetUnconfirmed = input.budgetConfirmation === "unconfirmed";
+  const formattedBudgetLabel = `${Number(totalBudgetNum || 0).toLocaleString("en-US")} ${budgetCurrency}`;
+
+  const spendAction = String(bgOutput?.spendAction || bgOutput?.action || "hold").toLowerCase();
+  const spendPace = String(bgOutput?.commercialStrategy?.spendPace || "cautious");
+  const carveOutPct = Number(bgOutput?.commercialStrategy?.learningBudgetCarveOutPct ?? 20);
+
+  const rawGovAllocations = Array.isArray(bgOutput?.allocations) ? bgOutput.allocations : [];
+  const denominators = reconcileBudgetDenominators(totalBudgetNum, budgetCurrency, rawGovAllocations, {
+    spendAction,
+    learningBudgetCarveOutPct: carveOutPct,
+  });
+
+  const paidAllocations = denominators.reconciledAllocations.filter((a: any) => !a.isOrganic);
+  const organicAllocations = denominators.reconciledAllocations.filter((a: any) => a.isOrganic);
+  const isOrganicOnlyPlan = paidAllocations.length === 0 && organicAllocations.length > 0;
+
+  // Extract Channel Selection preliminary recommendations for explicit authority comparison
+  const prelimAllocations: Array<{
+    channelName: string;
+    sharePercentage: number;
+    monthlyAmount: number;
+    rationale: string;
+  }> = [];
+  const csRecAlloc = csOutput?.aiChannelProposal?.recommendedBudgetAllocation;
+  if (Array.isArray(csRecAlloc) && csRecAlloc.length > 0) {
+    for (const item of csRecAlloc) {
+      const chName = String(item?.channelName || item?.channel || "").trim();
+      if (!chName) continue;
+      const pct = Number(item?.percentage ?? item?.sharePercentage ?? 0);
+      const amtStr = String(item?.estimatedMonthlySpend || item?.monthlyAmount || "");
+      const parsedAmt = Number(amtStr.replace(/[^0-9.]/g, "")) || Math.round((totalBudgetNum * pct) / 100);
+      prelimAllocations.push({
+        channelName: chName,
+        sharePercentage: pct,
+        monthlyAmount: parsedAmt,
+        rationale: String(item?.rationale || item?.why || "Preliminary Channel Selection recommendation"),
+      });
+    }
+  } else if (
+    csRecAlloc &&
+    typeof csRecAlloc === "object" &&
+    (typeof csRecAlloc.primaryChannelPercentage === "number" ||
+      typeof csRecAlloc.secondaryChannelPercentage === "number")
+  ) {
+    const pName = String(
+      csOutput?.primaryChannel?.channelName ||
+        csOutput?.aiChannelProposal?.proposedPrimary ||
+        "Primary Channel",
+    );
+    const pPct = Number(csRecAlloc.primaryChannelPercentage ?? 70);
+    const sName = String(
+      csOutput?.secondaryChannel?.channelName ||
+        csOutput?.aiChannelProposal?.secondary ||
+        "Secondary Channel",
+    );
+    const sPct = Number(csRecAlloc.secondaryChannelPercentage ?? (100 - pPct));
+    const sharedRationale = String(csRecAlloc.rationale || "Preliminary Channel Selection recommendation");
+    prelimAllocations.push({
+      channelName: pName,
+      sharePercentage: pPct,
+      monthlyAmount: Math.round((totalBudgetNum * pPct) / 100),
+      rationale: sharedRationale,
+    });
+    if (sName) {
+      prelimAllocations.push({
+        channelName: sName,
+        sharePercentage: sPct,
+        monthlyAmount: Math.round((totalBudgetNum * sPct) / 100),
+        rationale: sharedRationale,
+      });
+    }
+  } else if (csOutput?.primaryChannel?.channelName) {
+    const pName = String(csOutput.primaryChannel.channelName);
+    const pRecAmt = Number(csOutput.primaryChannel.recommendedBudgetAllocation);
+    const pPct =
+      Number.isFinite(pRecAmt) && pRecAmt > 0 && totalBudgetNum > 0
+        ? Math.round((pRecAmt / totalBudgetNum) * 100)
+        : Number(csOutput.primaryChannel.budgetSharePct ?? 65);
+    const pAmt =
+      Number.isFinite(pRecAmt) && pRecAmt > 0
+        ? pRecAmt
+        : Math.round((totalBudgetNum * pPct) / 100);
+    prelimAllocations.push({
+      channelName: pName,
+      sharePercentage: pPct,
+      monthlyAmount: pAmt,
+      rationale: String(csOutput.primaryChannel.whyChosen || "Primary Channel Selection recommendation"),
+    });
+    if (csOutput?.secondaryChannel?.channelName) {
+      const sName = String(csOutput.secondaryChannel.channelName);
+      const sRecAmt = Number(csOutput.secondaryChannel.recommendedBudgetAllocation);
+      const sPct =
+        Number.isFinite(sRecAmt) && sRecAmt > 0 && totalBudgetNum > 0
+          ? Math.round((sRecAmt / totalBudgetNum) * 100)
+          : Number(csOutput.secondaryChannel.budgetSharePct ?? (100 - pPct));
+      const sAmt =
+        Number.isFinite(sRecAmt) && sRecAmt > 0
+          ? sRecAmt
+          : Math.round((totalBudgetNum * sPct) / 100);
+      prelimAllocations.push({
+        channelName: sName,
+        sharePercentage: sPct,
+        monthlyAmount: sAmt,
+        rationale: String(csOutput.secondaryChannel.whyChosen || "Secondary Channel Selection recommendation"),
+      });
+    }
+  }
+
+  // Extract commercial orchestration prerequisites from Channel Selection
+  const commOrch = csOutput?.commercialOrchestration || {};
+  const channelInterlockText = String(commOrch?.channelInterlock || "").trim();
+  const validationMilestoneText = String(commOrch?.validationMilestone || "").trim();
+  const withdrawalTriggerText = String(commOrch?.withdrawalTrigger || "").trim();
+  const riskBudgetBalanceText = String(commOrch?.riskBudgetBalance || "").trim();
+
+  // Extract supporting organic channels (e.g. YouTube Organic) from Channel Selection
+  const supportingOrganicChannels: Array<{
+    channelName: string;
+    tier: "SUPPORTING";
+    funnelStage: string;
+    monetarySpend: number;
+    effortSource: string;
+    strategicRole: string;
+  }> = [];
+  const dynRecs = Array.isArray(csOutput?.aiChannelProposal?.dynamicRecommendations)
+    ? csOutput.aiChannelProposal.dynamicRecommendations
+    : [];
+  const govChannelNamesLower = new Set(
+    denominators.reconciledAllocations.map((a: any) => String(a.channelName || a.channelId || "").toLowerCase()),
+  );
+  for (const dr of dynRecs) {
+    const cName = String(dr?.channelName || dr?.channel || "").trim();
+    if (!cName) continue;
+    const isSupportingOrUnfunded =
+      String(dr?.tier || "").toUpperCase() === "SUPPORTING" ||
+      !govChannelNamesLower.has(cName.toLowerCase());
+    if (isSupportingOrUnfunded && /organic/i.test(`${cName} ${dr?.mode || ""}`)) {
+      supportingOrganicChannels.push({
+        channelName: cName,
+        tier: "SUPPORTING",
+        funnelStage: "nurture",
+        monetarySpend: 0,
+        effortSource:
+          "Non-monetary sweat equity using existing production capacity (no paid media allocation required)",
+        strategicRole: String(
+          dr?.strategicRole ||
+            dr?.whyRecommended ||
+            "Supporting middle-of-funnel nurture and emotional proof library",
+        ),
+      });
+    }
+  }
+
+  // Determine per-channel readiness & prerequisites
+  const channelPrerequisites = denominators.reconciledAllocations.map((a: any) => {
+    const chName = String(a.channelName || a.channelId || "");
+    const isRetargeting =
+      /retarget/i.test(chName) ||
+      (/instagram/i.test(chName) && !a.isOrganic && /retarget/i.test(`${a.proposedUse || ""} ${a.why || ""} ${channelInterlockText}`));
+    if (a.isOrganic) {
+      return {
+        channelId: a.channelId,
+        channelName: chName,
+        isOrganic: true,
+        readinessStatus: "READY_FOR_ORGANIC_EXECUTION" as const,
+        initialTestingEligibility: "ELIGIBLE_ORGANIC_VALIDATION" as const,
+        conditionalFullAllocation: a.monthlyAmount,
+        sharePercentage: a.sharePercentage,
+        monetaryAdSpend: 0,
+        requiredWarmAudiencePool: null,
+        requiredLandingPageVisits: null,
+        windowDays: null,
+        requiredConversionMeasurement: "Manual weekly conversion check-in + link-in-bio UTM tracking",
+        prerequisiteSummary:
+          "Organic sweat-equity channel ($0 paid media spend); ready for immediate organic publishing and validation.",
+      };
+    }
+    if (isRetargeting) {
+      return {
+        channelId: a.channelId,
+        channelName: chName,
+        isOrganic: false,
+        readinessStatus: "PREREQUISITE_GATED" as const,
+        initialTestingEligibility: "GATED_UNTIL_WARM_POOL_AND_TRACKING_READY" as const,
+        conditionalFullAllocation: a.monthlyAmount,
+        sharePercentage: a.sharePercentage,
+        monetaryAdSpend: a.monthlyAmount,
+        requiredWarmAudiencePool: 1000,
+        requiredLandingPageVisits: 1500,
+        windowDays: 21,
+        requiredConversionMeasurement:
+          "Active Meta Pixel & verified conversion event tracking (currently 0 tracked conversions in active window)",
+        interlockRule:
+          channelInterlockText ||
+          "Exclusively targets users who watch >50% of TikTok video ads or visit the landing page; cannot launch cold before TikTok seeds >= 1,000 engaged custom audience members and >= 1,500 landing page visits.",
+        withdrawalTrigger:
+          withdrawalTriggerText ||
+          "Pull Instagram Retargeting if custom audience retargeting pool fails to reach 1,000 engaged members within 21 days of TikTok launch.",
+        prerequisiteSummary:
+          "Gated on two unmet prerequisites before deploying any part of the $1,750 (35%) conditional allocation: (1) active conversion event measurement, and (2) accumulating >= 1,000 engaged custom audience members and >= 1,500 landing page visits from TikTok within 21 days.",
+      };
+    }
+    return {
+      channelId: a.channelId,
+      channelName: chName,
+      isOrganic: false,
+      readinessStatus: "READY_FOR_CONTROLLED_VALIDATION_TEST" as const,
+      initialTestingEligibility: "ELIGIBLE_WITHIN_1000_CARVEOUT" as const,
+      conditionalFullAllocation: a.monthlyAmount,
+      sharePercentage: a.sharePercentage,
+      monetaryAdSpend: a.monthlyAmount,
+      requiredWarmAudiencePool: null,
+      requiredLandingPageVisits: 1500,
+      windowDays: 21,
+      requiredConversionMeasurement:
+        "Active TikTok Pixel & verified conversion event tracking on landing page before ad spend release",
+      withdrawalTrigger:
+        withdrawalTriggerText ||
+        "Pull TikTok Paid if Cost-Per-Click (CPC) exceeds $2.50 or Click-Through-Rate (CTR) falls below 0.8% across 3 consecutive ad sets.",
+      prerequisiteSummary:
+        "Eligible for controlled initial validation testing within the $1,000 (20%) testing allowance once pixel/conversion tracking is verified; full $3,250 (65%) conditional allocation remains held until release gates are met.",
+    };
+  });
+
+  for (const sup of supportingOrganicChannels) {
+    channelPrerequisites.push({
+      channelId: sup.channelName.toLowerCase().replace(/[^a-z0-9]+/g, "_"),
+      channelName: sup.channelName,
+      isOrganic: true,
+      readinessStatus: "READY_FOR_ORGANIC_EXECUTION" as const,
+      initialTestingEligibility: "ELIGIBLE_ORGANIC_VALIDATION" as const,
+      conditionalFullAllocation: 0,
+      sharePercentage: 0,
+      monetaryAdSpend: 0,
+      requiredWarmAudiencePool: null,
+      requiredLandingPageVisits: null,
+      windowDays: null,
+      requiredConversionMeasurement: "Organic nurture attribution via landing page links",
+      prerequisiteSummary: `${sup.strategicRole} ($0 monetary spend; uses existing production capacity).`,
+    });
+  }
+
+  // Compare preliminary vs final to determine refinement status
+  const hasRefinement =
+    prelimAllocations.length > 0 &&
+    denominators.reconciledAllocations.some((finalItem: any) => {
+      const match = prelimAllocations.find(
+        (p) =>
+          p.channelName.toLowerCase() === String(finalItem.channelName || "").toLowerCase() ||
+          String(finalItem.channelName || "").toLowerCase().includes(p.channelName.toLowerCase().split(" ")[0]),
+      );
+      return match && (match.monthlyAmount !== finalItem.monthlyAmount || match.sharePercentage !== finalItem.sharePercentage);
+    });
+
+  const prelimSummaryStr =
+    prelimAllocations.length > 0
+      ? prelimAllocations
+          .map(
+            (p) =>
+              `${p.channelName}: ${p.sharePercentage}% (${Number(p.monthlyAmount).toLocaleString("en-US")} ${budgetCurrency})`,
+          )
+          .join(" / ")
+      : "Same as final allocation";
+
+  const finalSummaryStr = denominators.reconciledAllocations
+    .map(
+      (a: any) =>
+        `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount).toLocaleString("en-US")} ${budgetCurrency}${a.isOrganic ? " organic effort weighting" : ""})`,
+    )
+    .join(" / ");
+
+  const initialTestDollarAmount = denominators.initialTestingAllowance;
+  const unreleasedReserveAmount = denominators.heldInReserveUnderHold;
+
+  const eligibleInitialPaidChannels = channelPrerequisites
+    .filter((cp) => !cp.isOrganic && cp.initialTestingEligibility === "ELIGIBLE_WITHIN_1000_CARVEOUT")
+    .map((cp) => cp.channelName);
+  const gatedPaidChannels = channelPrerequisites
+    .filter((cp) => !cp.isOrganic && cp.readinessStatus === "PREREQUISITE_GATED")
+    .map((cp) => cp.channelName);
+
+  const initialTestingChannelLabel =
+    eligibleInitialPaidChannels.length > 0
+      ? eligibleInitialPaidChannels.join(", ")
+      : denominators.reconciledAllocations.map((a: any) => a.channelName || a.channelId).join(", ") ||
+        "approved channels";
+
+  const gatedNotice =
+    gatedPaidChannels.length > 0
+      ? ` ${gatedPaidChannels.join(", ")} is prerequisite-gated (requires >= 1,000 engaged TikTok retargeting pool members, >= 1,500 landing page visits, and active conversion tracking before deployment; no 65/35 split of the ${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency} initial testing allowance is invented).`
+      : "";
+
+  const authorityHierarchy = {
+    preliminaryRecommendationAuthority: "CHANNEL_SELECTION" as const,
+    finalAllocationAuthority: "BUDGET_GOVERNOR" as const,
+    status: hasRefinement ? ("REFINED_BY_BUDGET_GOVERNOR" as const) : ("ALIGNED" as const),
+    preliminaryChannelRecommendation: prelimAllocations,
+    preliminaryRiskBudgetBalanceNote: riskBudgetBalanceText || null,
+    finalPlannedChannelAllocation: denominators.reconciledAllocations.map((a: any) => ({
+      channelId: a.channelId,
+      channelName: a.channelName,
+      sharePercentage: a.sharePercentage,
+      monthlyAmount: a.monthlyAmount,
+      isOrganic: a.isOrganic,
+      allocationBasis: a.isOrganic
+        ? "ORGANIC_EFFORT_WEIGHTING_ZERO_AD_SPEND"
+        : "CONDITIONAL_FULL_BUDGET_ALLOCATION",
+    })),
+    refinementExplanation: hasRefinement
+      ? `Channel Selection proposed a preliminary recommendation of ${prelimSummaryStr}${
+          riskBudgetBalanceText ? ` (with commercialOrchestration.riskBudgetBalance noting ${riskBudgetBalanceText})` : ""
+        }. Budget Governor (authoritative final allocator) refined the conditional full-budget channel allocation to ${finalSummaryStr} to fund middle-of-funnel retargeting proof density while enforcing spendAction = ${spendAction} with a ${carveOutPct}% (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency}) initial testing allowance inside the ${formattedBudgetLabel} monthly envelope and ${unreleasedReserveAmount.toLocaleString("en-US")} ${budgetCurrency} (80%) held in reserve.`
+      : `Channel Selection and Budget Governor are aligned on ${finalSummaryStr} under spendAction = ${spendAction}.`,
+  };
+
+  const monthlyBudgetEnvelope = {
+    amount: totalBudgetNum,
+    currency: budgetCurrency,
+    period: "monthly" as const,
+    confirmationStatus: isBudgetUnconfirmed ? ("unconfirmed" as const) : ("user_confirmed" as const),
+    budgetSettingsVersion: budgetVersion,
+    budgetSettingsId: input.budgetSettingsId || null,
+    summary: `User-confirmed ${formattedBudgetLabel}/month total campaign budget envelope (v${budgetVersion}).`,
+  };
+
+  const finalPlannedChannelAllocation = {
+    authority: "BUDGET_GOVERNOR" as const,
+    allocationBasis: isOrganicOnlyPlan
+      ? ("ORGANIC_RESOURCE_WEIGHTING_EQUIVALENT" as const)
+      : ("CONDITIONAL_FULL_BUDGET_ALLOCATION" as const),
+    totalConditionalAllocation: denominators.conditionalFullBudgetAllocation,
+    currency: budgetCurrency,
+    isImmediatelyReleasedSpend: false,
+    channels: channelPrerequisites.filter((cp) => cp.conditionalFullAllocation > 0 || !cp.isOrganic),
+    supportingZeroSpendChannels: supportingOrganicChannels,
+    summary: isOrganicOnlyPlan
+      ? `100% organic sweat-equity execution (${finalSummaryStr}; $0 monetary paid-ad spend).`
+      : `Conditional full-budget allocation (${finalSummaryStr}) governing how the ${formattedBudgetLabel}/month envelope is distributed across channels as release gates are cleared; not immediately released spend.`,
+  };
+
+  const initialTestingAllowance = {
+    amount: initialTestDollarAmount,
+    currency: budgetCurrency,
+    percentageOfEnvelope: carveOutPct,
+    isInsideEnvelope: true,
+    isExtraSpend: false,
+    channelSplitSpecified: false,
+    eligibleInitialChannels: eligibleInitialPaidChannels,
+    prerequisiteGatedChannels: gatedPaidChannels,
+    summary: isOrganicOnlyPlan
+      ? `Initial ${carveOutPct}% validation phase (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency} resource-equivalent inside the ${formattedBudgetLabel} envelope; $0 monetary ad spend) focused on organic proof-of-concept validation on ${initialTestingChannelLabel}.`
+      : `${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency} (${carveOutPct}% of the ${formattedBudgetLabel} monthly envelope — inside the ${formattedBudgetLabel} envelope, not additional spend). Authorized for controlled initial validation testing on ${initialTestingChannelLabel}. No 65/35 channel split of the ${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency} allowance is invented because ${gatedPaidChannels.join(", ") || "secondary retargeting"} is gated on warm-pool and conversion-tracking prerequisites.`,
+  };
+
+  const unreleasedReserve = {
+    amount: unreleasedReserveAmount,
+    currency: budgetCurrency,
+    percentageOfEnvelope: Math.max(0, 100 - carveOutPct),
+    status: spendAction === "hold" ? ("HELD_IN_RESERVE" as const) : ("AVAILABLE_FOR_PACED_DEPLOYMENT" as const),
+    releaseCondition:
+      bgOutput?.commercialStrategy?.expansionPrecondition ||
+      "Requires 15+ verified conversions with statistical confidence >= 0.80 AND post-purchase emotional resonance score >= 40 across a 7-day window, plus >= 1,500 landing page visits and >= 1,000 engaged TikTok retargeting pool members before releasing Instagram Retargeting.",
+    summary: `${unreleasedReserveAmount.toLocaleString("en-US")} ${budgetCurrency} (${Math.max(0, 100 - carveOutPct)}% of the ${formattedBudgetLabel} monthly envelope) held in reserve under spendAction = ${spendAction} until validation release gates are met.`,
+  };
+
+  const actualSpend = {
+    amount: input.actualSpendTelemetry?.amount ?? null,
+    recordedCheckInAdSpend: input.actualSpendTelemetry?.recordedCheckInAdSpend ?? 0,
+    currency: budgetCurrency,
+    status: input.actualSpendTelemetry?.status || ("UNKNOWN_UNCONNECTED" as const),
+    summary:
+      input.actualSpendTelemetry?.detail ||
+      "UNKNOWN / unconnected paid-ad platform telemetry (no ad platform connected; $0 ad spend recorded in the single completed weekly check-in).",
+  };
+
+  const productionAndOrganicEffort = {
+    monetaryProductionCosts: denominators.monetaryProductionCosts,
+    currency: budgetCurrency,
+    organicResourceWeightingEquivalent: isOrganicOnlyPlan ? totalBudgetNum : 0,
+    organicEffortAllocationMode: "NON_MONETARY_SWEAT_EQUITY" as const,
+    supportingOrganicChannels,
+    weeklyOrganicCadence: input.weeklyCadence || {
+      reelsPerWeek: 2,
+      postsPerWeek: 2,
+      storiesPerDay: 1,
+      carouselsPerWeek: 1,
+      videosPerWeek: 1,
+    },
+    summary: isOrganicOnlyPlan
+      ? `$0 monetary paid-ad spend and $0 external monetary production fees; 100% of execution relies on non-monetary founder/team organic content production effort (${finalSummaryStr}).`
+      : `$0 monetary production fees charged against the ${formattedBudgetLabel} media budget; organic content creation and ${
+          supportingOrganicChannels.map((s) => s.channelName).join(", ") || "supporting organic channels"
+        } operate via non-monetary sweat equity using existing production capacity.`,
+  };
+
+  const holdPolicy = {
+    spendAction,
+    spendPace,
+    whatHoldPrevents: [
+      `Unrestricted full-budget (${formattedBudgetLabel}/mo) paid media deployment before conversion tracking and unit-economics validation`,
+      `Releasing the ${unreleasedReserveAmount.toLocaleString("en-US")} ${budgetCurrency} (${Math.max(0, 100 - carveOutPct)}%) held reserve before achieving 15+ verified conversions (confidence >= 0.80)`,
+      ...(gatedPaidChannels.length > 0
+        ? [
+            `Deploying ${gatedPaidChannels.join(", ")} before accumulating >= 1,000 engaged custom audience members and >= 1,500 landing page visits from TikTok within 21 days`,
+          ]
+        : []),
+    ],
+    whatHoldPermits: [
+      isOrganicOnlyPlan
+        ? `Full organic content production and publishing cadence across ${initialTestingChannelLabel} ($0 monetary ad spend)`
+        : `Controlled initial validation testing up to the ${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency} (${carveOutPct}%) learning allowance inside the ${formattedBudgetLabel} monthly envelope on ${initialTestingChannelLabel} once conversion tracking is active`,
+      `Full organic content creation and publishing cadence (2 Reels/wk, 2 Posts/wk, 1 Story/day, 1 Carousel/wk, 1 Video/wk) including ${
+        supportingOrganicChannels.map((s) => s.channelName).join(", ") || "organic social channels"
+      }`,
+      "Conversion tracking verification, creative hook validation (CPC <= $2.50, CTR >= 0.8%), and retargeting audience pool seeding",
+    ],
+    killSwitchTriggers: [
+      bgOutput?.commercialStrategy?.killTriggerThreshold ||
+        "Pause paid validation if CPA exceeds 1.3x target for 48 hours or conversion rate drops below 50% of baseline after 250 clicks.",
+      ...(withdrawalTriggerText ? [withdrawalTriggerText] : []),
+    ],
+    expansionPrecondition:
+      bgOutput?.commercialStrategy?.expansionPrecondition ||
+      "Requires 15+ verified conversions with statistical confidence >= 0.80 AND post-purchase emotional resonance score >= 40 across a 7-day window.",
+  };
+
+  return {
+    totalBudget: `${totalBudgetNum} ${budgetCurrency}`.trim(),
+    currency: budgetCurrency,
+    totalMonthlyBudget: totalBudgetNum,
+    period: "monthly",
+    budgetSettingsVersion: budgetVersion,
+    budgetConfirmation: isBudgetUnconfirmed ? "unconfirmed" : "user_confirmed",
+    isAssumption: isBudgetUnconfirmed,
+    provenance: isBudgetUnconfirmed
+      ? `Unconfirmed budget setting (${formattedBudgetLabel}). Does not authorize paid ad spend until confirmed.`
+      : `User-confirmed budget setting (${formattedBudgetLabel}).`,
+    budgetDenominators: denominators,
+    authorityHierarchy,
+    monthlyBudgetEnvelope,
+    finalPlannedChannelAllocation,
+    initialTestingAllowance,
+    unreleasedReserve,
+    actualSpend,
+    productionAndOrganicEffort,
+    holdPolicy,
+    channelPrerequisites,
+    testingAndScalingGuidance: {
+      governorRole: "authoritative_final_allocator",
+      preliminaryRecommenderRole: "channel_selection_preliminary",
+      spendAction,
+      spendPace,
+      learningBudgetCarveOutPct: carveOutPct,
+      initialValidationTestBudget: initialTestDollarAmount,
+      unreleasedReserveBudget: unreleasedReserveAmount,
+      initialTestingPlan: isOrganicOnlyPlan
+        ? `Use the user-confirmed ${formattedBudgetLabel}/month campaign envelope in 100% organic sweat-equity mode ($0 monetary ad spend), focusing the initial ${carveOutPct}% validation phase on ${initialTestingChannelLabel} to acquire baseline engagement-to-conversion benchmarks.`
+        : `Use the user-confirmed ${formattedBudgetLabel}/month budget envelope (conditional full-budget channel allocation: ${finalSummaryStr}), deploying an initial ${carveOutPct}% validation allowance (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency} inside the ${formattedBudgetLabel} envelope — not extra spend) on ${initialTestingChannelLabel} while holding ${unreleasedReserveAmount.toLocaleString("en-US")} ${budgetCurrency} (80%) in reserve.${gatedNotice}`,
+      scalingHoldCondition: `Hold full-scale expansion (${unreleasedReserveAmount.toLocaleString("en-US")} ${budgetCurrency} unreleased reserve) beyond the initial ${carveOutPct}% testing allowance (${initialTestDollarAmount.toLocaleString("en-US")} ${budgetCurrency}) until initial live testing achieves 15+ verified conversions (confidence >= 0.80) and clears channel prerequisites.`,
+      paidMediaAllocationSummary: paidAllocations
+        .map(
+          (a: any) =>
+            `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount || 0).toLocaleString("en-US")} ${budgetCurrency}/mo conditional full-budget allocation)`,
+        )
+        .join("; "),
+      organicProductionAllocationSummary:
+        organicAllocations.length > 0
+          ? organicAllocations
+              .map(
+                (a: any) =>
+                  `${a.channelName || a.channelId}: ${a.sharePercentage}% (${Number(a.monthlyAmount || 0).toLocaleString("en-US")} ${budgetCurrency}/mo organic effort weighting; $0 monetary ad spend)`,
+              )
+              .join("; ")
+          : supportingOrganicChannels
+              .map((s) => `${s.channelName}: SUPPORTING nurture ($0 monetary spend; existing production capacity)`)
+              .join("; "),
+    },
+    channels: denominators.reconciledAllocations.map((a: any) => {
+      const prereq = channelPrerequisites.find((cp) => cp.channelId === a.channelId || cp.channelName === a.channelName);
+      return {
+        channelId: a.channelId,
+        channelName: a.channelName,
+        sharePercentage: a.sharePercentage,
+        monthlyAmount: a.monthlyAmount,
+        why: a.why,
+        isOrganic: a.isOrganic,
+        proposedUse: a.proposedUse,
+        spendCategory: a.spendCategory,
+        allocationBasis: a.isOrganic
+          ? "ORGANIC_EFFORT_WEIGHTING_ZERO_AD_SPEND"
+          : "CONDITIONAL_FULL_BUDGET_ALLOCATION",
+        readinessStatus: prereq?.readinessStatus || "READY_FOR_CONTROLLED_VALIDATION_TEST",
+        initialTestingEligibility: prereq?.initialTestingEligibility || "ELIGIBLE_WITHIN_1000_CARVEOUT",
+        prerequisiteSummary: prereq?.prerequisiteSummary || null,
+      };
+    }),
+    breakdown: denominators.reconciledAllocations.map((a: any) => {
+      const prereq = channelPrerequisites.find((cp) => cp.channelId === a.channelId || cp.channelName === a.channelName);
+      return {
+        category: a.channelName || a.channelId,
+        percentage: a.sharePercentage,
+        monthlyAmount: a.monthlyAmount,
+        purpose: a.proposedUse || a.why || "Channel marketing allocation",
+        isOrganic: a.isOrganic,
+        spendCategory: a.spendCategory,
+        allocationBasis: a.isOrganic
+          ? "ORGANIC_EFFORT_WEIGHTING_ZERO_AD_SPEND"
+          : "CONDITIONAL_FULL_BUDGET_ALLOCATION",
+        readinessStatus: prereq?.readinessStatus || "READY_FOR_CONTROLLED_VALIDATION_TEST",
+        prerequisiteSummary: prereq?.prerequisiteSummary || null,
+      };
+    }),
   };
 }
 

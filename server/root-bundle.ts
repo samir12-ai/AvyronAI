@@ -404,12 +404,30 @@ export async function lockRootBundle(
     throw new Error(`[RootBundle] LINEAGE_MISMATCH_REJECTED: Cannot lock root bundle with incompatible dependencies: ${mismatchSummary}`);
   }
 
+  // Preserve the rootBundleId currently pinned by the designated active APPROVED plan
+  // so locking a candidate draft bundle does not mark the approved plan's bundle stale.
+  const [designatedActivePlan] = await db
+    .select({ rootBundleId: strategicPlans.rootBundleId })
+    .from(strategicPlans)
+    .where(
+      and(
+        eq(strategicPlans.campaignId, campaignId),
+        eq(strategicPlans.accountId, accountId),
+        eq(strategicPlans.isDesignatedActive, true),
+        eq(strategicPlans.status, "APPROVED")
+      )
+    )
+    .limit(1);
+
+  const pinnedActiveBundleId = designatedActivePlan?.rootBundleId || null;
+
   await db.update(rootBundles)
     .set({ status: "stale", staleAt: new Date(), staleReason: "new_version_created" })
     .where(and(
       eq(rootBundles.campaignId, campaignId),
       eq(rootBundles.accountId, accountId),
       eq(rootBundles.status, "active"),
+      ...(pinnedActiveBundleId ? [sql`${rootBundles.id} != ${pinnedActiveBundleId}`] : []),
     ));
 
   const version = await getNextVersion(campaignId, accountId);

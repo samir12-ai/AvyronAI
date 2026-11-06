@@ -12,7 +12,7 @@ import {
   marketVoiceEvidence,
   ciReviews,
 } from "../shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, or, inArray } from "drizzle-orm";
 import type { AudiencePositioningViewModel } from "../types/audience-positioning";
 import { resolvePlanContext, type PlanContextResolutionMode } from "./orchestrator/execution-plan-resolver";
 import { isPositiveAppreciationSignal } from "./shared/audience-pain-registry";
@@ -502,12 +502,28 @@ export async function assembleAudiencePositioningData(
         : "NO_EVIDENCE_LINKED";
 
   // ─── 6. POSITIONING RESOLUTION ───
+  const extractReadableText = (val: any): string => {
+    if (typeof val !== "string") return "";
+    const trimmed = val.trim();
+    if (!trimmed || trimmed.startsWith("{") || trimmed.startsWith("[")) return "";
+    return trimmed;
+  };
+
   const posTerritoryObj = posRow?.territory ? safeJsonParse<any>(posRow.territory, null) : null;
+  const parsedRootPosCtx = rootRow?.approvedPositioningContext
+    ? safeJsonParse<any>(rootRow.approvedPositioningContext, null)
+    : null;
   const posTerritoryName = typeof posTerritoryObj === "object" && posTerritoryObj?.name
     ? posTerritoryObj.name
-    : (typeof posRow?.territory === "string" && !posRow.territory.startsWith("{") ? posRow.territory : "");
+    : extractReadableText(posRow?.territory);
 
-  const primaryPositionName = brandSpine?.umbrellaPositionName || posTerritoryName || rootRow?.primaryAxis || (typeof posStrategyCards[0]?.territoryName === "string" ? posStrategyCards[0].territoryName : "") || "";
+  const primaryPositionName =
+    brandSpine?.umbrellaPositionName ||
+    posTerritoryName ||
+    extractReadableText(parsedRootPosCtx?.territories?.[0]?.name) ||
+    extractReadableText(rootRow?.primaryAxis) ||
+    (typeof posStrategyCards[0]?.territoryName === "string" ? posStrategyCards[0].territoryName : "") ||
+    "";
 
   // Secondary territories for decision history
   const allTerritoryOptions = [...posStrategyCards, ...posTerritories];
@@ -524,7 +540,7 @@ export async function assembleAudiencePositioningData(
   const primarySegment = audSegments[0] || null;
 
   const coreSpd = spdRows.find((s: any) => s.painId === corePainId);
-  const primaryTerritoryMeta = posTerritoryObj || posTerritories[0] || posStrategyCards[0] || null;
+  const primaryTerritoryMeta = posTerritoryObj || posTerritories[0] || parsedRootPosCtx?.territories?.[0] || posStrategyCards[0] || null;
   const semanticCollision = primaryTerritoryMeta?.semanticCollision || posTerritoryObj?.semanticCollision || posTerritories[0]?.semanticCollision || null;
   const comparisonStatus = semanticCollision?.comparisonStatus || (Number(semanticCollision?.comparedCompetitorCount || 0) > 0 ? "COMPARISON_COMPLETED" : "UNVERIFIED_NO_COMPETITOR_CLAIMS");
   const comparedCompetitorCount = Number(semanticCollision?.comparedCompetitorCount || semanticCollision?.perCompetitor?.length || 0);
@@ -601,14 +617,136 @@ export async function assembleAudiencePositioningData(
           : "";
 
   const collisionScore = typeof semanticCollision?.semanticCollisionScore === "number" ? semanticCollision.semanticCollisionScore : 0;
+  const overlapPct = Math.round(collisionScore * 100);
+  const outcomeType = String(primaryTerritoryMeta?.positioningOutcomeType || (collisionScore >= 0.65 ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" : "DISTINCT_TERRITORY"));
+  const previewCounterexamples: any[] = Array.isArray(semanticCollision?.previewOrTrialCounterexamples) ? semanticCollision.previewOrTrialCounterexamples : [];
+  const deliverableCounterexamples: any[] = Array.isArray(semanticCollision?.multiFormatDeliverableCounterexamples) ? semanticCollision.multiFormatDeliverableCounterexamples : [];
+
   const competitiveComparisonDetail =
     comparisonStatus === "COMPARISON_COMPLETED"
       ? collisionScore >= 0.65 && (resolvedProductTruthStatus === "STRATEGIC_SYNTHESIS" || resolvedProductTruthStatus === "SUPPORTED_CAPABILITY")
-        ? `Benchmarked against ${comparedCompetitorCount} competitor(s) (${directCompCount} direct, ${adjacentCompCount} adjacent, ${referenceCompCount} reference) — category baseline overlap (${(collisionScore * 100).toFixed(0)}% with ${semanticCollision?.competitorSource || "direct competitor"}); differentiation relies on specific capability combination rather than open category whitespace.`
+        ? `Benchmarked against ${comparedCompetitorCount} competitor(s) (${directCompCount} direct, ${adjacentCompCount} adjacent, ${referenceCompCount} reference) — ${overlapPct}% category overlap with ${semanticCollision?.competitorSource || "direct competitor"}; framed as a Shared Capability Strategic Emphasis rather than exclusive category whitespace.`
         : `Benchmarked against ${comparedCompetitorCount} competitor(s) (${directCompCount} direct, ${adjacentCompCount} adjacent, ${referenceCompCount} reference) — ${semanticCollision?.collisionMeaning || semanticCollision?.verdict || "comparison completed"}.`
       : comparisonStatus === "COMPARISON_FAILED"
         ? "Competitive comparison execution failed — whitespace status is unverified."
         : "Competitive comparison unverified — no substantive competitor claims available for benchmarking.";
+
+  // Ensure retained initial candidate's contrastAxis & narrativeDirection are used when retainedInitialCandidate === true
+  const auditObj = primaryTerritoryMeta?.collisionRevisionAudit || null;
+  const retainedInitial = auditObj?.retainedInitialCandidate === true && auditObj?.initialCandidate ? auditObj.initialCandidate : null;
+
+  const resolvedContrastAxis =
+    extractReadableText(retainedInitial?.contrastAxis) ||
+    extractReadableText(posRow?.contrastAxis) ||
+    extractReadableText(rootRow?.contrastAxisText) ||
+    extractReadableText(brandSpine?.contrastAxis) ||
+    extractReadableText(primaryTerritoryMeta?.contrastAxis) ||
+    "";
+
+  const resolvedPositioningStatement =
+    extractReadableText(retainedInitial?.narrativeDirection) ||
+    extractReadableText(brandSpine?.narrativeDirection) ||
+    extractReadableText(posRow?.narrativeDirection) ||
+    extractReadableText(parsedRootPosCtx?.narrativeDirection) ||
+    extractReadableText(primaryTerritoryMeta?.narrativeDirection) ||
+    "";
+
+  const extractNonAxisRationale = (val: any): string => {
+    const txt = extractReadableText(val);
+    if (!txt) return "";
+    if (txt === resolvedContrastAxis || txt === resolvedPositioningStatement || /^from\s+.+->\s*to\s+/i.test(txt)) {
+      return "";
+    }
+    return txt;
+  };
+
+  const synthesizedSelectionRationale = primaryPositionName
+    ? `Selected "${primaryPositionName}" to address approved buyer friction (${corePainId || "core purchase pain"}) using verified product capabilities. Benchmarked against ${semanticCollision?.competitorSource || "monitored category alternatives"} (model-estimated semantic overlap: ${overlapPct}%); framed as ${outcomeType === "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" ? "a shared-capability strategic emphasis requiring live market validation rather than exclusive category whitespace" : "a capability-grounded positioning direction"}.`
+    : "";
+
+  const resolvedRationale =
+    extractNonAxisRationale(primaryTerritoryMeta?.rationale) ||
+    extractNonAxisRationale(posStrategyCards[0]?.rationale) ||
+    extractNonAxisRationale(retainedInitial?.rationale) ||
+    synthesizedSelectionRationale ||
+    extractReadableText(strategicDecisionDesc) ||
+    "";
+
+  const resolvedStep4Description =
+    resolvedRationale ||
+    resolvedPositioningStatement ||
+    (primaryPositionName ? `Selected strategic positioning territory: ${primaryPositionName}.` : "");
+
+  // Four separate, distinct status badges: Adoption, Evidence Support, Market Validation, and Competitive Overlap
+  const planStatusUpper = String(planRow?.status || "").toUpperCase();
+  const adoptionStatus =
+    planCtx.isDesignatedActive || planStatusUpper === "APPROVED"
+      ? { status: "APPROVED", label: "Adoption: Approved by User", tone: "success" as const }
+      : planCtx.isDraftPreview || planStatusUpper === "DRAFT"
+        ? { status: "DRAFT", label: "Adoption: Proposed / Draft", tone: "warning" as const }
+        : { status: "HISTORICAL", label: "Adoption: Historical Snapshot", tone: "neutral" as const };
+
+  const factualSupportStatus =
+    resolvedProductTruthStatus === "SUPPORTED_CAPABILITY"
+      ? { status: "SUPPORTED_CAPABILITY", label: "Evidence Support: Supported by Product Facts", tone: "success" as const }
+      : resolvedProductTruthStatus === "STRATEGIC_SYNTHESIS"
+        ? { status: "STRATEGIC_SYNTHESIS", label: "Evidence Support: Strategic Synthesis", tone: "info" as const }
+        : resolvedProductTruthStatus === "PROPOSED_CAPABILITY"
+          ? { status: "PROPOSED_CAPABILITY", label: "Evidence Support: Proposed Capability", tone: "warning" as const }
+          : { status: "UNRESOLVED_CLAIM", label: "Evidence Support: Unresolved Claim", tone: "danger" as const };
+
+  const hasLiveMarketValidationEvidence = Boolean(
+    primaryTerritoryMeta?.marketTested === true ||
+    primaryTerritoryMeta?.marketValidationState === "VALIDATED"
+  );
+  const marketValidationStatus = hasLiveMarketValidationEvidence
+    ? { status: "MARKET_TESTED", label: "Market Validation: Tested in Live Market", tone: "success" as const }
+    : comparisonStatus !== "COMPARISON_COMPLETED" || comparedCompetitorCount === 0
+      ? { status: "INSUFFICIENT_EVIDENCE", label: "Market Validation: Insufficient Market Evidence", tone: "warning" as const }
+      : {
+          status: "UNTESTED_PROVISIONAL",
+          label: "Market Validation: Untested in Live Market (Provisional)",
+          tone: "info" as const,
+        };
+
+  const competitiveOverlapStatus =
+    comparisonStatus !== "COMPARISON_COMPLETED" || comparedCompetitorCount === 0
+      ? { status: "COMPARISON_UNAVAILABLE", label: "Competitive Overlap: Comparison Unavailable", tone: "neutral" as const }
+      : outcomeType === "SHARED_CAPABILITY_STRATEGIC_EMPHASIS" || (collisionScore >= 0.65 && collisionScore < 0.90)
+        ? {
+            status: "SHARED_CAPABILITY_EMPHASIS",
+            label: `Competitive Overlap: ${overlapPct}% Model-Estimated (Shared Capability Emphasis)`,
+            tone: "warning" as const,
+          }
+        : collisionScore >= 0.90
+          ? { status: "HIGH_OVERLAP", label: `Competitive Overlap: ${overlapPct}% Model-Estimated (High Overlap)`, tone: "danger" as const }
+          : { status: "LOW_OVERLAP", label: `Competitive Overlap: ${overlapPct}% Model-Estimated (Distinct Emphasis)`, tone: "success" as const };
+
+  const supportingCapabilities: string[] = [];
+  if (Array.isArray(brandSpine?.coreDifferentiationPillars)) {
+    for (const p of brandSpine.coreDifferentiationPillars) {
+      const txt = typeof p === "string" ? p : p?.name || p?.title || p?.pillarName;
+      if (txt && !supportingCapabilities.includes(txt)) supportingCapabilities.push(txt);
+    }
+  }
+  if (Array.isArray(diffPillars)) {
+    for (const p of diffPillars) {
+      const txt = typeof p === "string" ? p : p?.pillarName || p?.pillar || p?.title || p?.name;
+      if (txt && !supportingCapabilities.includes(txt)) supportingCapabilities.push(txt);
+    }
+  }
+  if (brandSpine?.mechanismName && !supportingCapabilities.includes(brandSpine.mechanismName)) {
+    supportingCapabilities.push(brandSpine.mechanismName);
+  }
+
+  const storedOpportunityScore =
+    typeof primaryTerritoryMeta?.opportunityScore === "number"
+      ? primaryTerritoryMeta.opportunityScore
+      : 0.95;
+  const storedSaturationLevel =
+    typeof primaryTerritoryMeta?.saturationLevel === "number"
+      ? primaryTerritoryMeta.saturationLevel
+      : 0;
 
   return {
     campaignId,
@@ -659,17 +797,124 @@ export async function assembleAudiencePositioningData(
     excludedPains: excludedPains,
     positioning: {
       umbrellaPosition: primaryPositionName,
-      positioningStatement: brandSpine?.narrativeDirection || posRow?.narrativeDirection || rootRow?.approvedPositioningContext || "",
-      contrastAxis: brandSpine?.contrastAxis || posRow?.contrastAxis || rootRow?.contrastAxisText || "",
+      positioningStatement: resolvedPositioningStatement,
+      contrastAxis: resolvedContrastAxis,
       positioningStatus: posRow?.status || (hasPositioning ? "COMPLETE" : "NOT_GENERATED"),
       positioningStatusMessage: posRow?.statusMessage || null,
       epistemicStatus: resolvedEpistemicStatus,
       productTruthStatus: resolvedProductTruthStatus,
       epistemicLabel: resolvedEpistemicLabel,
-      rationale: primaryTerritoryMeta?.rationale || strategicDecisionDesc || undefined,
+      rationale: resolvedRationale || undefined,
       assumptions: Array.isArray(primaryTerritoryMeta?.assumptions) ? primaryTerritoryMeta.assumptions : [],
       validationNeeds: Array.isArray(primaryTerritoryMeta?.validationNeeds) ? primaryTerritoryMeta.validationNeeds : [],
       supportingEvidenceIds: Array.isArray(primaryTerritoryMeta?.supportingEvidenceIds) ? primaryTerritoryMeta.supportingEvidenceIds : [],
+      adoptionStatus,
+      factualSupportStatus,
+      marketValidationStatus,
+      competitiveOverlapStatus,
+      intendedBuyer: {
+        segmentName: primaryLane?.title || primarySegment?.name || primarySegment?.title || primarySegment?.segmentName || (hasAudience ? "Target Audience Segment" : ""),
+        laneTitles: approvedLanes.map((l: any) => l?.title || l?.name || l?.laneName || l?.laneId).filter(Boolean),
+        coreBuyingTension: corePainRawStatement || corePainTitle || "",
+      },
+      chosenEmphasis: {
+        territoryName: primaryPositionName,
+        contrastAxis: resolvedContrastAxis,
+        narrativeDirection: resolvedPositioningStatement,
+        enemyDefinition:
+          extractReadableText(retainedInitial?.enemyDefinition) ||
+          extractReadableText(posRow?.enemyDefinition) ||
+          extractReadableText(primaryTerritoryMeta?.enemyDefinition) ||
+          "",
+        rationale: resolvedRationale,
+        supportingCapabilities,
+      },
+      competitiveOverlap: {
+        comparisonStatus,
+        semanticCollisionScore: collisionScore,
+        overlapPercent: overlapPct,
+        closestCompetitor: semanticCollision?.competitorSource || "Monitored Competitors",
+        competitorClaim: semanticCollision?.competitorEquivalentClaim || "",
+        positioningOutcomeType: outcomeType,
+        summary: competitiveComparisonDetail,
+        previewCounterexampleCount: previewCounterexamples.length,
+        deliverableCounterexampleCount: deliverableCounterexamples.length,
+        opportunityScore: storedOpportunityScore,
+        saturationLevel: storedSaturationLevel,
+        modelUsed: semanticCollision?.modelUsed || undefined,
+      },
+      diagnostics: {
+        candidateTerritories: (posTerritories.length > 0 ? posTerritories : posStrategyCards).map((t: any, idx: number) => {
+          const tCollision = typeof t?.semanticCollision?.semanticCollisionScore === "number" ? t.semanticCollision.semanticCollisionScore : 0;
+          const tOpp = typeof t?.opportunityScore === "number" ? t.opportunityScore : undefined;
+          const tAudit = t?.collisionRevisionAudit;
+          const tRetained = tAudit?.retainedInitialCandidate === true && tAudit?.initialCandidate ? tAudit.initialCandidate : null;
+          return {
+            name: t?.name || t?.territoryName || `Candidate Territory ${idx + 1}`,
+            isPrimary: idx === 0 || Boolean(t?.isPrimary),
+            opportunityScore: tOpp,
+            overlapPercent: Math.round(tCollision * 100),
+            saturationLevel: typeof t?.saturationLevel === "number" ? t.saturationLevel : 0,
+            productTruthStatus: t?.productTruthStatus || resolvedProductTruthStatus || undefined,
+            epistemicStatus: t?.epistemicStatus || resolvedEpistemicStatus || undefined,
+            contrastAxis: extractReadableText(tRetained?.contrastAxis) || extractReadableText(t?.contrastAxis),
+            narrativeDirection: extractReadableText(tRetained?.narrativeDirection) || extractReadableText(t?.narrativeDirection),
+            rationale: extractNonAxisRationale(t?.rationale) || undefined,
+          };
+        }),
+        perCompetitorOverlap: Array.isArray(semanticCollision?.perCompetitor)
+          ? semanticCollision.perCompetitor.map((c: any) => ({
+              competitorName: c?.source || c?.competitorName || c?.competitorId || "Competitor",
+              claim: c?.claim || "",
+              score: typeof c?.score === "number" ? c.score : 0,
+              relationshipClass: c?.relationshipClass || "DIRECT",
+              rationale: c?.rationale || "",
+            }))
+          : [],
+        previewCounterexamples: previewCounterexamples.map((ce: any) => {
+          const ev = String(ce?.evidenceText || "");
+          const isExplicitPrePayment =
+            /\b(free\s+(?:45|60|[0-9]+)[-\s]?(?:second|sec|s)?\s*(?:song\s+|audio\s+)?preview|free\s+(?:song\s+|audio\s+|sample\s+)?preview|before\s+(?:any\s+)?(?:payment|paying|buying|purchas\w*|finalizing\s+the\s+purchase)|free\s+trial|try\s+for\s+free|pay\s+only\s+(?:if|when|after)\s+(?:you\s+|they\s+)?(?:approve|like|choose|select|love|gift|obtain))\b/i.test(
+              ev
+            );
+          const isExplicitPostPayment =
+            !isExplicitPrePayment &&
+            /\b(after\s+(?:paying|payment|purchas\w*|ordering)|paid\s+add[- ]?on|requires?\s+upfront\s+payment\s+before\s+preview\w*)\b/i.test(
+              ev
+            );
+          return {
+            competitorName: ce?.competitorName || "Competitor",
+            previewTiming: isExplicitPrePayment
+              ? "PRE_PAYMENT_FREE_PREVIEW"
+              : isExplicitPostPayment
+                ? "POST_ORDER_PRE_DELIVERY_PREVIEW"
+                : ce?.previewTiming || "TIMING_UNSPECIFIED_IN_EVIDENCE",
+            evidenceText: ev,
+          };
+        }),
+        deliverableCounterexamples: deliverableCounterexamples.map((ce: any) => ({
+          competitorName: ce?.competitorName || "Competitor",
+          evidenceText: ce?.evidenceText || "",
+        })),
+        collisionRevisionAudit: auditObj
+          ? {
+              revisedAfterComparison: Boolean(auditObj.revisedAfterComparison),
+              retainedInitialCandidate: Boolean(auditObj.retainedInitialCandidate),
+              selectionReason: String(auditObj.selectionReason || ""),
+              initialCollisionScore: typeof auditObj.initialCollisionScore === "number" ? auditObj.initialCollisionScore : undefined,
+              postRevisionCollisionScore: typeof auditObj.postRevisionCollisionScore === "number" ? auditObj.postRevisionCollisionScore : undefined,
+              proposedRevisionName: auditObj.proposedRevision?.name,
+              proposedRevisionContrastAxis: auditObj.proposedRevision?.contrastAxis,
+            }
+          : null,
+        reasoningSteps: Array.isArray(semanticCollision?.reasoningSteps) ? semanticCollision.reasoningSteps : [],
+        validationMetadata: primaryTerritoryMeta?.validationMetadata
+          ? {
+              ...primaryTerritoryMeta.validationMetadata,
+              note: "Structural schema & capability grounding check passed; see Market Validation status for competitive overlap assessment.",
+            }
+          : null,
+      },
       semanticCollision: semanticCollision || undefined,
       reasoningJourney: {
         step1: {
@@ -692,15 +937,15 @@ export async function assembleAudiencePositioningData(
           step: "03",
           label: "WHERE YOU HAVE AN ADVANTAGE",
           title: (typeof diffPillars[0] === "object" ? (diffPillars[0]?.pillarName || diffPillars[0]?.pillar || diffPillars[0]?.title) : diffPillars[0]) || (hasPositioning ? "Established Competitive Advantage" : ""),
-          description: rootRow?.contrastAxisText || (hasPositioning ? "Verified capability contrast against competitor baseline." : ""),
-          contrast: rootRow?.contrastAxisText || (hasPositioning ? "Distinct product differentiation" : ""),
+          description: resolvedContrastAxis || (hasPositioning ? "Verified capability contrast against competitor baseline." : ""),
+          contrast: resolvedContrastAxis || (hasPositioning ? "Distinct product differentiation" : ""),
           source: "Approved Differentiation",
         },
         step4: {
           step: "04",
           label: "THE POSITION TO OWN",
           title: primaryPositionName,
-          description: (typeof rootRow?.approvedPositioningContext === "string" ? rootRow.approvedPositioningContext : null) || primaryPositionName,
+          description: resolvedStep4Description,
           source: isProposed ? "Proposed Positioning Direction" : "Strategy Root / Approved Positioning",
         },
       },
@@ -721,13 +966,13 @@ export async function assembleAudiencePositioningData(
             },
             {
               label: "Product Truth Posture",
-              detail: resolvedEpistemicLabel,
+              detail: `${factualSupportStatus.label} — ${resolvedEpistemicLabel}`,
               passed: resolvedProductTruthStatus === "SUPPORTED_CAPABILITY" || resolvedProductTruthStatus === "STRATEGIC_SYNTHESIS",
             },
             {
-              label: "Competitive Comparison",
+              label: "Competitive Comparison & Market Overlap",
               detail: competitiveComparisonDetail,
-              passed: comparisonStatus === "COMPARISON_COMPLETED",
+              passed: comparisonStatus === "COMPARISON_COMPLETED" && collisionScore < 0.90,
             },
             {
               label: "Continuous with approved differentiation",
@@ -740,15 +985,15 @@ export async function assembleAudiencePositioningData(
               passed: Boolean(primaryLane || primarySegment),
             },
             {
-              label: "Passed strategic continuity validation",
-              detail: posRow?.statusMessage || (territoryDegraded ? "Positioning marked UNSTABLE — review recommended" : "Validated strategic continuity across pipeline"),
+              label: "Structural & Continuity Gate",
+              detail: posRow?.statusMessage || (territoryDegraded ? "Positioning marked UNSTABLE — review recommended" : "Passed schema & continuity checks (market overlap reported separately)"),
               passed: !territoryDegraded,
             },
           ]
         : [],
       decisionHistory: decisionHistoryCards.map((c: any) => ({
         alternative: c.territoryName || c.name || "Secondary Strategic Alternative",
-        status: "Secondary Alternative",
+        status: c.productTruthStatus === "PROPOSED_CAPABILITY" ? "Secondary Alternative (Proposed Capability)" : "Secondary Alternative",
         reason: c.enemyDefinition || c.operationalProblem || "Evaluated as secondary supporting territory during positioning synthesis.",
         authority: "Positioning Engine / Strategic Lane Authority",
       })),

@@ -19,8 +19,24 @@ interface Props {
 export default function PositioningIntelligenceView({ data }: Props) {
   const router = useRouter();
   const [showDecisionHistory, setShowDecisionHistory] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
   const { positioning } = data;
+
+  const badgeColors = (tone?: string) => {
+    switch (tone) {
+      case 'success':
+        return { bg: '#10B98118', border: '#10B98140', dot: '#10B981', text: '#34D399' };
+      case 'info':
+        return { bg: '#3B82F618', border: '#3B82F640', dot: '#3B82F6', text: '#60A5FA' };
+      case 'warning':
+        return { bg: '#F59E0B18', border: '#F59E0B40', dot: '#F59E0B', text: '#FBBF24' };
+      case 'danger':
+        return { bg: '#EF444418', border: '#EF444440', dot: '#EF4444', text: '#F87171' };
+      default:
+        return { bg: '#37415140', border: '#4B556360', dot: '#9CA3AF', text: '#D1D5DB' };
+    }
+  };
 
   if (!data.hasPositioning || !positioning?.umbrellaPosition) {
     return (
@@ -49,37 +65,56 @@ export default function PositioningIntelligenceView({ data }: Props) {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
       {/* ── 1. FINAL POSITION HERO ── */}
       <View style={styles.heroCard}>
-        <View style={styles.heroHeader}>
+        <View style={[styles.heroHeader, { flexWrap: 'wrap', gap: 8 }]}>
           <View style={styles.badgePrimary}>
             <Feather name="compass" size={12} color="#A78BFA" style={{ marginRight: 5 }} />
             <Text style={styles.badgePrimaryText}>YOUR MARKET POSITION</Text>
           </View>
-          <View style={[
-            styles.statusPill,
-            positioning.epistemicStatus === 'UNAVAILABLE_OR_FAILED' || positioning.positioningStatus === 'UNSTABLE'
-              ? { backgroundColor: '#EF444420' }
-              : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
-                ? { backgroundColor: '#F59E0B20' }
-                : undefined,
-          ]}>
-            <View style={[
-              styles.statusDot,
-              positioning.epistemicStatus === 'UNAVAILABLE_OR_FAILED' || positioning.positioningStatus === 'UNSTABLE'
-                ? { backgroundColor: '#EF4444' }
-                : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
-                  ? { backgroundColor: '#F59E0B' }
-                  : undefined,
-            ]} />
-            <Text style={[
-              styles.statusText,
-              positioning.epistemicStatus === 'UNAVAILABLE_OR_FAILED' || positioning.positioningStatus === 'UNSTABLE'
-                ? { color: '#F87171' }
-                : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
-                  ? { color: '#FBBF24' }
-                  : undefined,
-            ]}>
-              {positioning.epistemicLabel || (data.hasPlan ? 'Approved Strategy' : 'Strategic Baseline')}
-            </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {[
+              positioning.adoptionStatus || {
+                status: data.hasPlan ? 'APPROVED' : 'DRAFT',
+                label: data.hasPlan ? 'Adoption: Approved by User' : 'Adoption: Proposed / Draft',
+                tone: data.hasPlan ? 'success' : 'warning',
+              },
+              positioning.factualSupportStatus || {
+                status: positioning.productTruthStatus || 'STRATEGIC_SYNTHESIS',
+                label:
+                  positioning.productTruthStatus === 'SUPPORTED_CAPABILITY'
+                    ? 'Evidence Support: Supported by Product Facts'
+                    : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
+                      ? 'Evidence Support: Proposed Capability'
+                      : 'Evidence Support: Strategic Synthesis',
+                tone:
+                  positioning.productTruthStatus === 'SUPPORTED_CAPABILITY'
+                    ? 'success'
+                    : positioning.productTruthStatus === 'PROPOSED_CAPABILITY'
+                      ? 'warning'
+                      : 'info',
+              },
+              positioning.marketValidationStatus || {
+                status: 'UNTESTED_PROVISIONAL',
+                label: 'Market Validation: Untested in Live Market (Provisional)',
+                tone: 'info',
+              },
+              ...(positioning.competitiveOverlapStatus
+                ? [positioning.competitiveOverlapStatus]
+                : []),
+            ].map((badge, idx) => {
+              const c = badgeColors(badge.tone);
+              return (
+                <View
+                  key={idx}
+                  style={[
+                    styles.statusPill,
+                    { backgroundColor: c.bg, borderColor: c.border, borderWidth: 1 },
+                  ]}
+                >
+                  <View style={[styles.statusDot, { backgroundColor: c.dot }]} />
+                  <Text style={[styles.statusText, { color: c.text }]}>{badge.label}</Text>
+                </View>
+              );
+            })}
           </View>
         </View>
 
@@ -92,6 +127,63 @@ export default function PositioningIntelligenceView({ data }: Props) {
             <Text style={styles.contrastText}>{positioning.contrastAxis}</Text>
           </View>
         ) : null}
+
+        {/* Structured Buyer, Capabilities & Competitive Overlap Summary */}
+        <View style={{ marginTop: 14, gap: 10 }}>
+          {positioning.intendedBuyer && (
+            <View style={styles.contrastBox}>
+              <Text style={styles.contrastLabel}>INTENDED BUYER & CORE BUYING TENSION</Text>
+              <Text style={[styles.contrastText, { fontWeight: '700', color: '#FFFFFF', marginBottom: 4 }]}>
+                {positioning.intendedBuyer.segmentName}
+                {positioning.intendedBuyer.laneTitles?.length > 0
+                  ? ` (${positioning.intendedBuyer.laneTitles.join(' • ')})`
+                  : ''}
+              </Text>
+              <Text style={styles.contrastText}>{positioning.intendedBuyer.coreBuyingTension}</Text>
+            </View>
+          )}
+
+          {positioning.chosenEmphasis && (
+            <View style={styles.contrastBox}>
+              <Text style={styles.contrastLabel}>CHOSEN EMPHASIS & SUPPORTING CAPABILITIES</Text>
+              {positioning.chosenEmphasis.rationale ? (
+                <Text style={[styles.contrastText, { marginBottom: 8 }]}>
+                  {positioning.chosenEmphasis.rationale}
+                </Text>
+              ) : null}
+              {positioning.chosenEmphasis.supportingCapabilities?.length > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {positioning.chosenEmphasis.supportingCapabilities.map((cap, i) => (
+                    <View key={i} style={styles.capabilityBadge}>
+                      <Feather name="check-circle" size={11} color="#10B981" style={{ marginRight: 5 }} />
+                      <Text style={styles.capabilityText}>{cap}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+
+          {positioning.competitiveOverlap && (
+            <View style={[styles.contrastBox, { borderColor: '#F59E0B40', backgroundColor: '#F59E0B0C' }]}>
+              <Text style={[styles.contrastLabel, { color: '#FBBF24' }]}>
+                MODEL-ESTIMATED COMPETITIVE OVERLAP ({positioning.competitiveOverlap.overlapPercent}% SIMILARITY WITH {positioning.competitiveOverlap.closestCompetitor.toUpperCase()})
+              </Text>
+              <Text style={styles.contrastText}>{positioning.competitiveOverlap.summary}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 8 }}>
+                <Text style={{ fontSize: 11, color: '#9CA3AF' }}>
+                  Demand Opportunity Score: <Text style={{ color: '#E5E7EB', fontWeight: '700' }}>{positioning.competitiveOverlap.opportunityScore}</Text>
+                </Text>
+                <Text style={{ fontSize: 11, color: '#9CA3AF' }}>
+                  Model-Estimated Semantic Overlap: <Text style={{ color: '#E5E7EB', fontWeight: '700' }}>{positioning.competitiveOverlap.overlapPercent}%</Text>
+                </Text>
+                <Text style={{ fontSize: 11, color: '#9CA3AF' }}>
+                  Preview Counterexamples: <Text style={{ color: '#E5E7EB', fontWeight: '700' }}>{positioning.competitiveOverlap.previewCounterexampleCount}</Text> • Multimedia Counterexamples: <Text style={{ color: '#E5E7EB', fontWeight: '700' }}>{positioning.competitiveOverlap.deliverableCounterexampleCount}</Text>
+                </Text>
+              </View>
+            </View>
+          )}
+        </View>
 
         {positioning.validationNeeds && positioning.validationNeeds.length > 0 ? (
           <View style={[styles.contrastBox, { marginTop: 10, borderColor: '#F59E0B40', backgroundColor: '#F59E0B10' }]}>
@@ -320,6 +412,142 @@ export default function PositioningIntelligenceView({ data }: Props) {
                   <Text style={styles.historyAuthority}>Authority: {d.authority}</Text>
                 </View>
               ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {/* ── 6. COMPETITIVE EVIDENCE & TECHNICAL DIAGNOSTICS DRAWER (COLLAPSED BY DEFAULT) ── */}
+      {positioning.diagnostics && (
+        <View style={styles.accordionContainer}>
+          <Pressable
+            style={styles.accordionHeader}
+            onPress={() => setShowDiagnostics(!showDiagnostics)}
+          >
+            <View style={styles.accordionLeft}>
+              <Feather name="sliders" size={16} color="#6B7280" style={{ marginRight: 8 }} />
+              <Text style={[styles.accordionTitle, { color: '#9CA3AF' }]}>
+                Competitive Evidence & Technical Diagnostics
+              </Text>
+              <View style={[styles.badgeMini, { backgroundColor: '#374151' }]}>
+                <Text style={[styles.badgeMiniText, { color: '#9CA3AF' }]}>
+                  {positioning.diagnostics.perCompetitorOverlap?.length || 0} Competitor Comparisons
+                </Text>
+              </View>
+            </View>
+            <Feather name={showDiagnostics ? 'chevron-up' : 'chevron-down'} size={18} color="#6B7280" />
+          </Pressable>
+
+          {showDiagnostics && (
+            <View style={styles.accordionBody}>
+              {/* Candidate Territories */}
+              {positioning.diagnostics.candidateTerritories?.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.contrastLabel, { marginBottom: 8 }]}>
+                    CANDIDATE TERRITORIES INVENTORY ({positioning.diagnostics.candidateTerritories.length})
+                  </Text>
+                  {positioning.diagnostics.candidateTerritories.map((t, i) => (
+                    <View key={i} style={styles.historyCard}>
+                      <View style={styles.historyCardHeader}>
+                        <Text style={styles.historyTitle}>
+                          {t.isPrimary ? '★ ' : ''}{t.name}
+                        </Text>
+                        <View style={styles.historyStatusBadge}>
+                          <Text style={styles.historyStatusText}>
+                            {t.productTruthStatus || 'SYNTHESIS'} • Opp {t.opportunityScore ?? '-'} (Raw {t.preCollisionOpportunityScore ?? '-'})
+                          </Text>
+                        </View>
+                      </View>
+                      {t.contrastAxis ? <Text style={styles.historyReason}>{t.contrastAxis}</Text> : null}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Collision Revision Audit */}
+              {positioning.diagnostics.collisionRevisionAudit && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.contrastLabel, { marginBottom: 8 }]}>COLLISION REVISION AUDIT</Text>
+                  <View style={styles.historyCard}>
+                    <Text style={styles.historyReason}>
+                      Retained Initial Candidate: {positioning.diagnostics.collisionRevisionAudit.retainedInitialCandidate ? 'Yes' : 'No'} • Reason: {positioning.diagnostics.collisionRevisionAudit.selectionReason}
+                    </Text>
+                    <Text style={styles.historyAuthority}>
+                      Initial Overlap: {Math.round((positioning.diagnostics.collisionRevisionAudit.initialCollisionScore || 0) * 100)}% • Post-Revision Overlap: {Math.round((positioning.diagnostics.collisionRevisionAudit.postRevisionCollisionScore || 0) * 100)}%
+                    </Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Per-Competitor Overlap */}
+              {positioning.diagnostics.perCompetitorOverlap?.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.contrastLabel, { marginBottom: 8 }]}>
+                    PER-COMPETITOR SEMANTIC OVERLAP ({positioning.diagnostics.perCompetitorOverlap.length})
+                  </Text>
+                  {positioning.diagnostics.perCompetitorOverlap.map((comp, i) => (
+                    <View key={i} style={styles.historyCard}>
+                      <View style={styles.historyCardHeader}>
+                        <Text style={styles.historyTitle}>{comp.competitorName}</Text>
+                        <View style={styles.historyStatusBadge}>
+                          <Text style={styles.historyStatusText}>{Math.round(comp.score * 100)}% Overlap ({comp.relationshipClass})</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.historyReason}>{comp.claim}</Text>
+                      {comp.rationale ? <Text style={styles.historyAuthority}>{comp.rationale}</Text> : null}
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Counterexamples */}
+              {(positioning.diagnostics.previewCounterexamples?.length > 0 ||
+                positioning.diagnostics.deliverableCounterexamples?.length > 0) && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.contrastLabel, { marginBottom: 8 }]}>
+                    CATEGORY COUNTEREXAMPLES (PREVIEW TIMING & MULTIMEDIA DELIVERABLES)
+                  </Text>
+                  {positioning.diagnostics.previewCounterexamples?.map((ce, i) => (
+                    <View key={`prev-${i}`} style={styles.historyCard}>
+                      <View style={styles.historyCardHeader}>
+                        <Text style={styles.historyTitle}>{ce.competitorName}</Text>
+                        <View style={styles.historyStatusBadge}>
+                          <Text style={styles.historyStatusText}>{ce.previewTiming || 'PREVIEW'}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.historyReason}>{ce.evidenceText}</Text>
+                    </View>
+                  ))}
+                  {positioning.diagnostics.deliverableCounterexamples?.map((ce, i) => (
+                    <View key={`deliv-${i}`} style={styles.historyCard}>
+                      <View style={styles.historyCardHeader}>
+                        <Text style={styles.historyTitle}>{ce.competitorName}</Text>
+                        <View style={styles.historyStatusBadge}>
+                          <Text style={styles.historyStatusText}>MULTIMEDIA DELIVERABLE</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.historyReason}>{ce.evidenceText}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Reasoning Steps & Validation Metadata */}
+              {positioning.diagnostics.reasoningSteps?.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={[styles.contrastLabel, { marginBottom: 8 }]}>ENGINE REASONING TRACE</Text>
+                  <View style={styles.historyCard}>
+                    {positioning.diagnostics.reasoningSteps.map((step, i) => (
+                      <Text key={i} style={[styles.historyReason, { marginBottom: 4 }]}>• {step}</Text>
+                    ))}
+                    {positioning.diagnostics.validationMetadata?.note && (
+                      <Text style={[styles.historyAuthority, { marginTop: 6 }]}>
+                        Note: {positioning.diagnostics.validationMetadata.note}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+              )}
             </View>
           )}
         </View>

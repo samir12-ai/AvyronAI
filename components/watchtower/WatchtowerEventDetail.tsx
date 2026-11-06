@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { useWatchtowerEventDetail } from '@/hooks/useWatchtowerEventDetail';
 import { formatWatchtowerDate } from '@/utils/watchtower-date-formatter';
 import { getApiUrl } from '@/lib/query-client';
+import { formatWatchtowerComparison, type WatchtowerStructuredComparison } from '@shared/perception-translator';
 
 interface Props {
   campaignId: string | null;
@@ -14,6 +15,7 @@ interface Props {
 
 export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: Props) {
   const router = useRouter();
+  const [showRawJson, setShowRawJson] = React.useState(false);
   const { data: detailData, isLoading, isError, error } = useWatchtowerEventDetail(campaignId, eventId);
 
   if (!eventId) return null;
@@ -88,6 +90,20 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
   const linkedScenarioId = presentation.linkedScenarioId || null;
   const investigationStatus = presentation.investigationStatus || null;
   const competitorName = competitors?.[0]?.competitorName || 'Market Competitor';
+  const structuredComparison: WatchtowerStructuredComparison =
+    observation.structuredComparison ||
+    formatWatchtowerComparison({
+      kind: event?.semanticKind,
+      prev: observation?.diff?.prev,
+      curr: observation?.diff?.curr,
+      evidence: {
+        notes: evidenceNotes,
+        prev: observation?.diff?.prev,
+        curr: observation?.diff?.curr,
+      },
+      hasBaseline: Boolean(lineage?.baselineSnapshotId) || observation?.diff?.prev !== undefined,
+      failureCode: strategicBrief?.failureCode ?? null,
+    });
 
   const openEvidenceUrl = (rawUrl: string) => {
     try {
@@ -282,7 +298,7 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
         )}
 
         {/* BEFORE / AFTER OBSERVATION & BUSINESS RELEVANCE */}
-        {(observation.diff || evidenceNotes.length > 0 || observation.businessRelevance) && (
+        {(observation.diff || observation.structuredComparison || evidenceNotes.length > 0 || observation.businessRelevance) && (
           <View style={[styles.sectionBlock, { marginBottom: 18 }]}>
             <View style={styles.sectionBlockHeader}>
               <View style={[styles.iconCircle, { backgroundColor: '#F59E0B20' }]}>
@@ -291,22 +307,146 @@ export default function WatchtowerEventDetail({ campaignId, eventId, onClose }: 
               <Text style={styles.sectionBlockTitle}>Before / After Observation & Business Relevance</Text>
             </View>
 
-            {observation.diff && (observation.diff.prev != null || observation.diff.curr != null) ? (
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 10, marginBottom: 12 }}>
-                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#1E1B2E', borderWidth: 1, borderColor: '#3B3355' }}>
-                  <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Before</Text>
-                  <Text style={{ fontSize: 13, color: '#E5E7EB', fontWeight: '600' }}>{String(observation.diff.prev ?? '—')}</Text>
+            {(observation.diff || observation.structuredComparison) ? (
+              <View style={{ marginTop: 10, marginBottom: 14, gap: 12 }}>
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                  <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#1E1B2E', borderWidth: 1, borderColor: '#3B3355' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase' }}>
+                        Before ({lineage?.baselineSnapshotId ? 'Baseline Snapshot' : 'No Baseline'})
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#A78BFA', fontWeight: '700', textTransform: 'uppercase' }}>
+                        {structuredComparison.beforeValueState}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: '#E5E7EB', fontWeight: '500', lineHeight: 19 }}>
+                      {structuredComparison.beforeSummary}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#132A26', borderWidth: 1, borderColor: '#10B98150' }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <Text style={{ fontSize: 11, color: '#34D399', fontWeight: '700', textTransform: 'uppercase' }}>
+                        Observed Now (Current Snapshot)
+                      </Text>
+                      <Text style={{ fontSize: 10, color: '#6EE7B7', fontWeight: '700', textTransform: 'uppercase' }}>
+                        {structuredComparison.afterValueState}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 13, color: '#ECFDF5', fontWeight: '600', lineHeight: 19 }}>
+                      {structuredComparison.afterSummary}
+                    </Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1, padding: 12, borderRadius: 8, backgroundColor: '#132A26', borderWidth: 1, borderColor: '#10B98150' }}>
-                  <Text style={{ fontSize: 11, color: '#34D399', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Observed Now</Text>
-                  <Text style={{ fontSize: 13, color: '#ECFDF5', fontWeight: '700' }}>{String(observation.diff.curr ?? '—')}</Text>
+
+                {structuredComparison.rows && structuredComparison.rows.length > 0 ? (
+                  <View style={{ borderRadius: 10, backgroundColor: '#0B0F19', borderWidth: 1, borderColor: '#1E293B', padding: 12, gap: 10 }}>
+                    <Text style={{ fontSize: 11, color: '#94A3B8', fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                      Labelled Field-by-Field Comparison ({structuredComparison.categoryLabel})
+                    </Text>
+                    {structuredComparison.rows.map((row, rIdx) => {
+                      const badgeBg =
+                        row.changeType === 'added'
+                          ? '#10B98120'
+                          : row.changeType === 'removed'
+                          ? '#EF444420'
+                          : row.changeType === 'modified'
+                          ? '#F59E0B20'
+                          : '#33415550';
+                      const badgeColor =
+                        row.changeType === 'added'
+                          ? '#34D399'
+                          : row.changeType === 'removed'
+                          ? '#F87171'
+                          : row.changeType === 'modified'
+                          ? '#FBBF24'
+                          : '#94A3B8';
+                      return (
+                        <View
+                          key={rIdx}
+                          style={{
+                            padding: 10,
+                            borderRadius: 8,
+                            backgroundColor: '#111827',
+                            borderWidth: 1,
+                            borderColor: '#1F2937',
+                            gap: 6,
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#E2E8F0' }}>{row.label}</Text>
+                            {row.changeType ? (
+                              <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, backgroundColor: badgeBg }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: badgeColor, textTransform: 'uppercase' }}>
+                                  {row.changeType}
+                                </Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 10 }}>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 10, color: '#64748B', fontWeight: '700', marginBottom: 2 }}>BEFORE</Text>
+                              <Text style={{ fontSize: 12, color: '#CBD5E1', lineHeight: 17 }}>{row.before}</Text>
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '700', marginBottom: 2 }}>AFTER</Text>
+                              <Text style={{ fontSize: 12, color: '#ECFDF5', lineHeight: 17 }}>{row.after}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+
+                {structuredComparison.methodologyNote ? (
+                  <View style={{ padding: 12, borderRadius: 8, backgroundColor: '#F59E0B15', borderWidth: 1, borderColor: '#F59E0B40', flexDirection: 'row', gap: 10 }}>
+                    <Feather name="alert-circle" size={16} color="#FBBF24" style={{ marginTop: 2 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: '#FBBF24', fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 }}>
+                        Comparison Methodology & Evidence Verification
+                      </Text>
+                      <Text style={{ fontSize: 12, color: '#FDE68A', lineHeight: 18 }}>
+                        {structuredComparison.methodologyNote}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+
+                <View>
+                  <Pressable
+                    onPress={() => setShowRawJson((prev) => !prev)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      alignSelf: 'flex-start',
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      borderRadius: 6,
+                      backgroundColor: '#1E293B',
+                      borderWidth: 1,
+                      borderColor: '#334155',
+                    }}
+                  >
+                    <Feather name={showRawJson ? 'chevron-up' : 'code'} size={13} color="#94A3B8" />
+                    <Text style={{ fontSize: 11, color: '#CBD5E1', fontWeight: '600' }}>
+                      {showRawJson ? 'Hide Technical / Raw Evidence JSON' : 'Show Technical / Raw Evidence JSON'}
+                    </Text>
+                  </Pressable>
+                  {showRawJson ? (
+                    <View style={{ marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: '#090D16', borderWidth: 1, borderColor: '#1E293B' }}>
+                      <Text style={{ fontSize: 11, color: '#94A3B8', fontFamily: 'monospace' }}>
+                        {structuredComparison.rawTechnicalJson}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               </View>
             ) : null}
 
             {observation.businessRelevance ? (
               <View style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Why This Matters to Zeytun Atelier</Text>
+                <Text style={{ fontSize: 11, color: '#9CA3AF', fontWeight: '700', textTransform: 'uppercase', marginBottom: 4 }}>Why This Matters to Your Strategy</Text>
                 <Text style={{ fontSize: 13, color: '#E2E8F0', lineHeight: 20 }}>{observation.businessRelevance}</Text>
               </View>
             ) : null}

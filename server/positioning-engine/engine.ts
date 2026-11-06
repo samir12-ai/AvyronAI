@@ -579,12 +579,14 @@ export interface CompactCompetitorComparisonContext {
     competitorId?: string;
     sourceId: string;
     evidenceText: string;
+    previewTiming?: "PRE_PAYMENT_FREE_PREVIEW" | "POST_ORDER_PRE_DELIVERY_PREVIEW";
   }>;
   multiFormatDeliverableCounterexamples: Array<{
     competitorName: string;
     competitorId?: string;
     sourceId: string;
     evidenceText: string;
+    previewTiming?: "PRE_PAYMENT_FREE_PREVIEW" | "POST_ORDER_PRE_DELIVERY_PREVIEW";
   }>;
   competitorProfiles: Array<{
     competitorName: string;
@@ -644,8 +646,12 @@ export function buildCompactCompetitorComparisonContext(args: {
     return p;
   };
 
+  const PRE_PAYMENT_PREVIEW_REGEX =
+    /\b(free\s+(?:45|60|[0-9]+)[-\s]?(?:second|sec|s)?\s*(?:song\s+|audio\s+)?preview|free\s+(?:song\s+|audio\s+|sample\s+)?preview|preview\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*)|listen\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*)|free\s+trial|try\s+for\s+free|pay\s+only\s+(?:if|when|after)\s+(?:you\s+)?(?:approve|like|choose|select|love|gift|obtain)|sample\s+before\s+purchas\w*)\b/i;
+  const POST_ORDER_PREVIEW_REGEX =
+    /\b(preview\s+(?:your\s+song\s+)?before\s+(?:final\s+)?deliver\w*|review\s+before\s+(?:final\s+)?deliver\w*|listen\s+before\s+(?:final\s+)?deliver\w*)\b/i;
   const PREVIEW_TRIAL_REGEX =
-    /\b(free\s+(?:45|60|[0-9]+)[-\s]?(?:second|sec|s)?\s*(?:song\s+|audio\s+)?preview|free\s+(?:song\s+|audio\s+|sample\s+)?preview|preview\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*)|listen\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*)|free\s+trial|try\s+for\s+free|pay\s+only\s+(?:if|when|after)\s+(?:you\s+)?(?:approve|like|choose|select|love)|sample\s+before\s+purchas\w*)\b/i;
+    /\b(free\s+(?:45|60|[0-9]+)[-\s]?(?:second|sec|s)?\s*(?:song\s+|audio\s+)?preview|free\s+(?:song\s+|audio\s+|sample\s+)?preview|preview\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*|final\s+deliver\w*)|listen\s+before\s+(?:you\s+)?(?:pay|buy|purchas\w*|final\s+deliver\w*)|free\s+trial|try\s+for\s+free|pay\s+only\s+(?:if|when|after)\s+(?:you\s+)?(?:approve|like|choose|select|love|gift|obtain)|sample\s+before\s+purchas\w*)\b/i;
   const MULTI_DELIVERABLE_REGEX =
     /\b(lyric\s+video|music\s+video|photo\s+slideshow|video\s+slideshow|slideshow|cover\s+art|custom\s+artwork|album\s+art|lyric\s+sheet|printable\s+lyrics?|framed\s+lyrics?|acrylic\s+plaque|wall\s+art|vinyl|cd\b|custom\s+sharing\s+page|dedicated\s+song\s+page|video\s+trim|mp4)\b/i;
 
@@ -757,11 +763,21 @@ export function buildCompactCompetitorComparisonContext(args: {
     const previewTerms = Array.from(p.previewOrPaymentTerms);
     const delivs = Array.from(p.deliverables);
     if (previewTerms.length > 0) {
+      const evText = previewTerms[0];
+      const EXPLICIT_POST_PAYMENT_PREVIEW_REGEX =
+        /\b(after\s+(?:paying|payment|purchas\w*|ordering)|paid\s+add[- ]?on|requires?\s+upfront\s+payment\s+before\s+preview\w*)\b/i;
+      const previewTiming: "PRE_PAYMENT_FREE_PREVIEW" | "POST_ORDER_PRE_DELIVERY_PREVIEW" | "TIMING_UNSPECIFIED_IN_EVIDENCE" =
+        PRE_PAYMENT_PREVIEW_REGEX.test(evText)
+          ? "PRE_PAYMENT_FREE_PREVIEW"
+          : EXPLICIT_POST_PAYMENT_PREVIEW_REGEX.test(evText)
+            ? "POST_ORDER_PRE_DELIVERY_PREVIEW"
+            : "TIMING_UNSPECIFIED_IN_EVIDENCE";
       previewOrTrialCounterexamples.push({
         competitorName: p.competitorName,
         competitorId: p.competitorId,
         sourceId: p.sourceId,
-        evidenceText: previewTerms[0],
+        evidenceText: evText,
+        previewTiming: previewTiming as any,
       });
     }
     if (delivs.length > 0) {
@@ -795,7 +811,7 @@ export function buildCompactCompetitorComparisonContext(args: {
     : `- ${args.initialCollision?.competitorSource || "monitored competitor"}: "${args.initialCollision?.competitorEquivalentClaim || ""}"`;
 
   const previewCounterLines = previewOrTrialCounterexamples.length > 0
-    ? previewOrTrialCounterexamples.map(c => `- ${c.competitorName} [${c.sourceId}]: ${c.evidenceText}`).join("\n")
+    ? previewOrTrialCounterexamples.map(c => `- ${c.competitorName} [${c.sourceId}] (${c.previewTiming || "PRE_PAYMENT_FREE_PREVIEW"}): ${c.evidenceText}`).join("\n")
     : "None recorded in structured competitor snapshots.";
 
   const delivCounterLines = multiFormatDeliverableCounterexamples.length > 0
@@ -5417,10 +5433,12 @@ REVISION RULES (STRICT EVIDENCE FIDELITY & NON-ARTIFICIAL DIFFERENTIATION):
 
   for (const t of finalTerritories) {
     if (t.semanticCollision?.comparisonStatus === "COMPARISON_COMPLETED") {
-      t.narrativeDistanceScore = Math.round(Math.max(0.05, 1 - t.semanticCollision.semanticCollisionScore) * 100) / 100;
+      const colScore = t.semanticCollision.semanticCollisionScore;
+      t.narrativeDistanceScore = Math.round(Math.max(0.05, 1 - colScore) * 100) / 100;
+      (t as any).overlapPercent = Math.round(colScore * 100);
       if (!(t as any).positioningOutcomeType) {
         (t as any).positioningOutcomeType =
-          t.semanticCollision.semanticCollisionScore >= 0.35
+          colScore >= 0.35
             ? "SHARED_CAPABILITY_STRATEGIC_EMPHASIS"
             : "SUPPORTED_COMPETITIVE_DISTINCTION";
       }
@@ -5436,6 +5454,14 @@ REVISION RULES (STRICT EVIDENCE FIDELITY & NON-ARTIFICIAL DIFFERENTIATION):
       t.epistemicLabel = "Proposed Strategic Hypothesis — Comparison Unavailable (Requires Market Validation)";
       const compNeed = "Competitive positioning comparison unavailable — requires market validation before asserting competitive exclusivity";
       t.validationNeeds = Array.from(new Set([...(t.validationNeeds || []), compNeed]));
+    }
+    // If collisionRevisionAudit retained INITIAL candidate, guarantee territory fields match initialCandidate
+    const revAudit = (t as any).collisionRevisionAudit;
+    if (revAudit?.retainedInitialCandidate && revAudit?.initialCandidate) {
+      t.name = revAudit.initialCandidate.name || t.name;
+      t.enemyDefinition = revAudit.initialCandidate.enemyDefinition || t.enemyDefinition;
+      t.contrastAxis = revAudit.initialCandidate.contrastAxis || t.contrastAxis;
+      t.narrativeDirection = revAudit.initialCandidate.narrativeDirection || t.narrativeDirection;
     }
     // Ensure every territory has a distinct explanation/rationale (never a raw contrastAxis string)
     if (!t.rationale || t.rationale.trim() === t.contrastAxis?.trim() || t.rationale.trim() === t.narrativeDirection?.trim() || /^from\s+.+->\s*to\s+/i.test(t.rationale.trim())) {
@@ -5612,7 +5638,6 @@ REVISION RULES (STRICT EVIDENCE FIDELITY & NON-ARTIFICIAL DIFFERENTIATION):
     enemyDefinition: primaryTerritory?.enemyDefinition || "",
     contrastAxis: primaryTerritory?.contrastAxis || "",
     narrativeDirection: primaryTerritory?.narrativeDirection || "",
-    rationale: primaryTerritory?.rationale || "",
     differentiationVector: JSON.stringify(differentiationAxes),
     proofSignals: JSON.stringify(primaryTerritory?.evidenceSignals || []),
     strategyCards: JSON.stringify(strategyCards),
@@ -5631,10 +5656,27 @@ REVISION RULES (STRICT EVIDENCE FIDELITY & NON-ARTIFICIAL DIFFERENTIATION):
   await pruneOldSnapshots(db, positioningSnapshots, campaignId, 20, accountId);
 
   try {
-    const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
-    const inv = await invalidateDownstreamOnRegeneration(campaignId, accountId, "positioning");
-    if (inv.supersededRoots > 0) {
-      console.log(`[PositioningEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+    const { strategicPlans } = await import("@shared/schema");
+    const [designatedApprovedPlan] = await db
+      .select({ id: strategicPlans.id })
+      .from(strategicPlans)
+      .where(
+        and(
+          eq(strategicPlans.campaignId, campaignId),
+          eq(strategicPlans.isDesignatedActive, true),
+          eq(strategicPlans.status, "APPROVED")
+        )
+      )
+      .limit(1);
+
+    if (!designatedApprovedPlan) {
+      const { invalidateDownstreamOnRegeneration } = await import("../shared/strategy-root");
+      const inv = await invalidateDownstreamOnRegeneration(campaignId, accountId, "positioning");
+      if (inv.supersededRoots > 0) {
+        console.log(`[PositioningEngine-V3] ROOT_INVALIDATED | superseded=${inv.supersededRoots}`);
+      }
+    } else {
+      console.log(`[PositioningEngine-V3] Preserving active strategyRoot for designated APPROVED plan ${designatedApprovedPlan.id}`);
     }
   } catch (invErr: any) {
     console.error(`[PositioningEngine-V3] Root invalidation failed (non-blocking): ${invErr.message}`);

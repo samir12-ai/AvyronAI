@@ -78,6 +78,116 @@ function getFreshnessState(date: Date): { age: string; status: string } {
   return { age: `${days}d`, status: "historical" };
 }
 
+export function formatCompetitorWebCorpusSummary(
+  competitorUnderstandingRaw: unknown,
+  pagesCrawledRaw: unknown
+): string {
+  const parts: string[] = [];
+
+  const parseIfJson = (v: unknown): any => {
+    if (!v) return null;
+    if (typeof v === "string") {
+      const t = v.trim();
+      if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+        try {
+          return JSON.parse(t);
+        } catch {
+          return t;
+        }
+      }
+      return t;
+    }
+    return v;
+  };
+
+  const cu = parseIfJson(competitorUnderstandingRaw);
+  if (cu) {
+    if (typeof cu === "string") {
+      parts.push(cu);
+    } else if (typeof cu === "object") {
+      const extractText = (val: any): string => {
+        if (!val) return "";
+        if (typeof val === "string" || typeof val === "number") return String(val).trim();
+        if (Array.isArray(val)) {
+          return val
+            .map((item) =>
+              typeof item === "string"
+                ? item.trim()
+                : item?.statement || item?.claim || item?.title || item?.name || item?.description || item?.text || ""
+            )
+            .filter(Boolean)
+            .join("; ");
+        }
+        if (typeof val === "object") {
+          return (
+            val.statement ||
+            val.summary ||
+            val.description ||
+            val.corePromise ||
+            val.valueProposition ||
+            Object.entries(val)
+              .filter(([, v]) => typeof v === "string" || typeof v === "number")
+              .map(([k, v]) => `${k}: ${v}`)
+              .join(", ")
+          );
+        }
+        return "";
+      };
+
+      const fields: Array<[string, any]> = [
+        ["Summary", cu.summary || cu.executiveSummary || cu.businessIdentity],
+        ["Value Proposition", cu.valueProposition || cu.corePromise || cu.primaryPromise],
+        ["Primary Offering", cu.primaryOffering || cu.coreOffer || cu.offerings],
+        ["Key Claims", cu.keyClaims || cu.claims || cu.productTruthFacts || cu.features],
+        ["Pricing Signals", cu.pricingSignals || cu.pricing || cu.pricingModel],
+        ["Differentiators", cu.differentiators || cu.uniqueMechanism],
+      ];
+      for (const [label, val] of fields) {
+        const text = extractText(val);
+        if (text) parts.push(`${label}: ${text}`);
+      }
+      if (parts.length === 0) {
+        const fallbackEntries = Object.entries(cu)
+          .map(([k, v]) => {
+            const t = extractText(v);
+            return t ? `${k}: ${t}` : "";
+          })
+          .filter(Boolean);
+        if (fallbackEntries.length > 0) parts.push(fallbackEntries.join(" | "));
+      }
+    }
+  }
+
+  const pages = parseIfJson(pagesCrawledRaw);
+  if (pages) {
+    if (typeof pages === "string") {
+      parts.push(pages);
+    } else if (Array.isArray(pages)) {
+      const pageSummaries = pages
+        .slice(0, 6)
+        .map((p: any) => {
+          if (typeof p === "string") return p;
+          if (!p || typeof p !== "object") return "";
+          const label = p.pageType || p.title || p.url || "page";
+          const body =
+            p.summary ||
+            p.textSnippet ||
+            p.metaDescription ||
+            (Array.isArray(p.headings) ? p.headings.slice(0, 4).join(", ") : "") ||
+            (typeof p.text === "string" ? p.text.slice(0, 220) : "") ||
+            (typeof p.markdown === "string" ? p.markdown.slice(0, 220) : "");
+          return body ? `[${label}] ${body.replace(/\s+/g, " ").trim()}` : `[${label}]`;
+        })
+        .filter(Boolean);
+      if (pageSummaries.length > 0) {
+        parts.push(`Crawled Pages (${pages.length}): ${pageSummaries.join(" ; ")}`);
+      }
+    }
+  }
+
+  return parts.filter(Boolean).join(" | ");
+}
+
 export async function buildStrategicContext(
   eventId: string,
   campaignId: string,
@@ -258,11 +368,11 @@ export async function buildStrategicContext(
       .from(strategyRootBundles)
       .where(eq(strategyRootBundles.id, activePlan.rootBundleId))
       .limit(1);
-    if (bundle?.strategyRootId) {
+    if ((bundle as any)?.strategyRootId) {
       const [rootByBundle] = await db
         .select()
         .from(strategyRoots)
-        .where(eq(strategyRoots.id, bundle.strategyRootId))
+        .where(eq(strategyRoots.id, (bundle as any).strategyRootId))
         .limit(1);
       activeRoot = rootByBundle;
     }
@@ -603,12 +713,10 @@ export async function buildStrategicContext(
       .map((p) => (p.caption || "").trim())
       .filter(Boolean)
       .join(" | ");
-    const currentWebCorpus = [
-      latestWebUnderstanding?.competitorUnderstanding || "",
-      latestWebSnap?.pagesCrawled || "",
-    ]
-      .filter(Boolean)
-      .join(" | ");
+    const currentWebCorpus = formatCompetitorWebCorpusSummary(
+      latestWebUnderstanding?.competitorUnderstanding,
+      latestWebSnap?.pagesCrawled
+    );
 
     if (recentStoredPosts.length > 0) {
       const fresh = getFreshnessState(recentStoredPosts[0].timestamp || new Date());

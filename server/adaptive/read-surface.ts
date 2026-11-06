@@ -28,6 +28,12 @@ import {
 } from "./contracts";
 import { evaluateWindowState } from "../pipeline/eval-windows";
 import { evaluateRhythmCompliance } from "../pipeline/lanes/user/rhythm-compliance";
+import {
+  formatWatchtowerComparison,
+  formatScalarOrStructuredValue,
+} from "@shared/perception-translator";
+import { buildCanonicalBudgetAuthorityModel } from "../orchestrator/plan-synthesis";
+import { resolvePlanContext } from "../orchestrator/execution-plan-resolver";
 
 export const adaptiveReadRouter = Router();
 
@@ -195,9 +201,9 @@ export function translateDecisionToBusinessLanguage(
       };
     case "STRATEGY_CHANGE_REQUIRED":
       return {
-        label: authLabel ? `Update ${authLabel}` : "Strategy Update Required",
-        actionDescription: `Confirmed evidence warrants updating ${authLabel || "the current strategy"}.`,
-        statusBadge: "STRATEGY_UPDATED",
+        label: authLabel ? `Update ${authLabel}` : "Strategy Update Proposal",
+        actionDescription: `Confirmed evidence warrants a scoped proposal to update ${authLabel || "the current strategy"}.`,
+        statusBadge: "PROPOSAL_PENDING",
       };
     case "STRATEGIC_REBUILD_REQUIRED":
       return {
@@ -815,6 +821,90 @@ adaptiveReadRouter.get("/performance-loop/overview/:campaignId", async (req: Req
       reportingTimezone,
     };
 
+    let budgetEvaluationTargets: any = null;
+    if (effAccId) {
+      try {
+        const buildPlanBudgetTarget = async (targetPlan: any) => {
+          if (!targetPlan) return null;
+          const pCtx = await resolvePlanContext({
+            accountId: String(effAccId),
+            campaignId: String(campaignId),
+            specificPlanId: targetPlan.id,
+            mode: "SPECIFIC_PLAN",
+          });
+          let bgRes: any = null;
+          if (pCtx.snapshotIds.budgetGovernorSnapshotId) {
+            const [bgRow] = await db
+              .select()
+              .from(schema.budgetGovernorSnapshots)
+              .where(eq(schema.budgetGovernorSnapshots.id, pCtx.snapshotIds.budgetGovernorSnapshotId))
+              .limit(1);
+            if (bgRow?.result) {
+              bgRes = typeof bgRow.result === "string" ? JSON.parse(bgRow.result) : bgRow.result;
+            }
+          }
+          let csRes: any = null;
+          if (pCtx.snapshotIds.channelSelectionSnapshotId) {
+            const [csRow] = await db
+              .select()
+              .from(schema.channelSelectionSnapshots)
+              .where(eq(schema.channelSelectionSnapshots.id, pCtx.snapshotIds.channelSelectionSnapshotId))
+              .limit(1);
+            if (csRow?.result) {
+              csRes = typeof csRow.result === "string" ? JSON.parse(csRow.result) : csRow.result;
+            }
+          }
+          const pJson = targetPlan.planJson
+            ? typeof targetPlan.planJson === "string"
+              ? JSON.parse(targetPlan.planJson)
+              : targetPlan.planJson
+            : {};
+          const canonical = buildCanonicalBudgetAuthorityModel({
+            totalMonthlyBudget: Number(pJson?.budgetAllocation?.totalMonthlyBudget ?? bgRes?.totalMonthlyBudget ?? 5000),
+            currency: pJson?.budgetAllocation?.currency || bgRes?.currency || "USD",
+            budgetSettingsVersion: Number(pJson?.budgetAllocation?.budgetSettingsVersion ?? bgRes?.budgetSettingsVersion ?? 1),
+            budgetConfirmation: "user_confirmed",
+            budgetGovernorOutput: bgRes,
+            channelSelectionOutput: csRes || pJson?.channelSelection || null,
+          });
+          return {
+            planId: targetPlan.id,
+            version: targetPlan.version,
+            rootBundleId: targetPlan.rootBundleId,
+            rootBundleVersion: targetPlan.rootBundleVersion,
+            status: targetPlan.status,
+            executionStatus: targetPlan.executionStatus,
+            isDesignatedActive: Boolean(targetPlan.isDesignatedActive),
+            authorityHierarchy: canonical.authorityHierarchy,
+            monthlyBudgetEnvelope: canonical.monthlyBudgetEnvelope,
+            finalPlannedChannelAllocation: canonical.finalPlannedChannelAllocation,
+            initialTestingAllowance: canonical.initialTestingAllowance,
+            unreleasedReserve: canonical.unreleasedReserve,
+            actualSpend: canonical.actualSpend,
+            productionAndOrganicEffort: canonical.productionAndOrganicEffort,
+            holdPolicy: canonical.holdPolicy,
+            channelPrerequisites: canonical.channelPrerequisites,
+          };
+        };
+
+        const activeCtx = await resolvePlanContext({
+          accountId: String(effAccId),
+          campaignId: String(campaignId),
+          mode: "APPROVED_ACTIVE",
+        });
+        const activeTarget = await buildPlanBudgetTarget(activeCtx.designatedActivePlan || strategicPlan);
+        const draftTarget = activeCtx.candidateDraftPlan
+          ? await buildPlanBudgetTarget(activeCtx.candidateDraftPlan)
+          : null;
+        budgetEvaluationTargets = {
+          activePlanBudgetTargets: activeTarget,
+          candidateDraftBudgetTargets: draftTarget,
+        };
+      } catch (budgetErr: any) {
+        console.warn("[AdaptiveReadRouter] budgetEvaluationTargets warning:", budgetErr?.message);
+      }
+    }
+
     if (planPerformance) {
       planPerformance.pendingClarificationRequest = pendingClarificationRequest;
       planPerformance.answeredClarificationHistory = answeredClarificationHistory;
@@ -824,6 +914,7 @@ adaptiveReadRouter.get("/performance-loop/overview/:campaignId", async (req: Req
       planPerformance.reportingTimezone = reportingTimezone;
       planPerformance.dueState = dueState;
       planPerformance.activeNotifications = activeNotifications;
+      planPerformance.budgetEvaluationTargets = budgetEvaluationTargets;
     }
 
     let historicalPerformanceCases: any[] = [];
@@ -842,6 +933,7 @@ adaptiveReadRouter.get("/performance-loop/overview/:campaignId", async (req: Req
       currentStrategyName: strategyName,
       businessUnderstanding: buData,
       planPerformance,
+      budgetEvaluationTargets,
       pendingClarificationRequest,
       answeredClarificationHistory,
       weeklyInventory,
@@ -957,6 +1049,15 @@ adaptiveReadRouter.get("/reasoning/events/:campaignId", async (req: Request, res
       }
     }
 
+    // Group events sharing the same source snapshot pair so sibling events from one crawl are linked
+    const eventsBySharedOrigin = new Map<string, string[]>();
+    for (const { event: evt } of rawEvents) {
+      const originKey = `${evt.competitorId || "unknown"}:${evt.baselineSnapshotId || "none"}:${evt.currentSnapshotId || evt.runId || "none"}`;
+      const list = eventsBySharedOrigin.get(originKey) || [];
+      list.push(evt.id);
+      eventsBySharedOrigin.set(originKey, list);
+    }
+
     const marketSignals = rawEvents.map(({ event: evt, competitor }) => {
       const signal = adaptWatchtowerEventToAdaptiveSignal(evt);
       const briefRow = briefsByEvent[evt.id] || null;
@@ -994,7 +1095,13 @@ adaptiveReadRouter.get("/reasoning/events/:campaignId", async (req: Request, res
         directionOfMovement = brief.directionOfMovement || null;
       } else if (briefStatus === "failed" || briefStatus === "insufficient_evidence") {
         intelligenceStatus = "FAILED";
-        intelligenceSummary = "Strategic intelligence analysis unavailable due to insufficient market telemetry.";
+        const violations = Array.isArray(briefRow?.deterministicViolations)
+          ? (briefRow.deterministicViolations as string[])
+          : [];
+        intelligenceSummary =
+          violations.length > 0
+            ? `Monitoring only (contradicted by current snapshot evidence): ${violations.join("; ")}`
+            : "Strategic intelligence analysis marked insufficient / monitoring only due to incomplete or contradicted market telemetry.";
       } else {
         intelligenceStatus = "PENDING";
         intelligenceSummary = "Strategic analysis in progress...";
@@ -1004,6 +1111,18 @@ adaptiveReadRouter.get("/reasoning/events/:campaignId", async (req: Request, res
         const meta = (p.metadata as any) || {};
         return meta.eventId === evt.id || p.id === parsedEv.proposalId;
       });
+
+      const structuredComparison = formatWatchtowerComparison({
+        kind: evt.kind,
+        prev: parsedEv.beforeState ?? parsedEv.prev,
+        curr: parsedEv.afterState ?? parsedEv.curr,
+        evidence: evt.evidence,
+        baselineSnapshotId: evt.baselineSnapshotId,
+        currentSnapshotId: evt.currentSnapshotId,
+      });
+
+      const originKey = `${evt.competitorId || "unknown"}:${evt.baselineSnapshotId || "none"}:${evt.currentSnapshotId || evt.runId || "none"}`;
+      const sharedOriginSiblingIds = (eventsBySharedOrigin.get(originKey) || []).filter((id) => id !== evt.id);
 
       return {
         ...signal,
@@ -1028,8 +1147,17 @@ adaptiveReadRouter.get("/reasoning/events/:campaignId", async (req: Request, res
         recommendation,
         directionOfMovement,
         hasBrief: intelligenceStatus === "READY",
-        beforeState: parsedEv.beforeState || parsedEv.prev || null,
-        afterState: parsedEv.afterState || parsedEv.curr || null,
+        beforeState:
+          typeof parsedEv.beforeState === "string" && parsedEv.beforeState.trim()
+            ? parsedEv.beforeState
+            : structuredComparison.beforeSummary,
+        afterState:
+          typeof parsedEv.afterState === "string" && parsedEv.afterState.trim()
+            ? parsedEv.afterState
+            : structuredComparison.afterSummary,
+        structuredComparison,
+        sharedOriginKey: sharedOriginSiblingIds.length > 0 ? originKey : null,
+        sharedOriginSiblingIds,
         productReferenced: parsedEv.productReferenced || null,
         segmentName: parsedEv.segmentName || null,
         laneId: parsedEv.laneId || null,
@@ -1160,8 +1288,8 @@ adaptiveReadRouter.get(["/reasoning/event-detail/:eventId", "/reasoning/events/:
     // Extract evidence items and before/after states safely
     let parsedEvidence: any[] = [];
     let parsedEvidenceObj: Record<string, any> = {};
-    let beforeStateVal: string | null = (evt as any).beforeState || (evt as any).previousValue || null;
-    let afterStateVal: string | null = (evt as any).afterState || (evt as any).currentValue || null;
+    let rawBeforeVal: unknown = (evt as any).beforeState ?? (evt as any).previousValue ?? undefined;
+    let rawAfterVal: unknown = (evt as any).afterState ?? (evt as any).currentValue ?? undefined;
     if (evt.evidence) {
       if (Array.isArray(evt.evidence)) {
         parsedEvidence = evt.evidence;
@@ -1172,17 +1300,38 @@ adaptiveReadRouter.get(["/reasoning/event-detail/:eventId", "/reasoning/events/:
             parsedEvidence = parsed;
           } else if (parsed && typeof parsed === "object") {
             parsedEvidenceObj = parsed;
-            beforeStateVal = beforeStateVal || parsed.beforeState || parsed.prev || null;
-            afterStateVal = afterStateVal || parsed.afterState || parsed.curr || null;
+            if (rawBeforeVal === undefined) {
+              rawBeforeVal = parsed.beforeState ?? parsed.prev;
+            }
+            if (rawAfterVal === undefined) {
+              rawAfterVal = parsed.afterState ?? parsed.curr;
+            }
             parsedEvidence = Array.isArray(parsed.notes)
               ? parsed.notes
-              : [parsed];
+              : [formatScalarOrStructuredValue(parsed)];
           }
         } catch {
           parsedEvidence = [{ note: evt.evidence }];
         }
       }
     }
+
+    const structuredComparison = formatWatchtowerComparison({
+      kind: evt.kind,
+      prev: rawBeforeVal,
+      curr: rawAfterVal,
+      evidence: evt.evidence,
+      baselineSnapshotId: evt.baselineSnapshotId,
+      currentSnapshotId: evt.currentSnapshotId,
+    });
+    const beforeStateVal =
+      typeof rawBeforeVal === "string" && rawBeforeVal.trim()
+        ? rawBeforeVal
+        : structuredComparison.beforeSummary;
+    const afterStateVal =
+      typeof rawAfterVal === "string" && rawAfterVal.trim()
+        ? rawAfterVal
+        : structuredComparison.afterSummary;
 
     let actionableScenario: any = null;
     if (process.env.AVYRON_DEMO_MODE === "1" && parsedEvidenceObj.linkedScenarioId) {
@@ -1237,6 +1386,7 @@ adaptiveReadRouter.get(["/reasoning/event-detail/:eventId", "/reasoning/events/:
       whatChanged: briefRow?.brief?.executiveSummary || evt.evidenceSummary || null,
       beforeState: beforeStateVal,
       afterState: afterStateVal,
+      structuredComparison,
       productReferenced: parsedEvidenceObj.productReferenced || null,
       segmentName: parsedEvidenceObj.segmentName || null,
       laneId: parsedEvidenceObj.laneId || null,
@@ -1571,58 +1721,79 @@ adaptiveReadRouter.get(["/reasoning/warning-detail/:signalId", "/reasoning/warni
 // ============================================================================
 adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res: Response) => {
   try {
-    const { campaignId } = req.params;
+    const campaignId = String(req.params.campaignId);
 
     // 1. Get current active Strategy Root & Root Bundle version via designated active plan
     const accountId = (req as any).accountId;
-    const casesLineage = await resolveDesignatedActiveLineage(campaignId, accountId);
+    const [casesLineage, initialCases] = await Promise.all([
+      resolveDesignatedActiveLineage(campaignId, accountId),
+      db
+        .select()
+        .from(schema.reasoningCases)
+        .where(eq(schema.reasoningCases.campaignId, campaignId))
+        .orderBy(desc(schema.reasoningCases.openedAt))
+        .limit(20),
+    ]);
     const currentRootVersion = casesLineage.strategyRootVersion;
     const effAccountId = accountId || casesLineage.activeRoot?.accountId || casesLineage.strategicPlan?.accountId;
-    if (effAccountId) {
+    const activeCasesUpToDate = initialCases.some(
+      (c) =>
+        !(c.status === "CLOSED" && (c.metadata as any)?.superseded === true) &&
+        c.strategyRootVersion === currentRootVersion &&
+        (c.reasoningVersion === "2.2.0-grounded-lineage" || c.reasoningVersion === "2.1.0-grounded"),
+    );
+    let cases = initialCases;
+    if (effAccountId && (!activeCasesUpToDate || req.query.sync === "1")) {
       try {
         await syncCampaignAdaptiveReasoning({ accountId: effAccountId, campaignId });
+        cases = await db
+          .select()
+          .from(schema.reasoningCases)
+          .where(eq(schema.reasoningCases.campaignId, campaignId))
+          .orderBy(desc(schema.reasoningCases.openedAt))
+          .limit(20);
       } catch (syncErr: any) {
         console.warn("[AdaptiveReadRouter] syncCampaignAdaptiveReasoning non-fatal warning:", syncErr?.message);
       }
     }
 
-    // 2. Fetch Reasoning Cases for campaign
-    const cases = await db
-      .select()
-      .from(schema.reasoningCases)
-      .where(eq(schema.reasoningCases.campaignId, campaignId))
-      .orderBy(desc(schema.reasoningCases.openedAt))
-      .limit(20);
-
     const caseIds = cases.map(c => c.id);
-    const hypothesesRows = caseIds.length > 0
-      ? await db.select().from(schema.reasoningHypotheses).where(inArray(schema.reasoningHypotheses.reasoningCaseId, caseIds))
-      : [];
-
-    const decisionsRows = caseIds.length > 0
-      ? await db.select().from(schema.adaptiveDecisions).where(inArray(schema.adaptiveDecisions.reasoningCaseId, caseIds))
-      : [];
-
-    const outcomesRows = caseIds.length > 0
-      ? await db.select().from(schema.strategyAdaptationOutcomes).where(inArray(schema.strategyAdaptationOutcomes.reasoningCaseId, caseIds))
-      : [];
-
-    const proposalsRows = await db
-      .select()
-      .from(schema.strategyChangeProposals)
-      .where(eq(schema.strategyChangeProposals.campaignId, campaignId))
-      .orderBy(desc(schema.strategyChangeProposals.createdAt))
-      .limit(10);
-
-    // Fetch all market events for campaign to resolve linked event details
-    const campaignEvents = await db
-      .select({
-        event: schema.pipelineChangeEvents,
-        competitor: schema.ciCompetitors,
-      })
-      .from(schema.pipelineChangeEvents)
-      .leftJoin(schema.ciCompetitors, eq(schema.pipelineChangeEvents.competitorId, schema.ciCompetitors.id))
-      .where(eq(schema.pipelineChangeEvents.campaignId, campaignId));
+    const [
+      hypothesesRows,
+      decisionsRows,
+      outcomesRows,
+      proposalsRows,
+      campaignEvents,
+      campaignContexts,
+    ] = await Promise.all([
+      caseIds.length > 0
+        ? db.select().from(schema.reasoningHypotheses).where(inArray(schema.reasoningHypotheses.reasoningCaseId, caseIds))
+        : Promise.resolve([]),
+      caseIds.length > 0
+        ? db.select().from(schema.adaptiveDecisions).where(inArray(schema.adaptiveDecisions.reasoningCaseId, caseIds))
+        : Promise.resolve([]),
+      caseIds.length > 0
+        ? db.select().from(schema.strategyAdaptationOutcomes).where(inArray(schema.strategyAdaptationOutcomes.reasoningCaseId, caseIds))
+        : Promise.resolve([]),
+      db
+        .select()
+        .from(schema.strategyChangeProposals)
+        .where(eq(schema.strategyChangeProposals.campaignId, campaignId))
+        .orderBy(desc(schema.strategyChangeProposals.createdAt))
+        .limit(10),
+      db
+        .select({
+          event: schema.pipelineChangeEvents,
+          competitor: schema.ciCompetitors,
+        })
+        .from(schema.pipelineChangeEvents)
+        .leftJoin(schema.ciCompetitors, eq(schema.pipelineChangeEvents.competitorId, schema.ciCompetitors.id))
+        .where(eq(schema.pipelineChangeEvents.campaignId, campaignId)),
+      db
+        .select()
+        .from(schema.performanceContexts)
+        .where(eq(schema.performanceContexts.campaignId, campaignId)),
+    ]);
 
     // Filter out test-fixture cases that reference ungrounded fixture event IDs (e.g. pce_live_conf_002) not present in campaignEvents
     // and exclude superseded cases from the active investigation list (preserving them in DB history).
@@ -1638,11 +1809,171 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
       return true;
     });
 
-    // Fetch all performance contexts for campaign
-    const campaignContexts = await db
-      .select()
-      .from(schema.performanceContexts)
-      .where(eq(schema.performanceContexts.campaignId, campaignId));
+    // Fetch strategic briefs for campaign market events
+    const campaignEventIds = campaignEvents.map((e) => e.event.id);
+    const campaignBriefs =
+      campaignEventIds.length > 0
+        ? await db
+            .select()
+            .from(schema.watchtowerStrategicBriefs)
+            .where(inArray(schema.watchtowerStrategicBriefs.eventId, campaignEventIds))
+        : [];
+    const briefByEventId = new Map<string, any>();
+    for (const b of campaignBriefs) {
+      const prev = briefByEventId.get(b.eventId);
+      if (!prev || (b.isLatest && !prev.isLatest)) {
+        briefByEventId.set(b.eventId, b);
+      }
+    }
+
+    // Group events sharing the same source snapshot pair so sibling events from one crawl are linked
+    const eventsBySharedOrigin = new Map<string, string[]>();
+    for (const { event: evt } of campaignEvents) {
+      const originKey = `${evt.competitorId || "unknown"}:${evt.baselineSnapshotId || "none"}:${evt.currentSnapshotId || evt.runId || "none"}`;
+      const list = eventsBySharedOrigin.get(originKey) || [];
+      list.push(evt.id);
+      eventsBySharedOrigin.set(originKey, list);
+    }
+
+    // Resolve all evidence IDs referenced by validCases to their actual database contents
+    const allReferencedEvIds = Array.from(
+      new Set(validCases.flatMap((c) => ((c.evidenceIds as string[]) || [])).filter(Boolean)),
+    );
+    const resolvedEvidenceMap: Record<
+      string,
+      {
+        id: string;
+        sourceType: string;
+        title: string;
+        summary: string;
+        observedAt: string | null;
+        url: string | null;
+      }
+    > = {};
+
+    if (allReferencedEvIds.length > 0) {
+      const [webRows, chanRows, clarRows, invRows, compSnapRows] = await Promise.all([
+        db
+          .select()
+          .from(schema.websiteSnapshots)
+          .where(inArray(schema.websiteSnapshots.id, allReferencedEvIds))
+          .catch(() => []),
+        db
+          .select()
+          .from(schema.userChannelSnapshots)
+          .where(inArray(schema.userChannelSnapshots.id, allReferencedEvIds))
+          .catch(() => []),
+        db
+          .select()
+          .from(schema.clarificationRequests)
+          .where(inArray(schema.clarificationRequests.id, allReferencedEvIds))
+          .catch(() => []),
+        db
+          .select()
+          .from(schema.weeklyBusinessInventories)
+          .where(
+            and(
+              eq(schema.weeklyBusinessInventories.campaignId, campaignId),
+              eq(schema.weeklyBusinessInventories.status, "COMPLETED"),
+            ),
+          )
+          .orderBy(desc(schema.weeklyBusinessInventories.periodEnd))
+          .catch(() => []),
+        db
+          .select()
+          .from(schema.pipelineSnapshots)
+          .where(inArray(schema.pipelineSnapshots.id, allReferencedEvIds))
+          .catch(() => []),
+      ]);
+
+      for (const w of webRows) {
+        const wUrl = (w as any).url || w.rootUrl || null;
+        resolvedEvidenceMap[w.id] = {
+          id: w.id,
+          sourceType: "WEBSITE_SNAPSHOT",
+          title: `Website Snapshot (${wUrl || "Primary Domain"})`,
+          summary: `Crawled ${wUrl || "website"} (${(w as any).status || "SUCCESS"}) — primary offering & landing page copy snapshot.`,
+          observedAt: formatStandardDateTime(w.createdAt),
+          url: wUrl,
+        };
+      }
+
+      for (const ch of chanRows) {
+        let snapData: any = {};
+        try {
+          snapData = typeof ch.snapshotData === "string" ? JSON.parse(ch.snapshotData) : (ch.snapshotData || {});
+        } catch {}
+        const plat = (ch.platform || "social").toUpperCase();
+        const followers = snapData.followers ?? 0;
+        const storedPosts = snapData.storedHistoricalPostCount ?? snapData.postCount ?? 0;
+        const activeWinPosts = snapData.activePlanWindowPostCount ?? 0;
+        resolvedEvidenceMap[ch.id] = {
+          id: ch.id,
+          sourceType: `OWNED_CHANNEL_${plat}`,
+          title: `${plat} Channel Snapshot (${ch.handle || snapData.handle || plat})`,
+          summary: `${followers} followers, ${storedPosts} stored historical posts, ${activeWinPosts} posts published in active plan window.`,
+          observedAt: formatStandardDateTime(ch.scrapedAt),
+          url: snapData.channelUrl || snapData.url || null,
+        };
+      }
+
+      const latestInv = invRows[0] || null;
+      for (const cr of clarRows) {
+        let ans: any = {};
+        try {
+          ans = typeof cr.structuredAnswer === "string" ? JSON.parse(cr.structuredAnswer) : (cr.structuredAnswer || {});
+        } catch {}
+        const invText = latestInv
+          ? ` Paired with completed weekly check-in (${latestInv.id}, window ${new Date(latestInv.periodStart).toISOString().slice(0, 10)} to ${new Date(latestInv.periodEnd).toISOString().slice(0, 10)}): explicitly submitted ${(latestInv as any).leadsCount ?? 0} leads, ${(latestInv as any).payingCustomersCount ?? 0} paying customers, $${(latestInv as any).adSpendAmount ?? 0} ad spend.`
+          : "";
+        resolvedEvidenceMap[cr.id] = {
+          id: cr.id,
+          sourceType: "HISTORICAL_BASELINE_AND_WINDOW_TRUTH",
+          title: "Historical Business Baseline & Weekly Commercial Check-In",
+          summary: `Operating history: ${ans.operatingDurationMonths ?? "—"} months, historical leads: ${ans.historicalLeadsCount ?? "—"}, historical paying customers: ${ans.historicalPayingCustomersCount ?? "—"}.${invText}`,
+          observedAt: formatStandardDateTime(cr.answeredAt || cr.createdAt),
+          url: null,
+        };
+      }
+
+      for (const cs of compSnapRows) {
+        let payload: any = {};
+        try {
+          payload = typeof cs.payload === "string" ? JSON.parse(cs.payload) : (cs.payload || {});
+        } catch {}
+        const patCount = Array.isArray(payload.patterns) ? payload.patterns.length : 0;
+        const offCount = Array.isArray(payload.objections) ? payload.objections.length : 0;
+        const priceCount = Array.isArray(payload.pricing) ? payload.pricing.length : 0;
+        const freq = typeof payload.frequency === "number" ? `, stored post count=${payload.frequency}` : "";
+        resolvedEvidenceMap[cs.id] = {
+          id: cs.id,
+          sourceType: "COMPETITOR_SNAPSHOT",
+          title: `Competitor Snapshot (${cs.id})`,
+          summary: `Normalized competitor snapshot (${patCount} messaging patterns, ${offCount} offer statements, ${priceCount} pricing items${freq}).`,
+          observedAt: formatStandardDateTime(cs.collectedAt),
+          url: null,
+        };
+      }
+
+      for (const { event: evt, competitor } of campaignEvents) {
+        if (allReferencedEvIds.includes(evt.id)) {
+          const comp = formatWatchtowerComparison({
+            kind: evt.kind,
+            evidence: evt.evidence,
+            baselineSnapshotId: evt.baselineSnapshotId,
+            currentSnapshotId: evt.currentSnapshotId,
+          });
+          resolvedEvidenceMap[evt.id] = {
+            id: evt.id,
+            sourceType: "WATCHTOWER_CONFIRMED_EVENT",
+            title: `${competitor?.name || "Competitor"} — ${translateEventTypeToTitle(evt.kind)} (${evt.id})`,
+            summary: `Before: ${comp.beforeSummary} → After: ${comp.afterSummary}`,
+            observedAt: formatStandardDateTime(evt.validatedAt || evt.createdAt),
+            url: competitor?.websiteUrl || null,
+          };
+        }
+      }
+    }
 
     let demoScenariosCatalog: any[] = [];
     let demoEvidenceMap: Record<string, { id: string; title: string; url: string; sourceType: string }> = {};
@@ -1700,14 +2031,21 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
               : (found?.event.evidence as any);
           if (parsedEv?.title) customEvtTitle = parsedEv.title;
         } catch {}
+        const compName = found?.competitor?.name || "Competitor";
+        const kindTitle = translateEventTypeToTitle(found?.event.kind);
         return {
           eventId: id,
           title:
             customEvtTitle ||
             matchedDemoScenario?.title ||
-            translateEventTypeToTitle(found?.event.kind),
-          competitorName: found?.competitor?.name || "Competitor",
+            `${compName}: ${kindTitle}`,
+          competitorName: compName,
+          kind: found?.event.kind || null,
           severity: found?.event.severity || "MEDIUM",
+          baselineSnapshotId: found?.event.baselineSnapshotId || null,
+          currentSnapshotId: found?.event.currentSnapshotId || null,
+          runId: found?.event.runId || null,
+          confirmedByRunId: (found?.event as any)?.confirmedByRunId || null,
         };
       });
 
@@ -1767,20 +2105,264 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
         }
       }
 
-      const supportingEvidenceLinks = ((c.evidenceIds as string[]) || [])
+      const caseEvidenceIds = (c.evidenceIds as string[]) || [];
+      const supportingEvidenceLinks = caseEvidenceIds
         .map((eid) => demoEvidenceMap[eid])
         .filter(Boolean);
+      const resolvedEvidenceItems = caseEvidenceIds.map((eid) => {
+        if (resolvedEvidenceMap[eid]) return resolvedEvidenceMap[eid];
+        if (demoEvidenceMap[eid]) {
+          return {
+            id: eid,
+            sourceType: demoEvidenceMap[eid].sourceType,
+            title: demoEvidenceMap[eid].title,
+            summary: demoEvidenceMap[eid].title,
+            observedAt: null,
+            url: demoEvidenceMap[eid].url,
+          };
+        }
+        return {
+          id: eid,
+          sourceType: "EVIDENCE_REFERENCE",
+          title: `Evidence Record (${eid})`,
+          summary: `Referenced artifact ID ${eid}`,
+          observedAt: null,
+          url: null,
+        };
+      });
+
+      const primaryEventId = (c.marketEventIds as string[] || [])[0] || null;
+      const primaryEventRow = primaryEventId
+        ? campaignEvents.find((e) => e.event.id === primaryEventId)
+        : null;
+      const primaryBriefRow = primaryEventId ? briefByEventId.get(primaryEventId) : null;
+      const primaryBrief = primaryBriefRow?.brief || null;
+      const primaryComparison = primaryEventRow
+        ? formatWatchtowerComparison({
+            kind: primaryEventRow.event.kind,
+            evidence: primaryEventRow.event.evidence,
+            baselineSnapshotId: primaryEventRow.event.baselineSnapshotId,
+            currentSnapshotId: primaryEventRow.event.currentSnapshotId,
+          })
+        : null;
+
+      const caseMeta = (c.metadata as Record<string, any>) || {};
+      const originKey = primaryEventRow
+        ? `${primaryEventRow.event.competitorId || "unknown"}:${primaryEventRow.event.baselineSnapshotId || "none"}:${primaryEventRow.event.currentSnapshotId || primaryEventRow.event.runId || "none"}`
+        : caseMeta.sharedOriginKey || null;
+      const sharedOriginSiblingIds = originKey
+        ? (eventsBySharedOrigin.get(originKey) || []).filter((id) => id !== primaryEventId)
+        : (caseMeta.sharedOriginSiblingIds || []);
+      const sharedOriginSiblingCaseIds = sharedOriginSiblingIds
+        .map((sibEvtId: string) =>
+          validCases.find((vc) => ((vc.marketEventIds as string[]) || []).includes(sibEvtId))?.id,
+        )
+        .filter(Boolean);
+
+      const matchingProposal = proposalsRows.find(p => p.reasoningCaseId === c.id) || null;
+      const propMeta = (matchingProposal?.metadata as Record<string, any>) || {};
+      const rawPatchPreview: any[] =
+        matchedDemoScenario?.beforeAfterPatchPreview ||
+        propMeta.beforeAfterPatchPreview ||
+        [];
+      const validPatchPreview = rawPatchPreview.filter((p: any) => {
+        const beforeStr = String(p?.beforeText ?? p?.before ?? "").trim();
+        const afterStr = String(p?.afterText ?? p?.after ?? "").trim();
+        const hasTarget = Boolean(p?.sectionName || p?.section || p?.taskId || p?.targetId);
+        return hasTarget && beforeStr.length > 0 && afterStr.length > 0 && beforeStr !== afterStr;
+      });
+
+      const actionableDecisionTypes = new Set([
+        "EXECUTION_RESPONSE",
+        "REEVALUATE_AUTHORITY",
+        "STRATEGY_CHANGE_REQUIRED",
+        "STRATEGIC_REBUILD_REQUIRED",
+        "TARGETED_RECOMPUTE",
+        "STRATEGIC_REBUILD",
+      ]);
+      const effectiveDecisionType = matchingProposal?.decisionType || decision?.decisionType || "";
+      const isActionableDecisionType = Boolean(
+        effectiveDecisionType && actionableDecisionTypes.has(effectiveDecisionType),
+      );
+      const isActionableProposal =
+        isActionableDecisionType &&
+        c.status !== "INSUFFICIENT_EVIDENCE" &&
+        c.status !== "CLOSED" &&
+        validPatchPreview.length > 0 &&
+        Boolean(matchingProposal || matchedDemoScenario);
+
+      const caseCategory: "EXPLANATION" | "PROPOSED_CHANGE" = isActionableProposal
+        ? "PROPOSED_CHANGE"
+        : "EXPLANATION";
+
+      const targetType: "EXECUTION" | "STRATEGY" | null = isActionableProposal
+        ? effectiveDecisionType === "EXECUTION_RESPONSE" || propMeta.targetType === "EXECUTION"
+          ? "EXECUTION"
+          : "STRATEGY"
+        : null;
+
+      // Build structured Explanation details (Step 4A)
+      const whatWasObserved =
+        matchedDemoScenario?.whatChanged ||
+        (primaryEventRow && primaryComparison
+          ? `${primaryEventRow.competitor?.name || "Competitor"} (${translateEventTypeToTitle(primaryEventRow.event.kind)}): Before: ${primaryComparison.beforeSummary} → After: ${primaryComparison.afterSummary}`
+          : linkedPerformanceWarnings.length > 0
+            ? decision?.rationale || "Weekly business check-in (2026-10-24 to 2026-10-31) recorded 0 leads, 0 paying customers, and $0 ad spend against a 6-month historical baseline of 10 leads and 5 paying customers, with 0 social posts published in the active plan window."
+            : decision?.rationale || "Market and performance telemetry evaluated.");
+
+      const whatItMayMean =
+        primaryBrief?.strategicInterpretation ||
+        (c.status === "INSUFFICIENT_EVIDENCE"
+          ? "Partial snapshot array diff suggested a feature removal, but full website evidence contradicts the removal claim. No actual competitor offering change occurred."
+          : linkedPerformanceWarnings.length > 0
+            ? "Zero leads and zero customers alongside $0 ad spend and 0 posts published in the active 7-day plan window indicate an unexecuted publishing window rather than paid ad fatigue or a broken offer."
+            : decisionTranslation?.actionDescription ||
+              "Observed competitor update is localized and does not invalidate current positioning or offer differentiation.");
+
+      const uncertaintyNotes: string[] = [];
+      if (sharedOriginSiblingIds.length > 0) {
+        uncertaintyNotes.push(
+          `Shared Origin Link: Derived from the same single website snapshot update (${primaryEventRow?.event.baselineSnapshotId} → ${primaryEventRow?.event.currentSnapshotId}) as sibling event(s) [${sharedOriginSiblingIds.join(", ")}]${sharedOriginSiblingCaseIds.length > 0 ? ` (cases: ${sharedOriginSiblingCaseIds.join(", ")})` : ""}. Linked as one source update and not counted as independent corroboration.`,
+        );
+      }
+      if (primaryComparison?.methodologyNote) {
+        uncertaintyNotes.push(primaryComparison.methodologyNote);
+      }
+      if (Array.isArray(primaryBriefRow?.deterministicViolations) && primaryBriefRow.deterministicViolations.length > 0) {
+        uncertaintyNotes.push(
+          `Counterevidence Contradiction: ${(primaryBriefRow.deterministicViolations as string[]).join("; ")}`,
+        );
+      }
+      if (linkedPerformanceWarnings.length > 0 && !primaryEventRow) {
+        uncertaintyNotes.push(
+          "Single-Window Baseline Scope: Only 1 completed 7-day weekly check-in (2026-10-24 to 2026-10-31) has been recorded against a 6-month historical summary; active-window social publishing was 0 posts across Instagram, TikTok, and YouTube.",
+        );
+      }
+
+      const whyNoActionProposed = isActionableProposal
+        ? null
+        : c.status === "INSUFFICIENT_EVIDENCE" || decision?.decisionType === "INSUFFICIENT_EVIDENCE"
+          ? "Claimed removal is contradicted by current snapshot evidence (where the feature remains present). No strategy or execution change is warranted on contradicted or insufficient evidence."
+          : decision?.decisionType === "OBSERVE"
+            ? primaryBrief?.impactOnOurStrategy ||
+              "Confirmed competitor observation does not erode our differentiation or conversion path; maintaining current approved strategy without mutation."
+            : decision?.decisionType === "EXECUTION_RESPONSE"
+              ? "Zero conversions occurred during a 7-day window with $0 ad spend and 0 published posts. Executing the existing approved Plan v4 publishing schedule is required before altering plan cadence or strategy."
+              : "No concrete, justified strategy or execution diff is warranted by current evidence.";
+
+      const reconsiderationCriteria =
+        Array.isArray(primaryBrief?.missingEvidence) && primaryBrief.missingEvidence.length > 0
+          ? primaryBrief.missingEvidence.join(" • ")
+          : linkedPerformanceWarnings.length > 0
+            ? "Publish the approved weekly content cadence in What To Do Today across at least 2 consecutive 7-day reporting windows and record resulting lead/conversion metrics before evaluating funnel or offer changes."
+            : "Reconsider only if a subsequent independent crawl confirms a structural base-price or core-offer shift corroborated by conversion or lead-velocity pressure in our target segment.";
+
+      const explanationDetails = {
+        whatWasObserved,
+        whatItMayMean,
+        evidenceAndUncertainty:
+          uncertaintyNotes.length > 0
+            ? uncertaintyNotes.join(" ")
+            : `Grounded in ${resolvedEvidenceItems.length} resolved evidence artifact(s).`,
+        uncertaintyNotes,
+        whyNoActionProposed,
+        reconsiderationCriteria,
+        sharedOriginKey: sharedOriginSiblingIds.length > 0 ? originKey : null,
+        sharedOriginSiblingIds,
+        sharedOriginSiblingCaseIds,
+      };
+
+      const proposalDetails = isActionableProposal
+        ? {
+            proposalId: matchingProposal?.id || matchedDemoScenario?.proposalId || null,
+            targetType,
+            whyActionWarranted:
+              matchedDemoScenario?.whyResponseWarranted ||
+              matchingProposal?.whyNow ||
+              decision?.rationale ||
+              "",
+            targetSummary:
+              targetType === "EXECUTION"
+                ? `What To Do Today Execution Task(s): ${validPatchPreview.map((p: any) => p.sectionName || p.section || p.taskId).join(", ")}`
+                : `Strategy Authority Section(s): ${validPatchPreview.map((p: any) => p.sectionName || p.section).join(", ")}`,
+            beforeAfterPatchPreview: validPatchPreview,
+            expectedEffectHypothesis:
+              propMeta.expectedEffectHypothesis ||
+              matchingProposal?.expectedImpact ||
+              matchedDemoScenario?.proposedResponse ||
+              "Hypothesis: Applying this targeted adjustment is expected to improve message alignment or execution conversion; post-application outcome will be monitored across the next 14-day window.",
+            supportingEvidenceItems: resolvedEvidenceItems.filter((ev) =>
+              hypotheses.some((h) => ((h.supportingEvidenceIds as string[]) || []).includes(ev.id)),
+            ),
+            contradictingEvidenceItems: resolvedEvidenceItems.filter((ev) =>
+              hypotheses.some((h) => ((h.contradictingEvidenceIds as string[]) || []).includes(ev.id)),
+            ),
+            whatRemainsUnchanged:
+              targetType === "EXECUTION"
+                ? `Strategy Root v${c.strategyRootVersion} (${c.strategyRootId}) and all core strategic authorities (Positioning, Differentiation, Offer, Audience, Funnel) remain 100% unchanged.`
+                : Array.isArray(matchedDemoScenario?.unchangedExplanation)
+                  ? matchedDemoScenario.unchangedExplanation.join(" ")
+                  : typeof matchedDemoScenario?.unchangedExplanation === "string"
+                    ? matchedDemoScenario.unchangedExplanation
+                    : `Preserved authorities: ${((matchingProposal?.preservedAuthorities as string[]) || ["AUDIENCE", "POSITIONING", "OFFER", "FUNNEL", "CHANNELS", "BUDGET"]).join(", ")}.`,
+            approvalActionLabel:
+              targetType === "EXECUTION"
+                ? "Approve Execution Adjustment (What To Do Today)"
+                : "Approve & Apply Strategy Patch",
+          }
+        : null;
 
       return {
         reasoningCaseId: c.id,
         scenarioId: matchedDemoScenario?.scenarioId || null,
+        caseCategory,
+        isActionableProposal,
+        targetType,
         caseTitle:
           matchedDemoScenario?.title ||
           linkedMarketEvents[0]?.title ||
+          linkedPerformanceWarnings[0]?.title ||
           "Deep Reasoning Investigation",
         campaignId: c.campaignId,
         strategyRootId: c.strategyRootId,
         strategyRootVersion: c.strategyRootVersion,
+        lineage: caseMeta.lineage || {
+          campaignId: c.campaignId,
+          productId: casesLineage.productId,
+          planId: casesLineage.planId,
+          planVersion: casesLineage.planVersion,
+          strategyRootId: c.strategyRootId,
+          strategyRootInternalVersion: casesLineage.strategyRootInternalVersion,
+          rootBundleId: casesLineage.rootBundleId,
+          rootBundleVersion: c.strategyRootVersion,
+          eventIds: (c.marketEventIds as string[]) || [],
+          performanceWindowIds: caseMeta.telemetryContext?.recentReportingWindow?.weeklyInventoryId
+            ? [caseMeta.telemetryContext.recentReportingWindow.weeklyInventoryId]
+            : [],
+          performanceContextIds: caseMeta.performanceContextIds || [],
+          evidenceRefs: caseEvidenceIds,
+          correlationId: c.id,
+        },
+        impactClassification:
+          caseMeta.impactClassification ||
+          ((c.marketEventIds as string[] || []).length > 0 && (c.performanceWarningIds as string[] || []).length === 0
+            ? "PROSPECTIVE_RISK"
+            : "UNEXECUTED_PUBLISHING_WINDOW"),
+        prospectiveRiskNote:
+          caseMeta.prospectiveRiskNote ||
+          ((c.marketEventIds as string[] || []).length > 0 && (c.performanceWarningIds as string[] || []).length === 0
+            ? "Confirmed competitor market signal with 0 corroborated campaign performance damage in active reporting window; classified as prospective market risk rather than proven campaign performance impact."
+            : null),
+        responseClassification:
+          caseMeta.responseClassification ||
+          (c.status === "INSUFFICIENT_EVIDENCE"
+            ? "INSUFFICIENT_EVIDENCE"
+            : isActionableProposal
+              ? targetType === "EXECUTION"
+                ? "EXECUTION_ADJUSTMENT"
+                : "STRATEGY_CHANGE_PROPOSAL"
+              : "NO_CHANGE"),
+        telemetryContext: caseMeta.telemetryContext || null,
         isCurrentRoot,
         rootBadgeLabel: isCurrentRoot ? `Strategy Root v${c.strategyRootVersion} (Active)` : `Strategy Root v${c.strategyRootVersion} (Historical)`,
         status: c.status,
@@ -1788,19 +2370,29 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
         resolvedAt: c.resolvedAt ? formatStandardDateTime(c.resolvedAt) : null,
         marketEventCount: (c.marketEventIds as string[] || []).length,
         performanceWarningCount: (c.performanceWarningIds as string[] || []).length,
-        evidenceCount: (c.evidenceIds as string[] || []).length,
+        evidenceCount: caseEvidenceIds.length,
         linkedMarketEvents,
         linkedPerformanceWarnings,
-        evidenceIds: (c.evidenceIds as string[] || []),
+        evidenceIds: caseEvidenceIds,
+        resolvedEvidenceItems,
         supportingEvidenceLinks,
-        whatChanged: matchedDemoScenario?.whatChanged || null,
+        sharedOriginKey: sharedOriginSiblingIds.length > 0 ? originKey : null,
+        sharedOriginSiblingIds,
+        sharedOriginSiblingCaseIds,
+        explanationDetails,
+        proposalDetails,
+        whatChanged: whatWasObserved,
         relevantAudience: matchedDemoScenario?.relevantAudience || null,
         relevantOffering: matchedDemoScenario?.relevantOffering || null,
         relevantLaneTitle: matchedDemoScenario?.relevantLaneTitle || null,
-        whyResponseWarranted: matchedDemoScenario?.whyResponseWarranted || null,
-        proposedResponse: matchedDemoScenario?.proposedResponse || null,
+        whyResponseWarranted: isActionableProposal
+          ? (matchedDemoScenario?.whyResponseWarranted || matchingProposal?.whyNow || decision?.rationale || null)
+          : null,
+        proposedResponse: isActionableProposal
+          ? (matchedDemoScenario?.proposedResponse || matchingProposal?.summary || null)
+          : null,
         tradeOffs: matchedDemoScenario?.tradeOffs || [],
-        beforeAfterPatchPreview: matchedDemoScenario?.beforeAfterPatchPreview || [],
+        beforeAfterPatchPreview: isActionableProposal ? validPatchPreview : [],
         unchangedExplanation: matchedDemoScenario?.unchangedExplanation || [],
         hypotheses: hypotheses.map(h => ({
           hypothesisId: h.id,
@@ -1815,26 +2407,55 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
           contradictingEvidenceIds: (h.contradictingEvidenceIds as string[] || []),
         })),
         adaptiveDecision: decision ? (() => {
-          const matchingProposal = proposalsRows.find(p => p.reasoningCaseId === c.id) || null;
-          const propMeta = (matchingProposal?.metadata as Record<string, any>) || {};
-          const appliedVer = matchingProposal?.appliedNewBundleVersion || outcome?.newRootVersion || 2;
+          const appliedVer = matchingProposal?.appliedNewBundleVersion || outcome?.newRootVersion || null;
+          const isTrulyApplied =
+            (matchingProposal?.status === "APPLIED" && Boolean(appliedVer || propMeta.appliedTaskIds)) ||
+            Boolean(outcome);
+
+          let truthfulStatusBadge = decisionTranslation?.statusBadge || "NO_CHANGE";
+          if (isTrulyApplied) {
+            truthfulStatusBadge =
+              targetType === "EXECUTION"
+                ? "EXECUTION ADJUSTMENT APPLIED"
+                : `APPROVED & APPLIED (v${appliedVer || c.strategyRootVersion})`;
+          } else if (isActionableProposal && (matchingProposal?.status === "PENDING_USER_APPROVAL" || matchingProposal?.status === "PROPOSED")) {
+            truthfulStatusBadge =
+              targetType === "EXECUTION"
+                ? "PENDING EXECUTION APPROVAL"
+                : "PENDING STRATEGY APPROVAL";
+          } else if (isActionableProposal && matchingProposal?.status === "APPROVED") {
+            truthfulStatusBadge = "APPROVED (AWAITING SCOPED COMMIT)";
+          } else if (c.status === "INSUFFICIENT_EVIDENCE" || decision.decisionType === "INSUFFICIENT_EVIDENCE") {
+            truthfulStatusBadge = "MONITORING";
+          } else if (decision.decisionType === "OBSERVE") {
+            truthfulStatusBadge = "NO_CHANGE";
+          } else if (decision.decisionType === "EXECUTION_RESPONSE" && !isActionableProposal) {
+            truthfulStatusBadge = "EXECUTION_DIAGNOSIS";
+          }
+
           return {
             decisionId: decision.id,
             decisionType: decision.decisionType,
+            targetType,
+            isActionableProposal,
             affectedAuthority: decision.affectedAuthority,
             affectedAuthorities: (matchingProposal?.affectedAuthorities as string[]) || matchedDemoScenario?.affectedAuthorities || (decision.affectedAuthority ? [decision.affectedAuthority] : []),
             preservedAuthorities: (matchingProposal?.preservedAuthorities as string[]) || matchedDemoScenario?.preservedAuthorities || ["AUDIENCE", "POSITIONING", "DIFFERENTIATION", "OFFER", "FUNNEL", "CHANNELS", "BUDGET"],
-            affectedLaneIds: (decision.affectedLaneIds as string[]) || ((decision.metadata as any)?.affectedLaneIds as string[]) || (decision.affectedEntityIds as string[] || []).filter((id: string) => id.startsWith("lane_")),
-            businessAction: matchingProposal?.summary || matchedDemoScenario?.proposalSummary || decisionTranslation?.label,
-            actionDescription: matchedDemoScenario?.proposedResponse || decisionTranslation?.actionDescription,
-            statusBadge: matchingProposal?.status === "PENDING_USER_APPROVAL"
-              ? "PENDING USER APPROVAL"
-              : matchingProposal?.status === "APPLIED" || outcome
-                ? `APPROVED & APPLIED (v${appliedVer})`
-                : decisionTranslation?.statusBadge,
-            proposalId: matchingProposal?.id || matchedDemoScenario?.proposalId || null,
-            proposalStatus: matchingProposal?.status || null,
-            appliedVersion: matchingProposal?.appliedNewBundleVersion || null,
+            affectedLaneIds: ((decision as any).affectedLaneIds as string[]) || ((decision.metadata as any)?.affectedLaneIds as string[]) || (decision.affectedEntityIds as string[] || []).filter((id: string) => id.startsWith("lane_")),
+            businessAction:
+              isActionableProposal
+                ? (matchingProposal?.summary || matchedDemoScenario?.proposalSummary || decisionTranslation?.label)
+                : decision.decisionType === "EXECUTION_RESPONSE"
+                  ? "Execution Cadence Review (No Strategy Change)"
+                  : decisionTranslation?.label,
+            actionDescription:
+              isActionableProposal
+                ? (matchedDemoScenario?.proposedResponse || decisionTranslation?.actionDescription)
+                : explanationDetails.whyNoActionProposed || decisionTranslation?.actionDescription,
+            statusBadge: truthfulStatusBadge,
+            proposalId: isActionableProposal ? (matchingProposal?.id || matchedDemoScenario?.proposalId || null) : null,
+            proposalStatus: isActionableProposal ? (matchingProposal?.status || "PENDING_USER_APPROVAL") : null,
+            appliedVersion: isTrulyApplied ? appliedVer : null,
             affectedStrategicAssumption:
               matchedDemoScenario?.affectedStrategicAssumption ||
               propMeta.affectedStrategicAssumption ||
@@ -1847,21 +2468,20 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
               matchedDemoScenario?.relevantOffering || propMeta.relevantOffering || null,
             relevantLaneTitle:
               matchedDemoScenario?.relevantLaneTitle || propMeta.relevantLaneTitle || null,
-            whyResponseWarranted:
-              matchedDemoScenario?.whyResponseWarranted || matchingProposal?.whyNow || decision.rationale,
-            proposedResponse:
-              matchedDemoScenario?.proposedResponse || propMeta.proposedResponse || matchingProposal?.summary,
+            whyResponseWarranted: isActionableProposal
+              ? (matchedDemoScenario?.whyResponseWarranted || matchingProposal?.whyNow || decision.rationale)
+              : null,
+            proposedResponse: isActionableProposal
+              ? (matchedDemoScenario?.proposedResponse || propMeta.proposedResponse || matchingProposal?.summary)
+              : null,
             tradeOffs:
               matchedDemoScenario?.tradeOffs || propMeta.tradeOffs || [],
-            beforeAfterPatchPreview:
-              matchedDemoScenario?.beforeAfterPatchPreview || propMeta.beforeAfterPatchPreview || [],
+            beforeAfterPatchPreview: isActionableProposal ? validPatchPreview : [],
             unchangedExplanation:
               matchedDemoScenario?.unchangedExplanation || propMeta.unchangedExplanation || [],
-            affectedPlanItems: (
-              matchedDemoScenario?.beforeAfterPatchPreview ||
-              propMeta.beforeAfterPatchPreview ||
-              []
-            ).map((p: any) => `${p.sectionName || p.section} — ${p.fieldLabel || "updated"}: ${p.afterText || p.after}`),
+            affectedPlanItems: isActionableProposal
+              ? validPatchPreview.map((p: any) => `${p.sectionName || p.section} — ${p.fieldLabel || "updated"}: ${p.afterText || p.after}`)
+              : [],
             confidence: decision.confidence,
             rationale: decision.rationale,
             createdAt: formatStandardDateTime(decision.createdAt),
@@ -1880,6 +2500,9 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
         } : null,
       };
     });
+
+    const explanationCases = composedCases.filter((c) => c.caseCategory === "EXPLANATION");
+    const proposedChanges = composedCases.filter((c) => c.caseCategory === "PROPOSED_CHANGE");
 
     // Build pendingActionableScenarios for any of the 3 demo scenarios not yet opened in reasoning_cases
     const pendingActionableScenarios = demoScenariosCatalog
@@ -1929,6 +2552,8 @@ adaptiveReadRouter.get("/reasoning/cases/:campaignId", async (req: Request, res:
       currentRootVersion,
       totalCount: composedCases.length,
       cases: composedCases,
+      explanationCases,
+      proposedChanges,
       supersededCases,
       pendingActionableScenarios,
     });

@@ -68,6 +68,9 @@ export default function StrategyPlanScreen() {
   const campaignId = selectedCampaign?.selectedCampaignId || selectedCampaignId || '';
   const initialTab = (searchParams.tab as StrategyTab) || 'overview';
   const [activeTab, setActiveTab] = useState<StrategyTab>(initialTab);
+  const [previewPlanId, setPreviewPlanId] = useState<string | null>((searchParams.planId as string) || null);
+  const [candidateDraftInfo, setCandidateDraftInfo] = useState<any>(null);
+  const [designatedActiveInfo, setDesignatedActiveInfo] = useState<any>(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -172,13 +175,16 @@ export default function StrategyPlanScreen() {
         latestJobFromMeta = metaData?.latestJob || null;
       }
 
-      // 2. Fetch active plan details
-      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}`);
+      // 2. Fetch active (or previewed candidate draft) plan details
+      const planQuery = previewPlanId ? `?planId=${encodeURIComponent(previewPlanId)}` : '';
+      const activeUrl = getApiUrl(`/api/plans/active/${encodeURIComponent(campaignId)}${planQuery}`);
       const activeRes = await authFetch(activeUrl);
       const activeData = await safeApiJson(activeRes);
 
       if (activeRes.ok && activeData.hasPlan) {
         setPlanData(activeData.plan);
+        setCandidateDraftInfo(activeData.candidateDraftPlan || null);
+        setDesignatedActiveInfo(activeData.designatedActivePlan || null);
         setError(null);
       } else {
         setPlanData(null);
@@ -219,7 +225,13 @@ export default function StrategyPlanScreen() {
     } finally {
       setLoading(false);
     }
-  }, [campaignId]);
+  }, [campaignId, previewPlanId]);
+
+  useEffect(() => {
+    if (typeof searchParams.planId === 'string' && searchParams.planId.trim()) {
+      setPreviewPlanId(searchParams.planId.trim());
+    }
+  }, [searchParams.planId]);
 
   useEffect(() => {
     setLoading(true);
@@ -943,6 +955,76 @@ export default function StrategyPlanScreen() {
               <Feather name="play" size={13} color="#FFFFFF" />
               <Text style={[st.reviewBtnText, { color: '#FFFFFF', fontWeight: '800' }]}>
                 {isContinuing ? 'Continuing...' : 'Continue Pipeline'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
+
+      {/* ── CANDIDATE DRAFT PREVIEW SWITCHER BANNER ── */}
+      {designatedActiveInfo && candidateDraftInfo && designatedActiveInfo.id !== candidateDraftInfo.id && (
+        <View
+          style={[
+            st.proposalBanner,
+            {
+              backgroundColor: planData?.id === candidateDraftInfo.id ? 'rgba(245, 158, 11, 0.14)' : 'rgba(56, 189, 248, 0.10)',
+              borderColor: planData?.id === candidateDraftInfo.id ? 'rgba(245, 158, 11, 0.5)' : 'rgba(56, 189, 248, 0.4)',
+            },
+          ]}
+        >
+          <View style={st.proposalBannerLeft}>
+            <View
+              style={[
+                st.proposalIconBox,
+                { backgroundColor: planData?.id === candidateDraftInfo.id ? 'rgba(245, 158, 11, 0.25)' : 'rgba(56, 189, 248, 0.22)' },
+              ]}
+            >
+              <Feather name="eye" size={16} color={planData?.id === candidateDraftInfo.id ? '#FBBF24' : '#38BDF8'} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[st.proposalBannerTitle, { color: planData?.id === candidateDraftInfo.id ? '#FDE68A' : '#BAE6FD' }]}>
+                {planData?.id === candidateDraftInfo.id
+                  ? `PREVIEWING UNAPPROVED CANDIDATE DRAFT (Plan v${candidateDraftInfo.version || 3} · Bundle v${candidateDraftInfo.rootBundleVersion || 14} · DRAFT / IDLE)`
+                  : `DESIGNATED ACTIVE PLAN v${designatedActiveInfo.version || 4} (Bundle v${designatedActiveInfo.rootBundleVersion || 13} · APPROVED) — CANDIDATE DRAFT v${candidateDraftInfo.version || 3} AVAILABLE`}
+              </Text>
+              <Text style={[st.proposalBannerSub, { color: '#CBD5E1' }]} numberOfLines={2}>
+                {planData?.id === candidateDraftInfo.id
+                  ? `Read-only preview of Candidate Draft ${candidateDraftInfo.id}. Live execution remains strictly pinned to Approved Plan ${designatedActiveInfo.id} (v${designatedActiveInfo.version || 4}).`
+                  : `Inspect the unapproved Candidate Draft (${candidateDraftInfo.id}) budget & channel refinements without approving or activating it.`}
+              </Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Pressable
+              style={[
+                st.reviewBtn,
+                {
+                  backgroundColor: planData?.id === designatedActiveInfo.id ? '#10B981' : 'rgba(15, 23, 42, 0.8)',
+                  borderColor: planData?.id === designatedActiveInfo.id ? '#059669' : '#334155',
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                },
+              ]}
+              onPress={() => setPreviewPlanId(null)}
+            >
+              <Text style={[st.reviewBtnText, { color: '#FFFFFF', fontWeight: '700' }]}>
+                Active Plan v{designatedActiveInfo.version || 4}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                st.reviewBtn,
+                {
+                  backgroundColor: planData?.id === candidateDraftInfo.id ? '#D97706' : 'rgba(15, 23, 42, 0.8)',
+                  borderColor: planData?.id === candidateDraftInfo.id ? '#F59E0B' : '#334155',
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                },
+              ]}
+              onPress={() => setPreviewPlanId(candidateDraftInfo.id)}
+            >
+              <Text style={[st.reviewBtnText, { color: '#FFFFFF', fontWeight: '700' }]}>
+                Preview Draft v{candidateDraftInfo.version || 3}
               </Text>
             </Pressable>
           </View>

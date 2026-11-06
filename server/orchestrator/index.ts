@@ -4246,11 +4246,50 @@ export async function executeEngine(
 
         const funnelContext = ctx.funnel || null;
 
-        console.log(`[Orchestrator] CHANNEL_SELECTION_DISPATCH | owned=${ownedChannels.length} compPlatforms=${competitorPlatforms.length} mvQuotes=${mvChannelEvidence.length}`);
+        // Fetch user-confirmed campaign budget settings so Channel Selection and Channel Orchestration
+        // receive the exact same budget truth as Budget Governor (never defaulting to a fake $500 or $0).
+        let csMonthlyBudget: number | null = null;
+        let csBudgetCurrency = "USD";
+        try {
+          const [savedBudget] = await db
+            .select()
+            .from(campaignBudgetSettings)
+            .where(
+              and(
+                eq(campaignBudgetSettings.accountId, config.accountId),
+                eq(campaignBudgetSettings.campaignId, config.campaignId)
+              )
+            )
+            .limit(1);
+          if (savedBudget && savedBudget.monthlyBudget != null) {
+            const parsedBudget = parseFloat(savedBudget.monthlyBudget);
+            if (!isNaN(parsedBudget) && parsedBudget > 0) {
+              csMonthlyBudget = parsedBudget;
+            }
+            csBudgetCurrency = savedBudget.currency || "USD";
+          }
+        } catch (budgetErr: any) {
+          console.warn(`[Orchestrator] CHANNEL_SELECTION_BUDGET_FETCH_WARN | ${budgetErr.message}`);
+        }
+
+        const csBudgetInput = csMonthlyBudget != null && csMonthlyBudget > 0
+          ? {
+              monthlyBudget: csMonthlyBudget,
+              currency: csBudgetCurrency,
+              testBudgetMin: Math.round(csMonthlyBudget * 0.2),
+              testBudgetMax: csMonthlyBudget,
+              scaleBudgetMin: csMonthlyBudget,
+              scaleBudgetMax: csMonthlyBudget * 2,
+              expansionPermission: csMonthlyBudget >= 1000,
+              killFlag: false,
+            }
+          : null;
+
+        console.log(`[Orchestrator] CHANNEL_SELECTION_DISPATCH | owned=${ownedChannels.length} compPlatforms=${competitorPlatforms.length} mvQuotes=${mvChannelEvidence.length} budget=${csMonthlyBudget ?? "none"} ${csBudgetCurrency}`);
 
         const result = await runChannelSelectionWithAIProposal(
           audInput, awarenessInput, persuasionInput, offerInput,
-          null, validationInput, "INTELLIGENT",
+          csBudgetInput as any, validationInput, "INTELLIGENT" as any,
           ctx.memoryContext || undefined,
           runStrategicContextOf(ctx), config.accountId,
           (ctx.audience as any)?.productDna || null,
@@ -4290,8 +4329,8 @@ export async function executeEngine(
               channelMode: r.channelMode || "INTELLIGENT",
               awarenessStage: awarenessInput.primaryRoute?.targetReadinessStage || ctx.ssc.awarenessMeaning?.stage || "unknown",
               audienceMaturityIndex: typeof audInput.maturityIndex === "number" ? audInput.maturityIndex : null,
-              testBudgetMin: 0,
-              testBudgetMax: 0,
+              testBudgetMin: csBudgetInput ? csBudgetInput.testBudgetMin : 0,
+              testBudgetMax: csBudgetInput ? csBudgetInput.testBudgetMax : 0,
               killFlag: false,
               expansionAllowed: false,
               rejectedChannels: rejArr.slice(0, 6).map((c: any) => `${c.channelName || c.label || c.channelKey || c.name || "?"} — ${c.rejectionReason || c.reason || "(no reason)"}`),

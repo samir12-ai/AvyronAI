@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { studioItems, requiredWork, strategicPlans } from "@shared/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, ne, sql, inArray } from "drizzle-orm";
 import { getBranchForMediaType, type FulfillmentBranch } from "../lib/media-types";
 
 export interface BranchFulfillment {
@@ -40,7 +40,6 @@ export async function computeFulfillment(
   accountId: string
 ): Promise<FulfillmentResult> {
   const activePlanStatuses = [
-    "DRAFT",
     "APPROVED",
     "GENERATED_TO_CALENDAR",
     "CREATIVE_GENERATED",
@@ -50,7 +49,7 @@ export async function computeFulfillment(
   ];
 
   const plans = await db
-    .select({ id: strategicPlans.id })
+    .select({ id: strategicPlans.id, isDesignatedActive: strategicPlans.isDesignatedActive })
     .from(strategicPlans)
     .where(
       and(
@@ -62,9 +61,10 @@ export async function computeFulfillment(
         )})`
       )
     )
-    .orderBy(sql`${strategicPlans.createdAt} DESC`);
+    .orderBy(sql`${strategicPlans.isDesignatedActive} DESC, ${strategicPlans.createdAt} DESC`);
 
-  const activePlanIds = plans.map((p) => p.id);
+  const designatedPlans = plans.filter((p) => p.isDesignatedActive);
+  const activePlanIds = (designatedPlans.length > 0 ? designatedPlans : plans).map((p) => p.id);
 
   let workRec: any = null;
   if (activePlanIds.length > 0) {
@@ -101,10 +101,18 @@ export async function computeFulfillment(
     })
     .from(studioItems)
     .where(
-      and(
-        eq(studioItems.campaignId, campaignId),
-        eq(studioItems.accountId, accountId)
-      )
+      activePlanIds.length > 0
+        ? and(
+            eq(studioItems.campaignId, campaignId),
+            eq(studioItems.accountId, accountId),
+            inArray(studioItems.planId, activePlanIds),
+            ne(studioItems.status, "SUPERSEDED")
+          )
+        : and(
+            eq(studioItems.campaignId, campaignId),
+            eq(studioItems.accountId, accountId),
+            ne(studioItems.status, "SUPERSEDED")
+          )
     );
 
   const fulfilledByBranch: Record<FulfillmentBranch | "CAROUSELS", number> = {

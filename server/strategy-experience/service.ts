@@ -21,6 +21,18 @@ import { planRecomputeCascade } from "../adaptive/cascade-planner";
 import { executeAdaptiveDecision } from "../adaptive/decision-executor";
 import { randomUUID } from "crypto";
 
+export class ProposalApplyError extends Error {
+  statusCode: number;
+  code: string;
+
+  constructor(statusCode: number, code: string, message: string) {
+    super(`${code}: ${message}`);
+    this.name = "ProposalApplyError";
+    this.statusCode = statusCode;
+    this.code = code;
+  }
+}
+
 export interface BusinessStageProgress {
   id: string;
   name: string;
@@ -817,7 +829,7 @@ export class StrategyExperienceService {
             approvedActivePlan.createdAt &&
             candidateDraftPlan.createdAt.getTime() > approvedActivePlan.createdAt.getTime()))
     );
-    const strategicPlan = isDraftNewer ? candidateDraftPlan : (approvedActivePlan || candidateDraftPlan || null);
+    const strategicPlan = approvedActivePlan || candidateDraftPlan || null;
     let parsedPlanJson: any = null;
     if (strategicPlan?.planJson) {
       try {
@@ -930,11 +942,9 @@ export class StrategyExperienceService {
     let strategyStatus: "LIVE" | "REVIEW_REQUIRED" | "HISTORICAL_ONLY" | "UNINITIALIZED" | "DRAFT" = "UNINITIALIZED";
     if (pendingProposals.length > 0 || activeRoot?.status === "REVIEW_REQUIRED") {
       strategyStatus = "REVIEW_REQUIRED";
-    } else if (isDraftNewer && candidateDraftPlan) {
-      strategyStatus = "DRAFT";
     } else if (approvedActivePlan && activeRoot?.status === "ACTIVE") {
       strategyStatus = "LIVE";
-    } else if (candidateDraftPlan && !approvedActivePlan) {
+    } else if (candidateDraftPlan) {
       strategyStatus = "DRAFT";
     } else if (isHistoricalOnly && activeRoot) {
       strategyStatus = "HISTORICAL_ONLY";
@@ -1272,14 +1282,26 @@ export class StrategyExperienceService {
 
   /**
    * Approves a change proposal and triggers targeted adaptation.
+   * Enforces strict backend validation:
+   * - Valid tenant/campaign ownership and approval permissions
+   * - Actionable decision type (rejects NO_CHANGE, MONITORING, OBSERVE, INSUFFICIENT_EVIDENCE, contradicted cases)
+   * - Explicit target type: STRATEGY or EXECUTION (rejects execution adjustments sent through strategy-mutation paths)
+   * - Valid target IDs and non-empty semantic diff where before != after
+   * - Current expected target version; rejects stale root/bundle/plan/task targets
+   * - Recorded approval before apply
+   * - Idempotent rejection of duplicate apply calls
+   * - Transactional APPLIED status update only after the target mutation commits
    */
   static async approveProposal(proposalId: string, accountId: string, options?: any) {
-    if (process.env.AVYRON_DEMO_MODE === "1") {
+    if (!accountId || !proposalId) {
+      throw new ProposalApplyError(401, "AUTHENTICATION_REQUIRED", "Authenticated tenant accountId and proposalId are required.");
+    }
+
+    if (process.env.AVYRON_DEMO_MODE === "1" && proposalId.startsWith("prop_demo_")) {
       const {
         approveDemoScenarioProposal,
         investigateDemoScenario,
       } = await import("../demo/scenario-service");
-      // Ensure investigation/proposal exists if user clicked approve directly by scenario/proposal ID
       const [existing] = await db
         .select()
         .from(schema.strategyChangeProposals)
@@ -1294,23 +1316,211 @@ export class StrategyExperienceService {
     const [proposal] = await db
       .select()
       .from(schema.strategyChangeProposals)
-      .where(and(eq(schema.strategyChangeProposals.id, proposalId), eq(schema.strategyChangeProposals.accountId, accountId)))
+      .where(eq(schema.strategyChangeProposals.id, proposalId))
       .limit(1);
 
     if (!proposal) {
-      throw new Error("Proposal not found or unauthorized.");
+      throw new ProposalApplyError(404, "PROPOSAL_NOT_FOUND", `Proposal '${proposalId}' was not found.`);
     }
 
-    // Idempotency: If already applied or approved, return clean idempotent response
-    if (proposal.status === "APPLIED" || proposal.status === "APPROVED") {
-      return {
-        status: "ALREADY_APPLIED",
-        proposalId,
-        message: "Proposal was already approved and applied.",
-      };
+    // 1. Tenant & Campaign Ownership check
+    if (proposal.accountId !== accountId) {
+      throw new ProposalApplyError(403, "UNAUTHORIZED_TENANT", "Proposal does not belong to the authenticated tenant.");
     }
 
-    // Stale proposal protection: Active Strategy Root MUST match proposal.currentStrategyRootId
+    const [campaignRootRow] = await db
+      .select()
+      .from(schema.strategyRoots)
+      .where(eq(schema.strategyRoots.campaignId, proposal.campaignId))
+      .limit(1);
+    if (campaignRootRow && campaignRootRow.accountId !== accountId) {
+      throw new ProposalApplyError(403, "UNAUTHORIZED_CAMPAIGN", "Campaign does not belong to the authenticated tenant.");
+    }
+
+    // 2. Duplicate / Rejected / Stale Apply Rejection
+    if (proposal.status === "APPLIED") {
+      throw new ProposalApplyError(
+        409,
+        "PROPOSAL_ALREADY_APPLIED",
+        `Proposal '${proposalId}' has already been applied. Duplicate apply calls are rejected.`,
+      );
+    }
+    if (proposal.status === "REJECTED") {
+      throw new ProposalApplyError(
+        409,
+        "PROPOSAL_REJECTED",
+        `Proposal '${proposalId}' was rejected and cannot be applied.`,
+      );
+    }
+    if (proposal.status === "STALE") {
+      throw new ProposalApplyError(
+        409,
+        "PROPOSAL_STALE",
+        `Proposal '${proposalId}' targets a stale version and cannot be applied.`,
+      );
+    }
+
+    // 3. Inspect linked Reasoning Case & Adaptive Decision for actionable decision type and contradiction status
+    const [linkedCase] = proposal.reasoningCaseId
+      ? await db
+          .select()
+          .from(schema.reasoningCases)
+          .where(eq(schema.reasoningCases.id, proposal.reasoningCaseId))
+          .limit(1)
+      : [undefined];
+
+    const [linkedDecision] = proposal.adaptiveDecisionId
+      ? await db
+          .select()
+          .from(schema.adaptiveDecisions)
+          .where(eq(schema.adaptiveDecisions.id, proposal.adaptiveDecisionId))
+          .limit(1)
+      : [undefined];
+
+    const NON_ACTIONABLE_DECISIONS = new Set([
+      "OBSERVE",
+      "NO_CHANGE",
+      "INSUFFICIENT_EVIDENCE",
+      "MONITORING",
+      "EXPLANATION_ONLY",
+    ]);
+
+    const effectiveDecisionType = String(proposal.decisionType || linkedDecision?.decisionType || "").toUpperCase();
+    if (
+      NON_ACTIONABLE_DECISIONS.has(effectiveDecisionType) ||
+      (linkedDecision?.decisionType && NON_ACTIONABLE_DECISIONS.has(String(linkedDecision.decisionType).toUpperCase()))
+    ) {
+      throw new ProposalApplyError(
+        422,
+        "NON_ACTIONABLE_DECISION",
+        `Decision type '${effectiveDecisionType}' is explanation/monitoring only and cannot be applied.`,
+      );
+    }
+
+    const caseMeta = ((linkedCase?.metadata as Record<string, any>) || {});
+    if (
+      linkedCase?.status === "INSUFFICIENT_EVIDENCE" ||
+      caseMeta.failureCode === "COUNTEREVIDENCE_CONTRADICTION" ||
+      (Array.isArray(caseMeta.counterevidenceViolations) && caseMeta.counterevidenceViolations.length > 0)
+    ) {
+      throw new ProposalApplyError(
+        422,
+        "CONTRADICTED_OR_INSUFFICIENT_EVIDENCE",
+        "Cannot apply a proposal from an investigation with insufficient or contradicted evidence.",
+      );
+    }
+
+    // 4. Explicit Target Type (STRATEGY vs EXECUTION) and Routing Enforcement
+    const propMeta = ((proposal.metadata as Record<string, any>) || {});
+    const explicitTargetType = propMeta.targetType ? String(propMeta.targetType).toUpperCase() : null;
+
+    if (explicitTargetType && explicitTargetType !== "STRATEGY" && explicitTargetType !== "EXECUTION") {
+      throw new ProposalApplyError(
+        422,
+        "INVALID_TARGET_TYPE",
+        `Invalid targetType '${explicitTargetType}'. Must be 'STRATEGY' or 'EXECUTION'.`,
+      );
+    }
+
+    const isExecutionDecision =
+      effectiveDecisionType === "EXECUTION_RESPONSE" ||
+      effectiveDecisionType === "EXECUTION_ADJUSTMENT" ||
+      linkedDecision?.decisionType === "EXECUTION_RESPONSE" ||
+      linkedDecision?.decisionType === "EXECUTION_ADJUSTMENT";
+
+    const isStrategyDecision = [
+      "TARGETED_RECOMPUTE",
+      "LANE_ADJUSTMENT",
+      "STRATEGIC_PIVOT",
+      "ESCALATE_STRATEGIC_REVIEW",
+    ].includes(effectiveDecisionType);
+
+    if (isExecutionDecision) {
+      if (
+        explicitTargetType === "STRATEGY" ||
+        options?.expectedTargetType === "STRATEGY" ||
+        options?.route === "STRATEGY_MUTATION"
+      ) {
+        throw new ProposalApplyError(
+          422,
+          "EXECUTION_ROUTED_TO_STRATEGY",
+          "Execution adjustments belong to execution/What To Do Today and cannot mutate the strategy root.",
+        );
+      }
+    }
+
+    const resolvedTargetType: "STRATEGY" | "EXECUTION" | null =
+      (explicitTargetType as "STRATEGY" | "EXECUTION" | null) ||
+      (isExecutionDecision ? "EXECUTION" : isStrategyDecision ? "STRATEGY" : null);
+
+    if (!resolvedTargetType) {
+      throw new ProposalApplyError(
+        422,
+        "MISSING_TARGET_TYPE",
+        "Proposal must specify an explicit targetType ('STRATEGY' or 'EXECUTION').",
+      );
+    }
+
+    if (options?.expectedTargetType && String(options.expectedTargetType).toUpperCase() !== resolvedTargetType) {
+      throw new ProposalApplyError(
+        422,
+        "TARGET_TYPE_MISMATCH",
+        `Proposal targetType '${resolvedTargetType}' does not match expected targetType '${options.expectedTargetType}'.`,
+      );
+    }
+
+    // 5. Valid Target IDs and Non-Empty Semantic Diff where before != after
+    const rawDiffs: Array<any> = Array.isArray(propMeta.beforeAfterPatchPreview)
+      ? propMeta.beforeAfterPatchPreview
+      : Array.isArray(propMeta.patchDiff)
+        ? propMeta.patchDiff
+        : [];
+
+    const validDiffs = rawDiffs.filter((d: any) => {
+      if (!d || typeof d !== "object") return false;
+      const beforeText = String(d.beforeText ?? d.before ?? "").trim();
+      const afterText = String(d.afterText ?? d.after ?? "").trim();
+      return beforeText.length > 0 && afterText.length > 0 && beforeText !== afterText;
+    });
+
+    if (validDiffs.length === 0) {
+      throw new ProposalApplyError(
+        422,
+        "EMPTY_OR_NOOP_PATCH",
+        "Proposal contains no concrete semantic diff where before != after.",
+      );
+    }
+
+    const strategyAuthorities = Array.isArray(proposal.affectedAuthorities)
+      ? (proposal.affectedAuthorities as string[]).filter((a) => Boolean(a) && a !== "PLAN_SYNTHESIS")
+      : [];
+
+    const targetTaskIds: string[] = Array.isArray(propMeta.targetTaskIds)
+      ? propMeta.targetTaskIds.filter(Boolean)
+      : Array.isArray(propMeta.affectedTaskIds)
+        ? propMeta.affectedTaskIds.filter(Boolean)
+        : [];
+    const targetPlanId: string | null = propMeta.targetPlanId || propMeta.strategicPlanId || null;
+
+    if (resolvedTargetType === "STRATEGY") {
+      if (!proposal.currentStrategyRootId || strategyAuthorities.length === 0) {
+        throw new ProposalApplyError(
+          422,
+          "MISSING_STRATEGY_TARGET",
+          "Strategy proposal must specify a valid currentStrategyRootId and at least one strategic authority.",
+        );
+      }
+    } else {
+      if (targetTaskIds.length === 0 && !targetPlanId) {
+        throw new ProposalApplyError(
+          422,
+          "MISSING_EXECUTION_TARGET",
+          "Execution adjustment proposal must specify valid targetTaskIds or targetPlanId.",
+        );
+      }
+    }
+
+    // 6. Current Expected Target Version & Stale Target Protection
     const activeRoot = await getActiveRoot(proposal.campaignId, accountId);
     if (!activeRoot || activeRoot.id !== proposal.currentStrategyRootId) {
       await db
@@ -1318,17 +1528,174 @@ export class StrategyExperienceService {
         .set({ status: "STALE", rejectionReason: "Active Strategy Root changed since proposal was generated." })
         .where(eq(schema.strategyChangeProposals.id, proposalId));
 
-      throw new Error("PROPOSAL_STALE: Strategy has changed since this proposal was created. Reevaluation required.");
+      throw new ProposalApplyError(
+        409,
+        "PROPOSAL_STALE",
+        "Strategy has changed since this proposal was created. Reevaluation required.",
+      );
     }
 
-    // Mark proposal APPROVED
-    await db
-      .update(schema.strategyChangeProposals)
-      .set({ status: "APPROVED", reviewedAt: new Date() })
-      .where(eq(schema.strategyChangeProposals.id, proposalId));
+    const [activeBundle] = await db
+      .select()
+      .from(schema.rootBundles)
+      .where(
+        and(
+          eq(schema.rootBundles.campaignId, proposal.campaignId),
+          eq(schema.rootBundles.accountId, accountId),
+          eq(schema.rootBundles.status, "active"),
+        ),
+      )
+      .orderBy(desc(schema.rootBundles.version))
+      .limit(1);
 
-    // Construct AdaptiveDecision object from persisted records
+    if (
+      proposal.currentRootBundleVersion &&
+      activeBundle &&
+      activeBundle.version !== proposal.currentRootBundleVersion
+    ) {
+      await db
+        .update(schema.strategyChangeProposals)
+        .set({
+          status: "STALE",
+          rejectionReason: `Active Root Bundle version (${activeBundle.version}) does not match proposal target version (${proposal.currentRootBundleVersion}).`,
+        })
+        .where(eq(schema.strategyChangeProposals.id, proposalId));
+
+      throw new ProposalApplyError(
+        409,
+        "PROPOSAL_STALE",
+        `Root Bundle version changed from v${proposal.currentRootBundleVersion} to v${activeBundle.version}.`,
+      );
+    }
+
+    if (
+      options?.expectedVersion !== undefined &&
+      Number(options.expectedVersion) !== Number(proposal.currentRootBundleVersion)
+    ) {
+      throw new ProposalApplyError(
+        409,
+        "PROPOSAL_STALE",
+        `Expected target version (${options.expectedVersion}) does not match proposal version (${proposal.currentRootBundleVersion}).`,
+      );
+    }
+
+    const [activePlan] = await db
+      .select()
+      .from(schema.strategicPlans)
+      .where(
+        and(
+          eq(schema.strategicPlans.campaignId, proposal.campaignId),
+          eq(schema.strategicPlans.accountId, accountId),
+        ),
+      )
+      .orderBy(desc(schema.strategicPlans.isDesignatedActive), desc(schema.strategicPlans.version))
+      .limit(1);
+
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const approvedBy = options?.approvedBy || `account:${accountId}`;
+
+    // 7A. EXECUTION ADJUSTMENT PATH (mutates execution/plan tasks only, never mutates Strategy Root)
+    if (resolvedTargetType === "EXECUTION") {
+      if (targetPlanId && (!activePlan || activePlan.id !== targetPlanId)) {
+        await db
+          .update(schema.strategyChangeProposals)
+          .set({ status: "STALE", rejectionReason: "Target execution plan is no longer active." })
+          .where(eq(schema.strategyChangeProposals.id, proposalId));
+
+        throw new ProposalApplyError(
+          409,
+          "PROPOSAL_STALE",
+          "Target execution plan has changed since this proposal was created.",
+        );
+      }
+
+      if (!activePlan) {
+        throw new ProposalApplyError(
+          422,
+          "MISSING_EXECUTION_TARGET",
+          "No active strategic plan found to apply the execution adjustment.",
+        );
+      }
+
+      const txResult = await db.transaction(async (tx) => {
+        let planObj: Record<string, any> = {};
+        try {
+          planObj =
+            typeof activePlan.planJson === "string"
+              ? JSON.parse(activePlan.planJson || "{}")
+              : (activePlan.planJson as Record<string, any>) || {};
+        } catch {
+          planObj = {};
+        }
+
+        const existingAdjustments = Array.isArray(planObj.executionAdjustments)
+          ? planObj.executionAdjustments
+          : [];
+        const adjustmentRecord = {
+          proposalId: proposal.id,
+          adaptiveDecisionId: proposal.adaptiveDecisionId,
+          reasoningCaseId: proposal.reasoningCaseId,
+          approvedBy,
+          approvedAt: nowIso,
+          appliedAt: nowIso,
+          targetTaskIds,
+          diffs: validDiffs,
+          summary: proposal.summary,
+        };
+        planObj.executionAdjustments = [...existingAdjustments, adjustmentRecord];
+
+        await tx
+          .update(schema.strategicPlans)
+          .set({
+            planJson: JSON.stringify(planObj),
+          })
+          .where(eq(schema.strategicPlans.id, activePlan.id));
+
+        await tx
+          .update(schema.strategyChangeProposals)
+          .set({
+            status: "APPLIED",
+            reviewedAt: now,
+            appliedAt: now,
+            metadata: {
+              ...propMeta,
+              targetType: "EXECUTION",
+              approvedBy,
+              approvedAt: nowIso,
+              appliedPlanId: activePlan.id,
+              appliedTaskIds: targetTaskIds,
+              beforeAfterPatchPreview: validDiffs,
+            },
+          })
+          .where(eq(schema.strategyChangeProposals.id, proposalId));
+
+        return adjustmentRecord;
+      });
+
+      return {
+        status: "SUCCESS",
+        executionStatus: "EXECUTION_ADJUSTMENT_APPLIED",
+        targetType: "EXECUTION",
+        proposalId: proposal.id,
+        appliedPlanId: activePlan.id,
+        appliedTaskIds: targetTaskIds,
+        appliedDiffs: validDiffs,
+        materiallyChangedAuthorities: [],
+        revalidatedAuthorities: [],
+        reassembledAuthorities: [],
+        preservedAuthorities: (proposal.preservedAuthorities as string[]) || [],
+        changedAuthorities: [],
+        newRoot: null,
+        newPlan: null,
+        executionSignals: [txResult],
+        summary: proposal.summary,
+      };
+    }
+
+    // 7B. STRATEGY MUTATION PATH
     const affectedLaneIds: string[] = (proposal.affectedLaneIds as string[]) || [];
+    const primaryStrategyAuthority = strategyAuthorities[0] as StrategicAuthorityName;
 
     const decision: AdaptiveDecision = {
       adaptiveDecisionId: proposal.adaptiveDecisionId,
@@ -1338,16 +1705,17 @@ export class StrategyExperienceService {
       strategyRootId: proposal.currentStrategyRootId,
       strategyRootVersion: proposal.currentRootBundleVersion || 1,
       decisionType: proposal.decisionType as any,
-      affectedAuthority: ((proposal.affectedAuthorities as string[])?.[0] as StrategicAuthorityName) || "DIFFERENTIATION",
+      affectedAuthority: primaryStrategyAuthority,
       affectedLaneIds,
       affectedEntityIds: affectedLaneIds,
       evidenceIds: [],
-      confidence: 0.9,
+      confidence: linkedDecision?.confidence ?? 0.85,
       rationale: proposal.whyNow,
       createdAt: proposal.createdAt.toISOString(),
       metadata: {
         affectedLaneIds,
         proposalId: proposal.id,
+        beforeAfterPatchPreview: validDiffs,
       },
     };
 
@@ -1383,165 +1751,252 @@ export class StrategyExperienceService {
       approvedLanes,
     };
 
-    // Execute targeted adaptation
+    // Execute targeted adaptation using the approved semantic diff (or caller-supplied engine handler)
+    const effectiveOptions: any = {
+      ...options,
+      mockEngineHandler:
+        options?.mockEngineHandler ||
+        (async (authority: StrategicAuthorityName) => {
+          if (strategyAuthorities.includes(authority)) {
+            return {
+              result: "CHANGED",
+              newArtifactId: `artifact_${authority.toLowerCase()}_${randomUUID().slice(0, 8)}`,
+              payload: {
+                authority,
+                appliedDiffs: validDiffs,
+              },
+            };
+          }
+          return {
+            result: "NO_CHANGE_REQUIRED",
+          };
+        }),
+    };
+
     const executionResult = await executeAdaptiveDecision(
       decision,
       currentRootContext,
       {
         activeRootVersion: proposal.currentRootBundleVersion || 1,
       },
-      options
+      effectiveOptions
     );
+
+    if (executionResult.executionStatus === "NO_CHANGE_CONFIRMED") {
+      await db
+        .update(schema.strategyChangeProposals)
+        .set({
+          status: "REJECTED",
+          reviewedAt: now,
+          rejectionReason: "No-op: Reevaluation verified that current strategy remains optimal; no strategy mutation committed.",
+        })
+        .where(eq(schema.strategyChangeProposals.id, proposalId));
+
+      throw new ProposalApplyError(
+        422,
+        "EMPTY_OR_NOOP_PATCH",
+        "Reevaluation confirmed no material strategy change is required; proposal cannot be marked APPLIED.",
+      );
+    }
+
+    if (executionResult.executionStatus === "FAILED" || !executionResult.newRoot) {
+      throw new ProposalApplyError(
+        422,
+        "APPLY_EXECUTION_FAILED",
+        executionResult.summary || "Strategy adaptation failed to produce a valid mutation.",
+      );
+    }
 
     if (executionResult.executionStatus === "STRATEGY_UPDATED" && executionResult.newRoot) {
       const newVersion = (proposal.currentRootBundleVersion || 1) + 1;
 
-      // 1. Supersede previous active root
-      await db
-        .update(schema.strategyRoots)
-        .set({ status: "SUPERSEDED" })
-        .where(
-          and(
-            eq(schema.strategyRoots.campaignId, proposal.campaignId),
-            eq(schema.strategyRoots.accountId, accountId),
-            eq(schema.strategyRoots.status, "ACTIVE")
-          )
-        );
+      // Apply concrete semantic diffs to the new root fields so the persisted root reflects the approved diff
+      let nextPrimaryAxis = activeRoot.primaryAxis;
+      let nextContrastAxisText = activeRoot.contrastAxisText;
+      let nextApprovedClaim = activeRoot.approvedClaim;
+      let nextApprovedPromise = activeRoot.approvedPromise;
 
-      // 2. Insert new immutable Strategy Root
-      const [newRootRow] = await db
-        .insert(schema.strategyRoots)
-        .values({
-          accountId,
-          campaignId: proposal.campaignId,
-          runId: `run_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-          rootHash: `hash_${randomUUID().slice(0, 16)}`,
-          primaryAxis: activeRoot.primaryAxis,
-          contrastAxisText: activeRoot.contrastAxisText,
-          approvedMechanism: typeof activeRoot.approvedMechanism === "string" ? activeRoot.approvedMechanism : JSON.stringify(activeRoot.approvedMechanism),
-          approvedAudiencePains: typeof activeRoot.approvedAudiencePains === "string" ? activeRoot.approvedAudiencePains : JSON.stringify(activeRoot.approvedAudiencePains),
-          approvedDesires: typeof activeRoot.approvedDesires === "string" ? activeRoot.approvedDesires : JSON.stringify(activeRoot.approvedDesires),
-          approvedTransformation: activeRoot.approvedTransformation,
-          approvedClaim: activeRoot.approvedClaim,
-          approvedClaims: typeof activeRoot.approvedClaims === "string" ? activeRoot.approvedClaims : JSON.stringify(activeRoot.approvedClaims || []),
-          approvedPromise: activeRoot.approvedPromise,
-          approvedObjections: typeof activeRoot.approvedObjections === "string" ? activeRoot.approvedObjections : JSON.stringify(activeRoot.approvedObjections),
-          approvedProofTypes: typeof activeRoot.approvedProofTypes === "string" ? activeRoot.approvedProofTypes : JSON.stringify(activeRoot.approvedProofTypes),
-          approvedPositioningContext: typeof activeRoot.approvedPositioningContext === "string" ? activeRoot.approvedPositioningContext : JSON.stringify(activeRoot.approvedPositioningContext),
-          brandSpine: typeof activeRoot.brandSpine === "string" ? activeRoot.brandSpine : (activeRoot.brandSpine ? JSON.stringify(activeRoot.brandSpine) : null),
-          approvedLanes: typeof activeRoot.approvedLanes === "string" ? activeRoot.approvedLanes : (activeRoot.approvedLanes ? JSON.stringify(activeRoot.approvedLanes) : null),
-          miSnapshotId: activeRoot.miSnapshotId,
-          audienceSnapshotId: activeRoot.audienceSnapshotId,
-          positioningSnapshotId: activeRoot.positioningSnapshotId,
-          differentiationSnapshotId: activeRoot.differentiationSnapshotId,
-          mechanismSnapshotId: activeRoot.mechanismSnapshotId,
-          status: "ACTIVE",
-        })
-        .returning();
+      for (const diff of validDiffs) {
+        const afterVal = String(diff.afterText ?? diff.after ?? "").trim();
+        const section = String(diff.sectionName ?? diff.section ?? diff.fieldLabel ?? "").toLowerCase();
+        const auth = String(diff.authority ?? primaryStrategyAuthority ?? "").toUpperCase();
+        if (!afterVal) continue;
+        if (section.includes("promise") || auth === "OFFER") {
+          nextApprovedPromise = afterVal;
+        } else if (section.includes("axis") || section.includes("differentiation") || auth === "DIFFERENTIATION") {
+          nextContrastAxisText = afterVal;
+        } else if (section.includes("claim") || section.includes("positioning") || auth === "POSITIONING") {
+          nextApprovedClaim = afterVal;
+        } else {
+          nextApprovedClaim = afterVal;
+        }
+      }
 
-      // 3. Supersede previous active bundle and insert new active Root Bundle
-      await db
-        .update(schema.rootBundles)
-        .set({ status: "stale" })
-        .where(
-          and(
-            eq(schema.rootBundles.campaignId, proposal.campaignId),
-            eq(schema.rootBundles.accountId, accountId)
-          )
-        );
+      const { newRootRow, newPlanRow } = await db.transaction(async (tx) => {
+        // 1. Supersede previous active root
+        await tx
+          .update(schema.strategyRoots)
+          .set({ status: "SUPERSEDED" })
+          .where(
+            and(
+              eq(schema.strategyRoots.campaignId, proposal.campaignId),
+              eq(schema.strategyRoots.accountId, accountId),
+              eq(schema.strategyRoots.status, "ACTIVE")
+            )
+          );
 
-      const [newBundleRow] = await db
-        .insert(schema.rootBundles)
-        .values({
-          accountId,
-          campaignId: proposal.campaignId,
-          version: newVersion,
-          strategyRootId: newRootRow.id,
-          status: "active",
-          bundleData: JSON.stringify({
+        // 2. Insert new immutable Strategy Root
+        const [insertedRootRow] = await tx
+          .insert(schema.strategyRoots)
+          .values({
+            accountId,
+            campaignId: proposal.campaignId,
+            runId: `run_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+            rootHash: `hash_${randomUUID().slice(0, 16)}`,
+            primaryAxis: nextPrimaryAxis,
+            contrastAxisText: nextContrastAxisText,
+            approvedMechanism: typeof activeRoot.approvedMechanism === "string" ? activeRoot.approvedMechanism : JSON.stringify(activeRoot.approvedMechanism),
+            approvedAudiencePains: typeof activeRoot.approvedAudiencePains === "string" ? activeRoot.approvedAudiencePains : JSON.stringify(activeRoot.approvedAudiencePains),
+            approvedDesires: typeof activeRoot.approvedDesires === "string" ? activeRoot.approvedDesires : JSON.stringify(activeRoot.approvedDesires),
+            approvedTransformation: activeRoot.approvedTransformation,
+            approvedClaim: nextApprovedClaim,
+            approvedClaims: typeof activeRoot.approvedClaims === "string" ? activeRoot.approvedClaims : JSON.stringify(activeRoot.approvedClaims || []),
+            approvedPromise: nextApprovedPromise,
+            approvedObjections: typeof activeRoot.approvedObjections === "string" ? activeRoot.approvedObjections : JSON.stringify(activeRoot.approvedObjections),
+            approvedProofTypes: typeof activeRoot.approvedProofTypes === "string" ? activeRoot.approvedProofTypes : JSON.stringify(activeRoot.approvedProofTypes),
+            approvedPositioningContext: typeof activeRoot.approvedPositioningContext === "string" ? activeRoot.approvedPositioningContext : JSON.stringify(activeRoot.approvedPositioningContext),
+            brandSpine: typeof activeRoot.brandSpine === "string" ? activeRoot.brandSpine : (activeRoot.brandSpine ? JSON.stringify(activeRoot.brandSpine) : null),
+            approvedLanes: typeof activeRoot.approvedLanes === "string" ? activeRoot.approvedLanes : (activeRoot.approvedLanes ? JSON.stringify(activeRoot.approvedLanes) : null),
+            miSnapshotId: activeRoot.miSnapshotId,
+            audienceSnapshotId: activeRoot.audienceSnapshotId,
+            positioningSnapshotId: activeRoot.positioningSnapshotId,
+            differentiationSnapshotId: activeRoot.differentiationSnapshotId,
+            mechanismSnapshotId: activeRoot.mechanismSnapshotId,
+            status: "ACTIVE",
+          })
+          .returning();
+
+        // 3. Supersede previous active bundle and insert new active Root Bundle
+        await tx
+          .update(schema.rootBundles)
+          .set({ status: "stale" })
+          .where(
+            and(
+              eq(schema.rootBundles.campaignId, proposal.campaignId),
+              eq(schema.rootBundles.accountId, accountId)
+            )
+          );
+
+        const [newBundleRow] = await tx
+          .insert(schema.rootBundles)
+          .values({
+            accountId,
+            campaignId: proposal.campaignId,
             version: newVersion,
-            strategyRootId: newRootRow.id,
+            strategyRootId: insertedRootRow.id,
+            status: "active",
+            bundleData: JSON.stringify({
+              version: newVersion,
+              strategyRootId: insertedRootRow.id,
+              changedAuthorities: executionResult.changedAuthorities,
+              preservedAuthorities: executionResult.preservedAuthorities,
+              appliedDiffs: validDiffs,
+            }),
+          } as any)
+          .returning();
+
+        // 4. Supersede previous strategic plans and insert new Strategic Plan
+        await tx
+          .update(schema.strategicPlans)
+          .set({ status: "SUPERSEDED", isDesignatedActive: false })
+          .where(
+            and(
+              eq(schema.strategicPlans.campaignId, proposal.campaignId),
+              eq(schema.strategicPlans.accountId, accountId)
+            )
+          );
+
+        const [insertedPlanRow] = await tx
+          .insert(schema.strategicPlans)
+          .values({
+            accountId,
+            campaignId: proposal.campaignId,
+            blueprintId: `bp_${randomUUID().slice(0, 8)}`,
+            planJson: JSON.stringify({
+              ...(executionResult.newPlan?.sections || {}),
+              appliedProposalId: proposal.id,
+              appliedDiffs: validDiffs,
+            }),
+            planSummary: `Updated Strategy Plan v${newVersion} following targeted recompute of ${executionResult.changedAuthorities.join(", ")}.`,
+            status: "APPROVED",
+            executionStatus: "ACTIVE",
+            isDesignatedActive: true,
+            rootBundleId: newBundleRow.id,
+            rootBundleVersion: newVersion,
+            version: newVersion,
+          })
+          .returning();
+
+        // 5. Record lineage
+        await tx
+          .insert(schema.strategyAdaptationLineages)
+          .values({
+            campaignId: proposal.campaignId,
+            accountId,
+            previousRootId: activeRoot.id,
+            previousRootVersion: proposal.currentRootBundleVersion || 1,
+            newRootId: insertedRootRow.id,
+            newRootVersion: newVersion,
+            triggerReasoningCaseId: proposal.reasoningCaseId || null,
+            triggerAdaptiveDecisionId: proposal.adaptiveDecisionId,
             changedAuthorities: executionResult.changedAuthorities,
             preservedAuthorities: executionResult.preservedAuthorities,
-          }),
-        })
-        .returning();
+            sourceEventIds: (linkedCase?.marketEventIds as string[]) || [],
+            sourcePerformanceWarningIds: (linkedCase?.performanceWarningIds as string[]) || [],
+            evidenceIds: (linkedCase?.evidenceIds as string[]) || [],
+          } as any);
 
-      // 4. Supersede previous strategic plans and insert new Strategic Plan
-      await db
-        .update(schema.strategicPlans)
-        .set({ status: "SUPERSEDED" })
-        .where(
-          and(
-            eq(schema.strategicPlans.campaignId, proposal.campaignId),
-            eq(schema.strategicPlans.accountId, accountId)
-          )
-        );
+        // 6. Record adaptation outcome monitoring (truthful initial observation state)
+        await tx
+          .insert(schema.strategyAdaptationOutcomes)
+          .values({
+            campaignId: proposal.campaignId,
+            accountId,
+            adaptiveDecisionId: proposal.adaptiveDecisionId,
+            reasoningCaseId: proposal.reasoningCaseId || `rcase_auto_${randomUUID().slice(0, 8)}`,
+            status: "MONITORING",
+            outcomeClassification: "INSUFFICIENT_OBSERVATION_WINDOW",
+            confidence: 0,
+            summary: `Monitoring 14-day post-apply window following ${executionResult.changedAuthorities.join(", ")} update (Root v${proposal.currentRootBundleVersion || 1} → v${newVersion}).`,
+            previousRootId: activeRoot.id,
+            previousRootVersion: proposal.currentRootBundleVersion || 1,
+            newRootId: insertedRootRow.id,
+            newRootVersion: newVersion,
+            changedAuthorities: executionResult.changedAuthorities,
+            observationWindowDays: 14,
+          } as any);
 
-      const [newPlanRow] = await db
-        .insert(schema.strategicPlans)
-        .values({
-          accountId,
-          campaignId: proposal.campaignId,
-          blueprintId: `bp_${randomUUID().slice(0, 8)}`,
-          planJson: JSON.stringify(executionResult.newPlan?.sections || {}),
-          planSummary: `Updated Strategy Plan v${newVersion} following targeted recompute of ${executionResult.changedAuthorities.join(", ")}.`,
-          status: "ACTIVE",
-          rootBundleId: newBundleRow.id,
-          rootBundleVersion: newVersion,
-          version: newVersion,
-        })
-        .returning();
+        // 7. Update Proposal Status to APPLIED transactionally after mutation commits
+        await tx
+          .update(schema.strategyChangeProposals)
+          .set({
+            status: "APPLIED",
+            reviewedAt: now,
+            appliedAt: now,
+            appliedNewRootId: insertedRootRow.id,
+            appliedNewBundleVersion: newVersion,
+            metadata: {
+              ...propMeta,
+              targetType: "STRATEGY",
+              approvedBy,
+              approvedAt: nowIso,
+              beforeAfterPatchPreview: validDiffs,
+            },
+          })
+          .where(eq(schema.strategyChangeProposals.id, proposalId));
 
-      // 5. Record lineage
-      await db
-        .insert(schema.strategyAdaptationLineages)
-        .values({
-          campaignId: proposal.campaignId,
-          accountId,
-          previousRootId: activeRoot.id,
-          previousRootVersion: proposal.currentRootBundleVersion || 1,
-          newRootId: newRootRow.id,
-          newRootVersion: newVersion,
-          triggerReasoningCaseId: proposal.reasoningCaseId || null,
-          triggerAdaptiveDecisionId: proposal.adaptiveDecisionId,
-          changedAuthorities: executionResult.changedAuthorities,
-          preservedAuthorities: executionResult.preservedAuthorities,
-          sourceEventIds: [],
-          sourcePerformanceWarningIds: [],
-          evidenceIds: [],
-        });
-
-      // 6. Record adaptation outcome monitoring
-      await db
-        .insert(schema.strategyAdaptationOutcomes)
-        .values({
-          campaignId: proposal.campaignId,
-          accountId,
-          adaptiveDecisionId: proposal.adaptiveDecisionId,
-          reasoningCaseId: proposal.reasoningCaseId || `rcase_auto_${randomUUID().slice(0, 8)}`,
-          status: "MONITORING",
-          outcomeClassification: "POSITIVE_ALIGNMENT",
-          confidence: 0.9,
-          summary: executionResult.summary,
-          previousRootId: activeRoot.id,
-          previousRootVersion: proposal.currentRootBundleVersion || 1,
-          newRootId: newRootRow.id,
-          newRootVersion: newVersion,
-          changedAuthorities: executionResult.changedAuthorities,
-          observationWindowDays: 14,
-        });
-
-      // 7. Update Proposal Status to APPLIED
-      await db
-        .update(schema.strategyChangeProposals)
-        .set({
-          status: "APPLIED",
-          appliedAt: new Date(),
-          appliedNewRootId: newRootRow.id,
-          appliedNewBundleVersion: newVersion,
-        })
-        .where(eq(schema.strategyChangeProposals.id, proposalId));
+        return { newRootRow: insertedRootRow, newPlanRow: insertedPlanRow };
+      });
 
       executionResult.newRoot = { ...newRootRow, version: newVersion };
       executionResult.newPlan = {
@@ -1551,38 +2006,16 @@ export class StrategyExperienceService {
         strategyRootId: newRootRow.id,
         strategyRootVersion: newVersion,
         planVersion: newVersion,
-        sections: executionResult.newPlan?.sections || {},
-        assembledAt: new Date().toISOString(),
-      };
-    } else if (executionResult.executionStatus === "NO_CHANGE_CONFIRMED") {
-      await db
-        .update(schema.strategyChangeProposals)
-        .set({
-          status: "APPLIED",
-          appliedAt: new Date(),
-          rejectionReason: "Reevaluation verified that current strategy remains optimal. No material changes required.",
-        })
-        .where(eq(schema.strategyChangeProposals.id, proposalId));
-    } else if (executionResult.executionStatus === "FAILED") {
-      return {
-        status: "BLOCKED",
-        executionStatus: "FAILED",
-        materiallyChangedAuthorities: [],
-        revalidatedAuthorities: [],
-        reassembledAuthorities: [],
-        preservedAuthorities: executionResult.preservedAuthorities || [],
-        changedAuthorities: [],
-        newRoot: null,
-        newPlan: null,
-        executionSignals: [],
-        summary: "Avyron identified a strategic area that requires reevaluation, but this specific automated update path is not currently available.",
-        internalReason: executionResult.summary,
+        sections: (executionResult.newPlan?.sections || {}) as any,
+        assembledAt: nowIso,
       };
     }
 
     return {
       status: "SUCCESS",
       executionStatus: executionResult.executionStatus,
+      targetType: "STRATEGY",
+      appliedVersion: (proposal.currentRootBundleVersion || 1) + 1,
       materiallyChangedAuthorities: executionResult.materiallyChangedAuthorities || executionResult.changedAuthorities || [],
       revalidatedAuthorities: executionResult.revalidatedAuthorities || [],
       reassembledAuthorities: executionResult.reassembledAuthorities || [],

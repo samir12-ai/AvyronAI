@@ -435,7 +435,7 @@ export function registerExecutionRoutes(app: Express) {
         .select()
         .from(strategicPlans)
         .where(eq(strategicPlans.accountId, accountId))
-        .orderBy(sql`${strategicPlans.createdAt} DESC`);
+        .orderBy(sql`${strategicPlans.isDesignatedActive} DESC, ${strategicPlans.createdAt} DESC`);
 
       res.json({ success: true, plans });
     } catch (err: any) {
@@ -1114,6 +1114,13 @@ export function registerExecutionRoutes(app: Express) {
       if (campaignId) {
         try {
           resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+          if (!requestedRunId) {
+            const { resolvePlanContext } = await import("../orchestrator/execution-plan-resolver");
+            const planCtx = await resolvePlanContext({ campaignId, accountId, mode: "LATEST_VIEWABLE" });
+            if (planCtx.planId && planCtx.isDesignatedActive) {
+            resolved = { ...resolved, planId: planCtx.planId, runId: planCtx.jobId || resolved.runId };
+            }
+          }
         } catch (e: any) {
           return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
         }
@@ -1193,6 +1200,13 @@ export function registerExecutionRoutes(app: Express) {
       let resolved;
       try {
         resolved = await resolveRunId(campaignId, accountId, requestedRunId);
+        if (!requestedRunId) {
+          const { resolvePlanContext } = await import("../orchestrator/execution-plan-resolver");
+          const planCtx = await resolvePlanContext({ campaignId, accountId, mode: "LATEST_VIEWABLE" });
+          if (planCtx.planId && planCtx.isDesignatedActive) {
+            resolved = { ...resolved, planId: planCtx.planId, runId: planCtx.jobId || resolved.runId };
+          }
+        }
       } catch (e: any) {
         return res.status(404).json({ error: e.message, runId: null, isLatest: false, isStale: false });
       }
@@ -1225,7 +1239,7 @@ export function registerExecutionRoutes(app: Express) {
           .from(calendarEntries)
           .where(
             and(
-              eq(calendarEntries.planId, plan.id),
+              eq(calendarEntries.planId, plan.id), ne(calendarEntries.status, "SUPERSEDED"),
               eq(calendarEntries.accountId, accountId)
             )
           )
@@ -1266,7 +1280,7 @@ export function registerExecutionRoutes(app: Express) {
       const entries = await db
         .select()
         .from(calendarEntries)
-        .where(eq(calendarEntries.planId, planId))
+        .where(and(eq(calendarEntries.planId, planId), ne(calendarEntries.status, "SUPERSEDED")))
         .orderBy(sql`${calendarEntries.scheduledDate} ASC, ${calendarEntries.scheduledTime} ASC`);
 
       res.json({ success: true, entries });
@@ -1283,7 +1297,7 @@ export function registerExecutionRoutes(app: Express) {
       const items = await db
         .select()
         .from(studioItems)
-        .where(eq(studioItems.planId, planId))
+        .where(and(eq(studioItems.planId, planId), ne(studioItems.status, "SUPERSEDED")))
         .orderBy(sql`${studioItems.createdAt} DESC`);
 
       res.json({ success: true, items });
@@ -1311,7 +1325,7 @@ export function registerExecutionRoutes(app: Express) {
             sql`${strategicPlans.status} IN ('APPROVED', 'GENERATED_TO_CALENDAR', 'CREATIVE_GENERATED', 'REVIEW', 'SCHEDULED', 'PUBLISHED')`
           )
         )
-        .orderBy(sql`${strategicPlans.createdAt} DESC`);
+        .orderBy(sql`${strategicPlans.isDesignatedActive} DESC, ${strategicPlans.createdAt} DESC`);
 
       if (matchingPlans.length === 0) {
         return res.json({

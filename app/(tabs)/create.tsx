@@ -888,18 +888,18 @@ export default function CreativeStudioScreen() {
 
                 <View style={styles.contextCard}>
                   <Text style={styles.contextLabel}>Strategic Direction</Text>
-                  <Text style={styles.contextValueSmall}>{contextData?.strategyDirection || 'Simplicity & Ease'}</Text>
+                  <Text style={styles.contextValueSmall}>{contextData?.strategyDirection || (loadingContext ? 'Loading strategy direction...' : 'Not configured')}</Text>
                 </View>
 
                 <View style={styles.contextCard}>
                   <Text style={styles.contextLabel}>Current Offer</Text>
-                  <Text style={styles.contextValueSmall}>{contextData?.currentOffer || 'Core Platform Trial'}</Text>
+                  <Text style={styles.contextValueSmall}>{contextData?.currentOffer || (loadingContext ? 'Loading offer...' : 'Not configured')}</Text>
                 </View>
 
                 <View style={styles.contextCard}>
                   <Text style={styles.contextLabel}>Target Lane</Text>
                   <Text style={styles.contextValueSmall}>
-                    {contextData?.activeLanes?.find(l => l.id === activeLaneId)?.title || contextData?.activeLanes?.[0]?.title || 'Simplified Scheduling for SMB Managers'}
+                    {contextData?.activeLanes?.find(l => l.id === activeLaneId)?.title || contextData?.activeLanes?.[0]?.title || (loadingContext ? 'Loading target lane...' : 'All Approved Audience Lanes')}
                   </Text>
                 </View>
 
@@ -1049,11 +1049,11 @@ export default function CreativeStudioScreen() {
                 </View>
                 <View style={styles.contextCard}>
                   <Text style={styles.contextLabel}>Strategic Direction</Text>
-                  <Text style={styles.contextValueSmall}>{contextData?.strategyDirection || 'Simplicity & Ease'}</Text>
+                  <Text style={styles.contextValueSmall}>{contextData?.strategyDirection || (loadingContext ? 'Loading strategy direction...' : 'Not configured')}</Text>
                 </View>
                 <View style={styles.contextCard}>
                   <Text style={styles.contextLabel}>Current Offer</Text>
-                  <Text style={styles.contextValueSmall}>{contextData?.currentOffer || 'Core Platform Trial'}</Text>
+                  <Text style={styles.contextValueSmall}>{contextData?.currentOffer || (loadingContext ? 'Loading offer...' : 'Not configured')}</Text>
                 </View>
               </View>
             </View>
@@ -1276,7 +1276,7 @@ export default function CreativeStudioScreen() {
                 </View>
                 <View style={styles.contextCard}>
                   <Text style={styles.contextLabel}>Strategic Direction</Text>
-                  <Text style={styles.contextValueSmall}>{contextData?.strategyDirection || 'Simplicity & Ease'}</Text>
+                  <Text style={styles.contextValueSmall}>{contextData?.strategyDirection || (loadingContext ? 'Loading strategy direction...' : 'Not configured')}</Text>
                 </View>
               </View>
             </View>

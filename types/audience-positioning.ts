@@ -79,6 +79,12 @@ export interface DecisionHistoryItemViewModel {
   authority: string;
 }
 
+export interface PositioningStatusBadge {
+  status: string;
+  label: string;
+  tone: "success" | "info" | "warning" | "danger" | "neutral";
+}
+
 export interface PositioningViewModel {
   umbrellaPosition: string;
   positioningStatement: string;
@@ -92,6 +98,84 @@ export interface PositioningViewModel {
   assumptions?: string[];
   validationNeeds?: string[];
   supportingEvidenceIds?: string[];
+  adoptionStatus?: PositioningStatusBadge;
+  factualSupportStatus?: PositioningStatusBadge;
+  marketValidationStatus?: PositioningStatusBadge;
+  competitiveOverlapStatus?: PositioningStatusBadge;
+  intendedBuyer?: {
+    segmentName: string;
+    laneTitles: string[];
+    coreBuyingTension: string;
+  };
+  chosenEmphasis?: {
+    territoryName: string;
+    contrastAxis: string;
+    narrativeDirection: string;
+    enemyDefinition: string;
+    rationale: string;
+    supportingCapabilities: string[];
+  };
+  competitiveOverlap?: {
+    comparisonStatus: string;
+    semanticCollisionScore: number;
+    overlapPercent: number;
+    closestCompetitor: string;
+    competitorClaim: string;
+    positioningOutcomeType: string;
+    summary: string;
+    previewCounterexampleCount: number;
+    deliverableCounterexampleCount: number;
+    opportunityScore: number;
+    saturationLevel: number;
+    modelUsed?: string;
+  };
+  diagnostics?: {
+    candidateTerritories: Array<{
+      name: string;
+      isPrimary: boolean;
+      opportunityScore?: number;
+      preCollisionOpportunityScore?: number;
+      saturationLevel?: number;
+      productTruthStatus?: string;
+      epistemicStatus?: string;
+      contrastAxis?: string;
+      narrativeDirection?: string;
+      rationale?: string;
+    }>;
+    perCompetitorOverlap: Array<{
+      competitorName: string;
+      claim: string;
+      score: number;
+      relationshipClass?: string;
+      rationale?: string;
+    }>;
+    previewCounterexamples: Array<{
+      competitorName: string;
+      previewTiming?: string;
+      evidenceText: string;
+    }>;
+    deliverableCounterexamples: Array<{
+      competitorName: string;
+      evidenceText: string;
+    }>;
+    collisionRevisionAudit: {
+      revisedAfterComparison: boolean;
+      retainedInitialCandidate: boolean;
+      selectionReason: string;
+      initialCollisionScore?: number;
+      postRevisionCollisionScore?: number;
+      proposedRevisionName?: string;
+      proposedRevisionContrastAxis?: string;
+    } | null;
+    reasoningSteps: string[];
+    validationMetadata: {
+      candidateHash?: string;
+      evidenceSnapshotId?: string;
+      validatedAt?: string;
+      passed?: boolean;
+      note?: string;
+    } | null;
+  };
   reasoningJourney: {
     step1: ReasoningStep;
     step2: ReasoningStep;

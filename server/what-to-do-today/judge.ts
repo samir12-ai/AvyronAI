@@ -10,33 +10,75 @@ import { ExecutionPlanningContext, DailyPlanDraft, ExecutionJudgeReport } from "
 import { generateDailyExecutionPlan } from "./planner";
 import { logger } from "../logger";
 
-export async function evaluateDailyPlanWithJudge(
+export function runDeterministicExecutionJudgeChecks(
   context: ExecutionPlanningContext,
   plan: DailyPlanDraft
-): Promise<ExecutionJudgeReport> {
-  // 1. Deterministic Constitutional Checks
+): { rejections: string[]; repairs: string[] } {
   const rejections: string[] = [];
   const repairs: string[] = [];
 
-  // Check task count feasibility (manageable day: 3 to 8 tasks)
   if (!plan.tasks || plan.tasks.length < 2) {
     rejections.push("DAILY_CAPACITY_UNDERUTILIZED: Plan contains fewer than 2 tasks.");
-    repairs.push("Generate at least 3-5 realistic tasks to cover the primary channel and key supporting ecosystem.");
+    repairs.push("Generate at least 3-5 realistic tasks across the approved channels and audience lanes.");
   } else if (plan.tasks.length > 9) {
-    rejections.push("DAILY_CAPACITY_EXCEEDED: Plan contains more than 9 tasks (unrealistic daily operator load).");
-    repairs.push("Consolidate tasks down to a focused 4-7 task plan prioritizing MUST_DO and SHOULD_DO executions.");
+    rejections.push("DAILY_CAPACITY_EXCEEDED: Plan contains more than 9 tasks (unrealistic daily load).");
+    repairs.push("Consolidate tasks down to a focused 4-6 task plan prioritizing MUST_DO and SHOULD_DO executions.");
   }
 
   // Check primary channel representation
   const primaryChannel = context.channelHierarchy.primaryChannel;
-  const primaryTasks = plan.tasks.filter(t => t.channel === primaryChannel);
+  const primaryTasks = (plan.tasks || []).filter(t => t.channel === primaryChannel);
   if (primaryTasks.length === 0) {
     rejections.push(`PRIMARY_CHANNEL_UNDERWEIGHTED: Selected primary channel ${primaryChannel} has 0 tasks.`);
-    repairs.push(`Ensure ${primaryChannel} receives the primary anchor asset execution (MUST_DO priority).`);
+    repairs.push(`Ensure ${primaryChannel} receives the primary anchor asset execution (MUST_DO priority, role PRIMARY).`);
+  }
+
+  // Check approved channel compliance
+  const approvedPlatforms = new Set(context.channelHierarchy.approvedChannels.map(c => c.platform));
+  const unapprovedTasks = (plan.tasks || []).filter(t => !approvedPlatforms.has(t.channel));
+  if (unapprovedTasks.length > 0) {
+    rejections.push(
+      `UNAPPROVED_CHANNEL_USED: Tasks generated for unapproved channels (${unapprovedTasks.map(t => t.channel).join(", ")}). Approved channels are: ${Array.from(approvedPlatforms).join(", ")}.`
+    );
+    repairs.push(`Assign all tasks strictly to approved channels: ${Array.from(approvedPlatforms).join(", ")}.`);
+  }
+
+  // Check audience lane & CTA fidelity against the campaign's approved strategy corpus
+  const validLaneIds = new Set(context.approvedLanes.map(l => l.laneId));
+  const approvedStrategyCorpus = [
+    context.strategyName,
+    context.offerSummary,
+    context.approvedPromise,
+    context.funnelJourney?.ctaPrimary,
+    context.funnelJourney?.conversionPath,
+    ...context.approvedLanes.flatMap(l => (l.funnelStages || []).map(s => `${s.stageName} ${s.cta || ""} ${s.conversionAction || ""}`)),
+    ...context.approvedLanes.map(l => `${l.title} ${l.targetRole || ""} ${l.primaryPain || ""} ${l.primaryCta || ""} ${l.conversionAction || ""}`),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+  const strategySupportsWebinarOrDemo = /\b(webinar|demo)\b/i.test(approvedStrategyCorpus);
+  const strategySupportsOperatorsTerm = /\boperators?\b/i.test(approvedStrategyCorpus);
+
+  for (const t of plan.tasks || []) {
+    if (t.laneId && !validLaneIds.has(t.laneId)) {
+      rejections.push(`INVALID_LANE_REFERENCE: Task "${t.title}" references unknown laneId "${t.laneId}".`);
+      repairs.push(`Use only approved laneIds: ${Array.from(validLaneIds).join(", ")}.`);
+    }
+    const taskCombinedText = `${t.title} ${t.description} ${t.ctaDestination || ""}`;
+    if (!strategySupportsWebinarOrDemo && /\bwebinar\s*\/?\s*demo\b/i.test(taskCombinedText)) {
+      rejections.push(`UNSUPPORTED_FUNNEL_CTA: Task "${t.title}" uses "Webinar / Demo" which is not present in the campaign's approved offer or funnel strategy.`);
+      repairs.push(`Use the campaign's approved funnel CTA ("${context.funnelJourney?.ctaPrimary || "Approved Funnel CTA"}") and product URL (${context.productUrl || ""}).`);
+    }
+    if (!strategySupportsOperatorsTerm && /\b(target audience operators|serious operators)\b/i.test(taskCombinedText)) {
+      rejections.push(`UNSUPPORTED_AUDIENCE_TERM: Task "${t.title}" uses generic template audience text ("operators") not present in the campaign's approved audience segments or lanes.`);
+      repairs.push(`Reference the campaign's approved audience segments: ${context.approvedLanes.map(l => l.targetRole || l.title).join(", ")}.`);
+    }
   }
 
   // Check for duplicate titles across channels (copy-paste check)
-  const titles = plan.tasks.map(t => t.title.toLowerCase().trim());
+  const titles = (plan.tasks || []).map(t => t.title.toLowerCase().trim());
   const uniqueTitles = new Set(titles);
   if (uniqueTitles.size < titles.length) {
     rejections.push("CROSS_CHANNEL_COPY_PASTE: Duplicate task titles detected across channels.");
@@ -49,28 +91,46 @@ export async function evaluateDailyPlanWithJudge(
     repairs.push("Write a concrete, strategy-grounded mission sentence for today's work.");
   }
 
+  return { rejections, repairs };
+}
+
+export async function evaluateDailyPlanWithJudge(
+  context: ExecutionPlanningContext,
+  plan: DailyPlanDraft
+): Promise<ExecutionJudgeReport> {
+  // 1. Deterministic Constitutional Checks
+  const { rejections, repairs } = runDeterministicExecutionJudgeChecks(context, plan);
+  const primaryChannel = context.channelHierarchy.primaryChannel;
+
+  const approvedChannelListStr = context.channelHierarchy.approvedChannels
+    .map(c => `${c.channelName} (${c.platform}, ${c.mode}, Role: ${c.strategicRole}${c.allocationPct !== undefined ? `, ${c.allocationPct}% share` : ""})`)
+    .join("; ");
+
+  const approvedDestinationStr =
+    context.funnelJourney?.conversionPath ||
+    `${context.funnelJourney?.ctaPrimary || "Approved Funnel CTA"}${context.productUrl ? ` (${context.productUrl})` : ""}`;
+
   // 2. LLM Semantic Judge Check
-  const judgePrompt = `You are a Senior Strategic Execution Auditor. Your task is to rigorously evaluate whether this daily execution plan faithfully and natively executes the approved B2B SaaS strategy without inventing strategy or creating copy-paste busywork.
+  const judgePrompt = `You are a Senior Strategic Execution Auditor. Your task is to rigorously evaluate whether this daily execution plan faithfully and natively executes the approved campaign strategy without inventing strategy, channels, or generic copy-paste busywork.
 
 CONSTITUTIONAL EVALUATION CRITERIA:
-1. STRATEGY FIDELITY: Every task derives from the approved strategy (${context.strategyName}, ${context.approvedMechanism.mechanismName}).
-2. NO STRATEGY INVENTION: No unapproved new targets, pains, mechanisms, or offers.
-3. PRIMARY CHANNEL EMPHASIS: Primary channel (${primaryChannel}) receives significant strategic depth.
-4. FULL CHANNEL ECOSYSTEM: Supporting channels (Instagram, TikTok, Facebook, X) are meaningfully engaged with native format adaptation.
+1. STRATEGY FIDELITY: Every task derives from the approved positioning ("${context.strategyName}") and mechanism ("${context.approvedMechanism.mechanismName}").
+2. NO STRATEGY INVENTION: No unapproved targets, pains, mechanisms, offers, or invented B2B templates (like "Webinar / Demo" unless explicitly part of the offer).
+3. PRIMARY CHANNEL EMPHASIS: Primary strategic channel (${primaryChannel}, mode: ${context.channelHierarchy.primaryChannelMode}) receives primary strategic depth and MUST_DO anchor execution.
+4. APPROVED CHANNEL ECOSYSTEM: Tasks execute strictly on the campaign's approved channels (${approvedChannelListStr}) with native format adaptation.
 5. PLATFORM NATIVENESS: No copy-pasting of identical content across platforms.
-6. CROSS-CHANNEL COHERENCE: All tasks align toward one coherent daily strategy.
-7. DEPENDENCY VALIDITY: Downstream clips/assets are sequenced logically.
-8. DAILY FEASIBILITY: The plan is executable by a real marketing team in one business day.
-9. STRATEGIC USEFULNESS: Tasks create real leverage toward the funnel destination (${context.funnelJourney?.conversionPath || "Webinar/Demo"}).
-10. BUDGET COMPLIANCE: Adheres to mode "${context.budgetConstraints.operationalMode}" (${context.budgetConstraints.spendRule}).
+6. AUDIENCE LANE CONTINUITY: Tasks address the approved audience lanes (${context.approvedLanes.map(l => `[${l.laneId}] ${l.title}`).join("; ")}) and their specific pains, objections, and proof requirements.
+7. FUNNEL & CTA FIDELITY: Tasks drive toward the approved funnel destination (${approvedDestinationStr}).
+8. BUDGET & MODE COMPLIANCE: Adheres to mode "${context.budgetConstraints.operationalMode}" (${context.budgetConstraints.spendRule}).
 
 APPROVED STRATEGY:
-- Strategy Name: ${context.strategyName}
-- Primary Axis: ${context.primaryAxis} (${context.contrastAxis})
+- Positioning Umbrella: ${context.strategyName}
+- Primary Contrast Axis: ${context.contrastAxis}
 - Mechanism: ${context.approvedMechanism.mechanismName}
-- Lanes: ${context.approvedLanes.map(l => l.title).join("; ")}
-- Primary Channel: ${primaryChannel}
-- Destination: ${context.funnelJourney?.conversionPath || "Webinar / Demo"}
+- Approved Lanes: ${context.approvedLanes.map(l => `[${l.laneId}] ${l.title} (Pain: ${l.primaryPain})`).join("; ")}
+- Approved Channels: ${approvedChannelListStr}
+- Rejected Paid Channels: ${context.channelHierarchy.rejectedPaidChannels.join(", ") || "None"}
+- Approved Funnel Destination: ${approvedDestinationStr}
 
 PLAN UNDER REVIEW:
 ${JSON.stringify(plan, null, 2)}
@@ -110,11 +170,11 @@ Return structured JSON:
         score: parsedJudge.score ?? (finalValid ? 0.95 : 0.6),
         rejectionReasons: combinedRejections,
         repairDirectives: combinedRepairs,
-        feedback: parsedJudge.feedback || (finalValid ? "Plan satisfies all 12 constitutional execution criteria." : "Plan requires targeted repairs."),
+        feedback: parsedJudge.feedback || (finalValid ? "Plan satisfies all constitutional execution criteria." : "Plan requires targeted repairs."),
       };
     }
-  } catch (err) {
-    logger.warn("[WhatToDoTodayJudge] LLM judge evaluation fallback:", err);
+  } catch (err: any) {
+    logger.warn("[WhatToDoTodayJudge] LLM judge evaluation fallback:", err?.message || String(err));
   }
 
   // Fallback to deterministic results if LLM judge unreachable

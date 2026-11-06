@@ -33,8 +33,8 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
   );
 
   useEffect(() => {
-    if (sections.budgetGovernor || (Array.isArray(rawBudget) && rawBudget.length > 0)) {
-      setRecommendation(sections.budgetGovernor || sections.budgetRecommendation || null);
+    if (sections.budgetGovernor || (Array.isArray(rawBudget) && rawBudget.length > 0) || budget?.authorityHierarchy || Array.isArray(budget?.channels)) {
+      setRecommendation(sections.budgetGovernor || sections.budgetRecommendation || budget || null);
       return;
     }
     if (!selectedCampaignId) return;
@@ -56,7 +56,7 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
       }
     })();
     return () => { isMounted = false; };
-  }, [selectedCampaignId, sections.budgetGovernor, sections.budgetRecommendation, rawBudget]);
+  }, [selectedCampaignId, sections.budgetGovernor, sections.budgetRecommendation, rawBudget, budget]);
 
   // Approved Strategic Channels
   const channelsList = Array.isArray(dist.channels) && dist.channels.length > 0
@@ -71,8 +71,9 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
             ? planData.approvedChannels.map((c: string, idx: number) => ({ channel: c, role: idx === 0 ? 'Primary validation & awareness engine' : 'Secondary nurture & conversion channel', tier: idx === 0 ? 'PRIMARY' : 'SECONDARY' }))
             : []));
 
-  const currency = recommendation?.currency || 'USD';
+  const currency = budget?.currency || recommendation?.currency || 'USD';
   const rawAllocArray: any[] =
+    (Array.isArray(budget.channels) && budget.channels.length > 0 ? budget.channels : null) ||
     (Array.isArray(rawBudget) && rawBudget.length > 0 ? rawBudget : null) ||
     (Array.isArray(recommendation?.channelAllocations) && recommendation.channelAllocations.length > 0 ? recommendation.channelAllocations : null) ||
     (Array.isArray(recommendation?.allocations) && recommendation.allocations.length > 0 ? recommendation.allocations : null) ||
@@ -87,20 +88,24 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
     sharePercentage: number;
     allocatedAmount: number;
     rationale: string;
+    readinessStatus?: string;
+    prerequisiteSummary?: string | null;
   }> = rawAllocArray.length > 0
     ? rawAllocArray.map((b: any) => {
         const ch = b.channelName || b.channel || b.category || b.platform || 'Channel';
         const pct = Number(b.percentage ?? b.sharePercentage ?? b.allocationPercentage ?? 0);
         const amt = Number(b.monthlyAmount ?? b.monthlyBudget ?? b.allocatedAmount ?? b.amount ?? 0);
-        const mode = String(b.mode || (ch.toLowerCase().includes('organic') ? 'ORGANIC' : ch.toLowerCase().includes('paid') ? 'PAID' : '')).toUpperCase();
+        const mode = String(b.mode || (b.isOrganic === true || ch.toLowerCase().includes('organic') ? 'ORGANIC' : b.isOrganic === false || ch.toLowerCase().includes('paid') ? 'PAID' : '')).toUpperCase();
         return {
           channel: ch,
           platform: b.platform || ch.replace(/\s+(organic|paid)$/i, ''),
           mode: mode || undefined,
-          costCategory: b.costCategory || (mode === 'ORGANIC' ? 'Production & Distribution Operations' : mode === 'PAID' ? 'Paid Media & Acquisition Spend' : undefined),
+          costCategory: b.costCategory || (mode === 'ORGANIC' ? 'Organic Sweat Equity ($0 Paid Media Spend)' : mode === 'PAID' ? 'Conditional Full-Budget Paid Media Allocation' : undefined),
           sharePercentage: pct,
           allocatedAmount: amt,
-          rationale: b.rationale || b.purpose || 'Strategic channel allocation',
+          rationale: b.why || b.rationale || b.purpose || b.proposedUse || 'Strategic channel allocation',
+          readinessStatus: b.readinessStatus,
+          prerequisiteSummary: b.prerequisiteSummary,
         };
       })
     : channelsList.map((c: any, idx: number) => ({
@@ -111,6 +116,8 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
       }));
 
   const computedTotalBudget =
+    budget?.monthlyBudgetEnvelope?.amount ??
+    budget?.totalMonthlyBudget ??
     recommendation?.totalMonthlyBudget ??
     budget.totalBudget ??
     (allocations.reduce((sum, a) => sum + (Number(a.allocatedAmount) || 0), 0) || null);
@@ -119,8 +126,14 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
     ? (typeof computedTotalBudget === 'number' ? `${currency} ${computedTotalBudget.toLocaleString()}` : String(computedTotalBudget))
     : 'Not specified';
 
-  const statusLabel = recommendation?.governanceMode || recommendation?.status || 'STAGE_GATED';
+  const statusLabel =
+    budget?.holdPolicy?.spendAction
+      ? `SPEND ACTION: ${String(budget.holdPolicy.spendAction).toUpperCase()} (${String(budget.holdPolicy.spendPace || 'cautious').toUpperCase()})`
+      : (recommendation?.governanceMode || recommendation?.status || 'STAGE_GATED');
   const budgetRationale = dist.rationale || businessRep?.contentDistribution?.rationale || 'Strategic focus concentrated on approved channels to drive qualified pipeline growth.';
+  const authorityHierarchy = budget?.authorityHierarchy || null;
+  const holdPolicy = budget?.holdPolicy || null;
+  const channelPrerequisites: any[] = Array.isArray(budget?.channelPrerequisites) ? budget.channelPrerequisites : [];
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
@@ -145,11 +158,13 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
         {/* Approved Strategic Channels Grid */}
         <View style={styles.channelGrid}>
           {channelsList.map((chan: any, idx: number) => {
-            const isPrimary = chan.tier === 'PRIMARY' || idx === 0;
+            const tierRaw = String(chan.tier || (idx === 0 ? 'PRIMARY' : 'SECONDARY')).toUpperCase();
+            const isPrimary = tierRaw === 'PRIMARY';
+            const isSupporting = tierRaw === 'SUPPORTING';
             const channelName = chan.channel || chan.name || 'Approved Channel';
-            const channelRole = chan.role || (isPrimary ? 'Primary awareness & proof engine' : 'Secondary nurture channel');
+            const channelRole = chan.role || (isPrimary ? 'Primary awareness & proof engine' : isSupporting ? 'Supporting middle-of-funnel nurture' : 'Secondary nurture channel');
             const iconName = channelName.toLowerCase().includes('youtube') ? 'video' : (channelName.toLowerCase().includes('email') ? 'mail' : 'share-2');
-            const accentColor = isPrimary ? '#A78BFA' : '#60A5FA';
+            const accentColor = isPrimary ? '#A78BFA' : isSupporting ? '#34D399' : '#60A5FA';
 
             return (
               <View key={idx} style={[styles.channelCard, isPrimary && styles.channelCardPrimary]}>
@@ -159,7 +174,7 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
                     <Text style={styles.channelName}>{channelName}</Text>
                   </View>
                   <View style={[styles.channelTierBadge, isPrimary ? styles.channelTierPrimary : styles.channelTierSecondary]}>
-                    <Text style={[styles.channelTierText, { color: accentColor }]}>{isPrimary ? 'PRIMARY' : 'SECONDARY'}</Text>
+                    <Text style={[styles.channelTierText, { color: accentColor }]}>{tierRaw}</Text>
                   </View>
                 </View>
                 <Text style={styles.channelRoleText}>{channelRole}</Text>
@@ -173,15 +188,15 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
           <Feather name="dollar-sign" size={16} color="#8B5CF6" style={{ marginRight: 8 }} />
-          <Text style={styles.sectionTitle}>BUDGET ALLOCATION & CHANNEL DISTRIBUTION</Text>
+          <Text style={styles.sectionTitle}>BUDGET AUTHORITY & 6-FIGURE RECONCILIATION</Text>
         </View>
         <Text style={styles.sectionSubtitle}>
-          Intelligent, LLM-generated budget distribution across selected platforms based on your monthly marketing budget.
+          Budget Governor owns the final conditional channel allocation and spend governance; Channel Selection provides preliminary channel recommendations and interlock prerequisites.
         </Text>
 
         <View style={styles.budgetSummaryRow}>
           <View>
-            <Text style={styles.budgetSummaryLabel}>MONTHLY BUDGET</Text>
+            <Text style={styles.budgetSummaryLabel}>MONTHLY BUDGET ENVELOPE (USER-CONFIRMED)</Text>
             <Text style={styles.budgetSummaryValue}>{totalBudget}</Text>
           </View>
           {statusLabel && (
@@ -190,6 +205,121 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
             </View>
           )}
         </View>
+
+        {/* 6 Distinct Budget Figures Grid */}
+        {budget?.monthlyBudgetEnvelope && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12, marginBottom: 8 }}>
+            <View style={{ flex: 1, minWidth: 200, backgroundColor: 'rgba(15, 23, 42, 0.75)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#334155' }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.5 }}>1. MONTHLY BUDGET ENVELOPE</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#F8FAFC', marginTop: 4 }}>
+                {currency} {Number(budget.monthlyBudgetEnvelope.amount || 0).toLocaleString()}
+              </Text>
+              <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{budget.monthlyBudgetEnvelope.summary}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 200, backgroundColor: 'rgba(15, 23, 42, 0.75)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#334155' }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#A78BFA', letterSpacing: 0.5 }}>2. FINAL PLANNED CHANNEL ALLOCATION</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#C4B5FD', marginTop: 4 }}>
+                {currency} {Number(budget.finalPlannedChannelAllocation?.totalConditionalAllocation || 0).toLocaleString()} ({budget.finalPlannedChannelAllocation?.allocationBasis === 'ORGANIC_RESOURCE_WEIGHTING_EQUIVALENT' ? 'Organic Weighting' : 'Conditional Full-Budget'})
+              </Text>
+              <Text style={{ fontSize: 11, color: '#CBD5E1', marginTop: 2 }}>{budget.finalPlannedChannelAllocation?.summary}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 200, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)' }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#34D399', letterSpacing: 0.5 }}>3. INITIAL TESTING ALLOWANCE (INSIDE ENVELOPE)</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#6EE7B7', marginTop: 4 }}>
+                {currency} {Number(budget.initialTestingAllowance?.amount || 0).toLocaleString()} ({budget.initialTestingAllowance?.percentageOfEnvelope ?? 20}%)
+              </Text>
+              <Text style={{ fontSize: 11, color: '#D1FAE5', marginTop: 2 }}>{budget.initialTestingAllowance?.summary}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 200, backgroundColor: 'rgba(245, 158, 11, 0.08)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#FBBF24', letterSpacing: 0.5 }}>4. UNRELEASED RESERVE (HELD UNDER HOLD)</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#FDE68A', marginTop: 4 }}>
+                {currency} {Number(budget.unreleasedReserve?.amount || 0).toLocaleString()} ({budget.unreleasedReserve?.percentageOfEnvelope ?? 80}%)
+              </Text>
+              <Text style={{ fontSize: 11, color: '#FEF3C7', marginTop: 2 }}>{budget.unreleasedReserve?.summary}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 200, backgroundColor: 'rgba(15, 23, 42, 0.75)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#334155' }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#38BDF8', letterSpacing: 0.5 }}>5. ACTUAL SPEND TELEMETRY</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#7DD3FC', marginTop: 4 }}>
+                {budget.actualSpend?.amount != null ? `${currency} ${Number(budget.actualSpend.amount).toLocaleString()}` : 'UNKNOWN (Unconnected)'}
+              </Text>
+              <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{budget.actualSpend?.summary}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 200, backgroundColor: 'rgba(15, 23, 42, 0.75)', borderRadius: 8, padding: 10, borderWidth: 1, borderColor: '#334155' }}>
+              <Text style={{ fontSize: 10, fontWeight: '700', color: '#60A5FA', letterSpacing: 0.5 }}>6. MONETARY PRODUCTION VS. ORGANIC EFFORT</Text>
+              <Text style={{ fontSize: 16, fontWeight: '800', color: '#93C5FD', marginTop: 4 }}>
+                {currency} {Number(budget.productionAndOrganicEffort?.monetaryProductionCosts || 0).toLocaleString()} Monetary Production
+              </Text>
+              <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>{budget.productionAndOrganicEffort?.summary}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Preliminary (Channel Selection) vs Final (Budget Governor) Authority Card */}
+        {authorityHierarchy && (
+          <View style={[styles.budgetRationaleBox, { marginTop: 10, borderColor: 'rgba(139, 92, 246, 0.35)', backgroundColor: 'rgba(139, 92, 246, 0.08)' }]}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#C4B5FD', marginBottom: 6, letterSpacing: 0.5 }}>
+              AUTHORITY HIERARCHY: CHANNEL SELECTION (PRELIMINARY) → BUDGET GOVERNOR (FINAL AUTHORITY · {authorityHierarchy.status})
+            </Text>
+            <Text style={[styles.budgetRationaleText, { fontStyle: 'normal', marginBottom: 6 }]}>
+              {authorityHierarchy.refinementExplanation}
+            </Text>
+            {Array.isArray(authorityHierarchy.preliminaryChannelRecommendation) && authorityHierarchy.preliminaryChannelRecommendation.length > 0 && (
+              <Text style={[styles.budgetRationaleText, { fontStyle: 'normal', fontSize: 11, color: '#94A3B8' }]}>
+                <Text style={{ fontWeight: '700', color: '#CBD5E1' }}>Preliminary Recommendation (Channel Selection): </Text>
+                {authorityHierarchy.preliminaryChannelRecommendation.map((p: any) => `${p.channelName}: ${p.sharePercentage}% (${currency} ${Number(p.monthlyAmount || 0).toLocaleString()})`).join(' · ')}
+              </Text>
+            )}
+          </View>
+        )}
+
+        {/* Hold Policy Governance Card */}
+        {holdPolicy && (
+          <View style={[styles.budgetRationaleBox, { marginTop: 10, borderColor: 'rgba(245, 158, 11, 0.3)', backgroundColor: 'rgba(245, 158, 11, 0.06)' }]}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#FBBF24', marginBottom: 6, letterSpacing: 0.5 }}>
+              HOLD POLICY GOVERNANCE (SPEND ACTION = {String(holdPolicy.spendAction || 'HOLD').toUpperCase()})
+            </Text>
+            {Array.isArray(holdPolicy.whatHoldPrevents) && holdPolicy.whatHoldPrevents.length > 0 && (
+              <View style={{ marginBottom: 6 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FCA5A5', marginBottom: 2 }}>What Hold Prevents:</Text>
+                {holdPolicy.whatHoldPrevents.map((item: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 11, color: '#E2E8F0', lineHeight: 16 }}>• {item}</Text>
+                ))}
+              </View>
+            )}
+            {Array.isArray(holdPolicy.whatHoldPermits) && holdPolicy.whatHoldPermits.length > 0 && (
+              <View style={{ marginBottom: 4 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#6EE7B7', marginBottom: 2 }}>What Hold Permits:</Text>
+                {holdPolicy.whatHoldPermits.map((item: string, i: number) => (
+                  <Text key={i} style={{ fontSize: 11, color: '#E2E8F0', lineHeight: 16 }}>• {item}</Text>
+                ))}
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Channel Readiness & Retargeting Prerequisites */}
+        {channelPrerequisites.some((cp: any) => cp.readinessStatus === 'PREREQUISITE_GATED') && (
+          <View style={[styles.budgetRationaleBox, { marginTop: 10, borderColor: 'rgba(56, 189, 248, 0.35)', backgroundColor: 'rgba(56, 189, 248, 0.08)' }]}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#38BDF8', marginBottom: 6, letterSpacing: 0.5 }}>
+              RETARGETING & CHANNEL PREREQUISITE GATES
+            </Text>
+            {channelPrerequisites.map((cp: any, idx: number) => (
+              <View key={idx} style={{ marginBottom: idx < channelPrerequisites.length - 1 ? 6 : 0 }}>
+                <Text style={{ fontSize: 11, color: '#F8FAFC', lineHeight: 16 }}>
+                  <Text style={{ fontWeight: '700', color: cp.readinessStatus === 'PREREQUISITE_GATED' ? '#FBBF24' : '#34D399' }}>
+                    [{cp.readinessStatus}] {cp.channelName}:{' '}
+                  </Text>
+                  {cp.prerequisiteSummary}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {recommendation?.overallRationale ? (
           <View style={styles.budgetRationaleBox}>
@@ -256,6 +386,11 @@ export default function ChannelsBudgetSectionView({ planData, intelligenceData }
                 {(alloc.mode || alloc.costCategory) ? (
                   <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>
                     {[alloc.mode, alloc.costCategory].filter(Boolean).join(' · ')}
+                  </Text>
+                ) : null}
+                {alloc.readinessStatus ? (
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: alloc.readinessStatus === 'PREREQUISITE_GATED' ? '#FBBF24' : '#34D399', marginTop: 2 }}>
+                    [{alloc.readinessStatus}]
                   </Text>
                 ) : null}
               </View>

@@ -168,8 +168,12 @@ export interface DesignatedActiveLineage {
   activeRoot: typeof schema.strategyRoots.$inferSelect | null;
   strategyRootId: string | null;
   strategyRootVersion: number;
+  strategyRootInternalVersion: number;
+  rootBundleId: string | null;
+  rootBundleVersion: number;
   planId: string | null;
   planVersion: number;
+  productId: string | null;
 }
 
 /**
@@ -261,11 +265,11 @@ export async function resolveDesignatedActiveLineage(
 
   // 3. Resolve Strategy Root via rootBundle.strategyRootId first
   let activeRoot: typeof schema.strategyRoots.$inferSelect | undefined;
-  if (rootBundle?.strategyRootId) {
+  if ((rootBundle as any)?.strategyRootId) {
     [activeRoot] = await db
       .select()
       .from(schema.strategyRoots)
-      .where(eq(schema.strategyRoots.id, rootBundle.strategyRootId))
+      .where(eq(schema.strategyRoots.id, (rootBundle as any).strategyRootId))
       .limit(1);
   }
   if (!activeRoot) {
@@ -290,14 +294,34 @@ export async function resolveDesignatedActiveLineage(
       .limit(1);
   }
 
+  let resolvedProductId: string | null =
+    (strategicPlan as any)?.productId ??
+    (rootBundle as any)?.productId ??
+    (activeRoot as any)?.productId ??
+    null;
+  if (!resolvedProductId) {
+    try {
+      const [campSel] = await db
+        .select({ productId: schema.campaignSelections.productId })
+        .from(schema.campaignSelections)
+        .where(eq(schema.campaignSelections.selectedCampaignId, campaignId))
+        .limit(1);
+      if (campSel?.productId) resolvedProductId = campSel.productId;
+    } catch {}
+  }
+
   return {
     strategicPlan: strategicPlan ?? null,
     rootBundle: rootBundle ?? null,
     activeRoot: activeRoot ?? null,
-    strategyRootId: activeRoot?.id ?? rootBundle?.strategyRootId ?? null,
+    strategyRootId: activeRoot?.id ?? (rootBundle as any)?.strategyRootId ?? null,
     strategyRootVersion: rootBundle?.version ?? strategicPlan?.rootBundleVersion ?? 1,
+    strategyRootInternalVersion: (activeRoot as any)?.version ?? 1,
+    rootBundleId: rootBundle?.id ?? strategicPlan?.rootBundleId ?? null,
+    rootBundleVersion: rootBundle?.version ?? strategicPlan?.rootBundleVersion ?? 1,
     planId: strategicPlan?.id ?? null,
     planVersion: strategicPlan?.version ?? 1,
+    productId: resolvedProductId,
   };
 }
 
@@ -395,7 +419,14 @@ export async function syncCampaignAdaptiveReasoning(params: {
       .where(eq(schema.adaptiveDecisions.id, decisionId))
       .limit(1);
 
-    if (existingCase && existingDecision) {
+    const needsGroundedReconcile =
+      Boolean(existingCase && existingDecision) &&
+      (existingCase!.reasoningVersion !== "2.2.0-grounded-lineage" ||
+        (existingDecision!.decisionType === "OBSERVE" &&
+          (existingCase!.metadata as any)?.responseClassification === "STRATEGY_CHANGE_PROPOSAL") ||
+        !((existingCase!.metadata as any)?.lineage?.productId));
+
+    if (existingCase && existingDecision && !needsGroundedReconcile) {
       casesSkippedIdempotent++;
       return;
     }
@@ -407,6 +438,7 @@ export async function syncCampaignAdaptiveReasoning(params: {
       strategyRootVersion,
       marketSignals,
       performanceSignals,
+      reasoningVersion: "2.2.0-grounded-lineage",
     });
     baseCase.reasoningCaseId = caseId;
 
@@ -418,6 +450,22 @@ export async function syncCampaignAdaptiveReasoning(params: {
 
     if (forceInsufficientEvidence) {
       analysis.updatedCase.status = "INSUFFICIENT_EVIDENCE";
+    }
+
+    const primaryMarketMeta = (marketSignals[0]?.metadata || {}) as Record<string, any>;
+    const primaryPerfMeta = (performanceSignals[0]?.metadata || {}) as Record<string, any>;
+    if (primaryMarketMeta.sharedOriginKey) {
+      analysis.updatedCase.metadata = {
+        ...(analysis.updatedCase.metadata || {}),
+        sharedOriginKey: primaryMarketMeta.sharedOriginKey,
+        sharedOriginSiblingIds: primaryMarketMeta.sharedOriginSiblingIds || [],
+        sharedOriginRunId: primaryMarketMeta.sharedOriginRunId || null,
+        sharedOriginConfirmedByRunId: primaryMarketMeta.sharedOriginConfirmedByRunId || null,
+        corroborationNote:
+          (primaryMarketMeta.sharedOriginSiblingIds || []).length > 0
+            ? "Derived from the same single website snapshot update; sibling observations are linked and not counted as independent corroboration."
+            : null,
+      };
     }
 
     const knownEvidenceSet = new Set<string>(analysis.updatedCase.evidenceIds);
@@ -443,6 +491,18 @@ export async function syncCampaignAdaptiveReasoning(params: {
       judgeVerdict.rationale = rationaleOverride;
     }
 
+    // Ground decision confidence in the actual signal/brief/hypothesis assessment rather than a blanket 0.80 template
+    if (!forceInsufficientEvidence && marketSignals.length > 0 && performanceSignals.length === 0) {
+      const topValidatedOrProposed = [...analysis.hypotheses].sort(
+        (a, b) => b.confidence - a.confidence,
+      )[0];
+      if (typeof primaryMarketMeta.briefValidatedConfidence === "number") {
+        judgeVerdict.confidence = Number(primaryMarketMeta.briefValidatedConfidence.toFixed(2));
+      } else if (topValidatedOrProposed) {
+        judgeVerdict.confidence = Number(topValidatedOrProposed.confidence.toFixed(2));
+      }
+    }
+
     const decision = routeAdaptiveDecision({
       reasoningCase: analysis.updatedCase,
       judgeVerdict,
@@ -452,6 +512,152 @@ export async function syncCampaignAdaptiveReasoning(params: {
       accountId,
     });
     decision.adaptiveDecisionId = decisionId;
+
+    const impactClassification =
+      marketSignals.length > 0 && performanceSignals.length === 0
+        ? "PROSPECTIVE_RISK"
+        : primaryPerfMeta.isZeroActivityWindow === true
+          ? "UNEXECUTED_PUBLISHING_WINDOW"
+          : forceInsufficientEvidence || analysis.updatedCase.status === "INSUFFICIENT_EVIDENCE"
+            ? "INSUFFICIENT_OR_CONTRADICTED_EVIDENCE"
+            : "MEASURED_PERFORMANCE_VARIANCE";
+
+    const responseClassification =
+      forceInsufficientEvidence ||
+      analysis.updatedCase.status === "INSUFFICIENT_EVIDENCE" ||
+      decision.decisionType === "INSUFFICIENT_EVIDENCE" ||
+      primaryMarketMeta.isContradicted === true
+        ? "INSUFFICIENT_EVIDENCE"
+        : (decision.decisionType as string) === "NO_ACTION" || decision.decisionType === "OBSERVE"
+          ? "NO_CHANGE"
+          : decision.decisionType === "EXECUTION_RESPONSE"
+            ? "EXECUTION_ADJUSTMENT"
+            : "STRATEGY_CHANGE_PROPOSAL";
+
+    const lineageMetadata = {
+      campaignId,
+      productId: lineage.productId,
+      planId: lineage.planId,
+      planVersion: lineage.planVersion,
+      strategyRootId,
+      strategyRootInternalVersion: lineage.strategyRootInternalVersion,
+      rootBundleId: lineage.rootBundleId,
+      rootBundleVersion: lineage.rootBundleVersion,
+      eventIds: analysis.updatedCase.marketEventIds || [],
+      performanceWindowIds: primaryPerfMeta.weeklyInventoryId ? [primaryPerfMeta.weeklyInventoryId] : [],
+      performanceContextIds: analysis.updatedCase.metadata?.performanceContextIds || [],
+      evidenceRefs: analysis.updatedCase.evidenceIds || [],
+      correlationId: caseId,
+    };
+
+    const telemetryContext = {
+      historicalBaseline: {
+        operatingDurationMonths: primaryPerfMeta.operatingDurationMonths ?? 6,
+        historicalLeadsCount: primaryPerfMeta.historicalLeadsCount ?? 10,
+        historicalPayingCustomersCount: primaryPerfMeta.historicalPayingCustomersCount ?? 5,
+        source: "clarification_requests",
+      },
+      recentReportingWindow: {
+        weeklyInventoryId: primaryPerfMeta.weeklyInventoryId ?? null,
+        windowLabel: primaryPerfMeta.windowLabel || "2026-10-24 to 2026-10-31",
+        leadsCount: 0,
+        payingCustomersCount: 0,
+        adSpendAmount: 0,
+        activeWindowPosts: 0,
+      },
+      paidAdTelemetryStatus: "UNKNOWN_UNCONNECTED",
+    };
+
+    analysis.updatedCase.metadata = {
+      ...(analysis.updatedCase.metadata || {}),
+      lineage: lineageMetadata,
+      impactClassification,
+      prospectiveRiskNote:
+        impactClassification === "PROSPECTIVE_RISK"
+          ? "Confirmed competitor market signal with 0 corroborated campaign performance damage in active reporting window; classified as prospective market risk rather than proven campaign performance impact."
+          : null,
+      telemetryContext,
+      responseClassification,
+    };
+
+    decision.metadata = {
+      ...(decision.metadata || {}),
+      lineage: lineageMetadata,
+      impactClassification,
+      responseClassification,
+      telemetryContext,
+      ...(primaryMarketMeta.sharedOriginKey
+        ? {
+            sharedOriginKey: primaryMarketMeta.sharedOriginKey,
+            sharedOriginSiblingIds: primaryMarketMeta.sharedOriginSiblingIds || [],
+            isPromotionalDiscountOnly: primaryMarketMeta.isPromotionalDiscountOnly || false,
+            hasComparableTimestampWindow: primaryMarketMeta.hasComparableTimestampWindow ?? null,
+          }
+        : {}),
+    };
+
+    if (needsGroundedReconcile && existingCase && existingDecision) {
+      const priorCaseMeta = (existingCase.metadata as Record<string, any>) || {};
+      await db
+        .update(schema.reasoningCases)
+        .set({
+          status: analysis.updatedCase.status,
+          evidenceIds: analysis.updatedCase.evidenceIds,
+          reasoningVersion: "2.2.0-grounded-lineage",
+          metadata: {
+            ...priorCaseMeta,
+            ...(analysis.updatedCase.metadata || {}),
+            reconciledAt: new Date().toISOString(),
+            previousReasoningVersion: existingCase.reasoningVersion,
+          },
+        })
+        .where(eq(schema.reasoningCases.id, caseId));
+
+      await db
+        .delete(schema.reasoningHypotheses)
+        .where(eq(schema.reasoningHypotheses.reasoningCaseId, caseId));
+
+      for (let i = 0; i < analysis.hypotheses.length; i++) {
+        const h = analysis.hypotheses[i];
+        const hypId = deterministicId("hyp", `${caseId}:${h.hypothesisType}:${i}`);
+        await db
+          .insert(schema.reasoningHypotheses)
+          .values({
+            id: hypId,
+            reasoningCaseId: caseId,
+            hypothesisType: h.hypothesisType,
+            explanation: h.explanation,
+            supportingEvidenceIds: h.supportingEvidenceIds,
+            contradictingEvidenceIds: h.contradictingEvidenceIds,
+            alternativeCauseIds: h.alternativeCauseIds,
+            confidence: h.confidence,
+            status: h.status,
+            metadata: h.metadata || {},
+          })
+          .onConflictDoNothing();
+      }
+
+      const priorDecMeta = (existingDecision.metadata as Record<string, any>) || {};
+      await db
+        .update(schema.adaptiveDecisions)
+        .set({
+          decisionType: decision.decisionType,
+          affectedAuthority: decision.affectedAuthority,
+          affectedEntityIds: decision.affectedEntityIds,
+          evidenceIds: decision.evidenceIds,
+          confidence: decision.confidence,
+          rationale: decision.rationale,
+          metadata: {
+            ...priorDecMeta,
+            ...(decision.metadata || {}),
+            reconciledAt: new Date().toISOString(),
+          },
+        })
+        .where(eq(schema.adaptiveDecisions.id, decisionId));
+
+      casesSkippedIdempotent++;
+      return;
+    }
 
     if (!existingCase) {
       const insertedCase = await db
@@ -552,6 +758,15 @@ export async function syncCampaignAdaptiveReasoning(params: {
       : [];
   const briefByEventId = new Map(briefs.map((b) => [b.eventId, b]));
 
+  // Group events sharing the same source snapshot pair / run so sibling events from one crawl are linked
+  const eventsBySharedOrigin = new Map<string, string[]>();
+  for (const evt of confirmedEvents) {
+    const originKey = `${evt.competitorId || "unknown"}:${evt.baselineSnapshotId || "none"}:${evt.currentSnapshotId || evt.runId || "none"}`;
+    const list = eventsBySharedOrigin.get(originKey) || [];
+    list.push(evt.id);
+    eventsBySharedOrigin.set(originKey, list);
+  }
+
   for (const evt of confirmedEvents) {
     const briefRow = briefByEventId.get(evt.id);
     // Wait if brief is still queued/generating/validating so we don't create premature decisions
@@ -615,12 +830,91 @@ export async function syncCampaignAdaptiveReasoning(params: {
       evt.scope,
       evt.severity,
     );
-    signal.candidateAffectedAuthorities = mapping.authorities;
+    (signal as any).candidateAffectedAuthorities = mapping.authorities;
+
+    // Inspect event evidence for promotional discount banner vs base-price change and posting frequency window metadata
+    let parsedEv: Record<string, any> = {};
+    try {
+      parsedEv = typeof evt.evidence === "string" ? JSON.parse(evt.evidence) : ((evt.evidence as any) || {});
+    } catch {}
+
+    let isPromotionalDiscountOnly = false;
+    let promoSummary: string | null = null;
+    let unchangedBasePrice: string | null = null;
+    if (evt.kind === "pricing_change") {
+      const prevPlans: string[] = Array.isArray(parsedEv.prev?.plans)
+        ? parsedEv.prev.plans.map((p: any) => `${p.name || ""} — ${p.price || ""}`.trim())
+        : Array.isArray(parsedEv.prev)
+          ? parsedEv.prev.map(String)
+          : [];
+      const currPlans: string[] = Array.isArray(parsedEv.curr?.plans)
+        ? parsedEv.curr.plans.map((p: any) => `${p.name || ""} — ${p.price || ""}`.trim())
+        : Array.isArray(parsedEv.curr)
+          ? parsedEv.curr.map(String)
+          : [];
+      const stripCta = (s: string) => s.split("|")[0].trim();
+      const prevCores = prevPlans.map(stripCta).filter(Boolean);
+      const currCores = currPlans.map(stripCta).filter(Boolean);
+      const isPromoStr = (s: string) =>
+        /\b(\d+%\s*off|discount|promo|promotional|anniversary\s+special|limited[\s-]time|coupon|seasonal\s+sale)\b/i.test(s) &&
+        !/\$\d/.test(s);
+      const addedItems = currCores.filter((cc) => !prevCores.includes(cc));
+      const newExplicitBasePrices = addedItems.filter((cc) => /\$\d/.test(cc));
+      if (addedItems.length > 0 && addedItems.some(isPromoStr) && newExplicitBasePrices.length === 0) {
+        isPromotionalDiscountOnly = true;
+        promoSummary = addedItems.filter(isPromoStr).join("; ");
+        unchangedBasePrice = prevCores.join("; ") || "prior tier pricing";
+      }
+    }
+
+    let hasComparableTimestampWindow: boolean | null = null;
+    let fromCount: number | null = null;
+    let toCount: number | null = null;
+    if (evt.kind === "posting_frequency_shift") {
+      const prevNum = typeof parsedEv.prev === "number" ? parsedEv.prev : null;
+      const currNum = typeof parsedEv.curr === "number" ? parsedEv.curr : null;
+      fromCount = prevNum;
+      toCount = currNum;
+      const notesStr = Array.isArray(parsedEv.notes) ? parsedEv.notes.join(" ") : "";
+      hasComparableTimestampWindow = notesStr.includes("30d window frequency");
+    }
+
+    const originKey = `${evt.competitorId || "unknown"}:${evt.baselineSnapshotId || "none"}:${evt.currentSnapshotId || evt.runId || "none"}`;
+    const siblingEventIds = (eventsBySharedOrigin.get(originKey) || []).filter((id) => id !== evt.id);
+
+    const rawValidatedConf =
+      typeof briefRow?.finalValidatedConfidence === "number"
+        ? briefRow.finalValidatedConfidence
+        : typeof briefRow?.modelProposedConfidence === "number"
+          ? briefRow.modelProposedConfidence
+          : null;
+    const validatedConf =
+      typeof rawValidatedConf === "number"
+        ? rawValidatedConf > 1
+          ? Number((rawValidatedConf / 100).toFixed(2))
+          : rawValidatedConf
+        : null;
+
     signal.metadata = {
       ...(signal.metadata || {}),
-      observeOnly: mapping.observeOnly,
+      observeOnly: mapping.observeOnly || isPromotionalDiscountOnly || hasComparableTimestampWindow === false,
       briefId: briefRow?.id ?? null,
       briefRecommendation: (briefRow?.brief as any)?.recommendation ?? null,
+      briefValidatedConfidence: validatedConf,
+      counterevidenceViolations: deterministicCounterevidenceViolations,
+      isContradicted:
+        deterministicCounterevidenceViolations.length > 0 ||
+        briefRow?.failureCode === "COUNTEREVIDENCE_CONTRADICTION",
+      isPromotionalDiscountOnly,
+      promoSummary,
+      unchangedBasePrice,
+      hasComparableTimestampWindow,
+      fromCount,
+      toCount,
+      sharedOriginKey: siblingEventIds.length > 0 ? originKey : null,
+      sharedOriginSiblingIds: siblingEventIds,
+      sharedOriginRunId: evt.runId || null,
+      sharedOriginConfirmedByRunId: (evt as any).confirmedByRunId || null,
     };
 
     const rationale = isBriefInsufficient
@@ -628,7 +922,11 @@ export async function syncCampaignAdaptiveReasoning(params: {
         ? `Insufficient / contradicted evidence: ${deterministicCounterevidenceViolations.join("; ")}`
         : "Insufficient or contradicted evidence in strategic brief."
       : (briefRow?.brief as any)?.executiveSummary && (briefRow?.brief as any)?.executiveSummary !== "INSUFFICIENT_EVIDENCE"
-        ? `${(briefRow?.brief as any).executiveSummary} (Recommendation: ${(briefRow?.brief as any).recommendation || "monitor"})`
+        ? `${(briefRow?.brief as any).executiveSummary} (Recommendation: ${(briefRow?.brief as any).recommendation || "monitor"})${
+            siblingEventIds.length > 0
+              ? ` [Linked shared-origin snapshot update with ${siblingEventIds.join(", ")}]`
+              : ""
+          }`
         : undefined;
 
     await persistEvaluatedCase(
@@ -652,11 +950,91 @@ export async function syncCampaignAdaptiveReasoning(params: {
   if (perfContext) {
     const perfSignals = adaptPerformanceContextToSignals(perfContext);
     if (perfSignals.length > 0) {
-      // Ensure each signal carries at least its context ID as evidence reference
+      // Resolve evidence categories and window telemetry so hypotheses receive mechanism-partitioned evidence
+      const allPerfEvIds = Array.from(
+        new Set(perfSignals.flatMap((ps) => ps.evidenceIds || []).filter(Boolean)),
+      );
+      const channelSnaps =
+        allPerfEvIds.length > 0
+          ? await db
+              .select({ id: schema.userChannelSnapshots.id, platform: schema.userChannelSnapshots.platform })
+              .from(schema.userChannelSnapshots)
+              .where(inArray(schema.userChannelSnapshots.id, allPerfEvIds))
+          : [];
+      const webSnaps =
+        allPerfEvIds.length > 0
+          ? await db
+              .select({ id: schema.websiteSnapshots.id })
+              .from(schema.websiteSnapshots)
+              .where(inArray(schema.websiteSnapshots.id, allPerfEvIds))
+          : [];
+      const clarReqs =
+        allPerfEvIds.length > 0
+          ? await db
+              .select()
+              .from(schema.clarificationRequests)
+              .where(inArray(schema.clarificationRequests.id, allPerfEvIds))
+          : [];
+      const completedInvs = await db
+        .select()
+        .from(schema.weeklyBusinessInventories)
+        .where(
+          and(
+            eq(schema.weeklyBusinessInventories.campaignId, campaignId),
+            eq(schema.weeklyBusinessInventories.status, "COMPLETED"),
+          ),
+        )
+        .orderBy(desc(schema.weeklyBusinessInventories.periodEnd));
+
+      const channelIds = channelSnaps.map((c) => c.id);
+      const webIds = webSnaps.map((w) => w.id);
+      const clarIds = clarReqs.map((cr) => cr.id);
+      const latestInv = completedInvs[0] || null;
+      const latestClar = clarReqs[0] || null;
+      let parsedClarAns: Record<string, any> = {};
+      try {
+        parsedClarAns =
+          typeof latestClar?.structuredAnswer === "string"
+            ? JSON.parse(latestClar.structuredAnswer)
+            : ((latestClar?.structuredAnswer as any) || {});
+      } catch {}
+
+      const isZeroActivityWindow =
+        Boolean(latestInv) &&
+        Number((latestInv as any).leadsCount ?? 0) === 0 &&
+        Number((latestInv as any).payingCustomersCount ?? 0) === 0 &&
+        Number((latestInv as any).adSpendAmount ?? 0) === 0;
+      const isSingleWindowSample = completedInvs.length <= 1;
+      const windowLabel =
+        latestInv?.periodStart && latestInv?.periodEnd
+          ? `${new Date(latestInv.periodStart).toISOString().slice(0, 10)} to ${new Date(latestInv.periodEnd).toISOString().slice(0, 10)}`
+          : "latest 7-day reporting window";
+
+      const distributionEvidenceIds = Array.from(new Set([...channelIds, ...clarIds]));
+      const funnelEvidenceIds = Array.from(new Set([...webIds, ...clarIds]));
+      const baselineEvidenceIds = clarIds.length > 0 ? clarIds : allPerfEvIds.slice(0, 1);
+
+      // Ensure each signal carries at least its context ID as evidence reference and partitioned metadata
       for (const ps of perfSignals) {
         if (!ps.evidenceIds || ps.evidenceIds.length === 0) {
           ps.evidenceIds = [perfContext.id];
         }
+        ps.metadata = {
+          ...(ps.metadata || {}),
+          distributionEvidenceIds:
+            distributionEvidenceIds.length > 0 ? distributionEvidenceIds : ps.evidenceIds,
+          funnelEvidenceIds: funnelEvidenceIds.length > 0 ? funnelEvidenceIds : ps.evidenceIds,
+          zeroActivityChannelEvidenceIds: isZeroActivityWindow ? channelIds : [],
+          baselineEvidenceIds,
+          isZeroActivityWindow,
+          isSingleWindowSample,
+          completedWindowsCount: completedInvs.length,
+          windowLabel,
+          weeklyInventoryId: latestInv?.id ?? null,
+          operatingDurationMonths: parsedClarAns.operatingDurationMonths ?? 6,
+          historicalLeadsCount: parsedClarAns.historicalLeadsCount ?? 10,
+          historicalPayingCustomersCount: parsedClarAns.historicalPayingCustomersCount ?? 5,
+        };
       }
       const isProofGapOnly = perfSignals.every(
         (ps) => ps.signalType === "PROOF_GAP_UNMEASURED_TRUTH" || ps.metadata?.isProofGapOnly === true

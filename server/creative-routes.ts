@@ -91,100 +91,124 @@ export function registerCreativeRoutes(app: Express) {
         })),
       };
 
-      // C. Strategic Truth & Offer
-      const approvedPlans = await db
-        .select()
-        .from(schema.strategicPlans)
-        .where(
-          and(
-            eq(schema.strategicPlans.accountId, accountId),
-            eq(schema.strategicPlans.campaignId, campaignId)
-          )
-        )
-        .orderBy(desc(schema.strategicPlans.createdAt))
-        .limit(1);
+      // C. Strategic Truth, Offer & Active Lanes via Canonical Plan Context Resolver
+      const { resolvePlanContext } = await import("./orchestrator/execution-plan-resolver");
+      const planCtx = await resolvePlanContext({
+        accountId,
+        campaignId,
+        mode: "LATEST_VIEWABLE",
+      });
 
-      let strategyDirection = "Positioning baseline active";
-      let currentOffer = "Core service offering";
-      let activeLanes: Array<{ id: string; title: string }> = [
-        { id: "lane_smb", title: "Simplified Scheduling for SMB Managers" },
-        { id: "lane_creators", title: "Automated Social Planning for Creators" },
-      ];
-
-      if (approvedPlans.length > 0) {
-        const plan = approvedPlans[0];
-        let planData: any = {};
+      const plan = planCtx.selectedPlan;
+      let planData: any = {};
+      if (plan?.planJson) {
         try {
-          planData = typeof plan.planData === "string" ? JSON.parse(plan.planData) : (plan.planData || {});
+          planData = typeof plan.planJson === "string" ? JSON.parse(plan.planJson) : (plan.planJson || {});
         } catch {}
-
-        const rootBundle = planData.rootBundle;
-        if (rootBundle?.spine?.positioning) {
-          strategyDirection = rootBundle.spine.positioning;
-        } else if (planData.positioning?.statement) {
-          strategyDirection = planData.positioning.statement;
-        }
-
-        if (rootBundle?.spine?.offer) {
-          currentOffer = rootBundle.spine.offer;
-        } else if (planData.offer?.statement) {
-          currentOffer = planData.offer.statement;
-        }
-
-        if (rootBundle?.lanes && Array.isArray(rootBundle.lanes)) {
-          activeLanes = rootBundle.lanes.map((l: any, idx: number) => ({
-            id: l.id || l.laneId || `lane_${idx}`,
-            title: l.title || l.laneName || l.audienceName || `Strategic Lane ${idx + 1}`,
-          }));
-        }
       }
 
-      // D. Product Truth
+      const rootRow = planCtx.strategyRoot;
+      const brandSpine = planData.brandSpine || (rootRow?.brandSpine ? (typeof rootRow.brandSpine === "string" ? JSON.parse(rootRow.brandSpine) : rootRow.brandSpine) : null);
+
+      const strategyDirection =
+        planData.positioning?.narrativeDirection ||
+        brandSpine?.narrativeDirection ||
+        planData.positioning?.umbrellaPositionName ||
+        brandSpine?.umbrellaPositionName ||
+        rootRow?.primaryAxis ||
+        "";
+
+      const currentOffer =
+        planData.offerStrategy?.coreOffer ||
+        planData.offer?.primaryOffer?.offerName ||
+        brandSpine?.mechanismPromise ||
+        rootRow?.approvedPromise ||
+        "";
+
+      const rawLanes =
+        (Array.isArray(planData.approvedLanes) && planData.approvedLanes.length > 0
+          ? planData.approvedLanes
+          : rootRow?.approvedLanes
+            ? (typeof rootRow.approvedLanes === "string" ? JSON.parse(rootRow.approvedLanes) : rootRow.approvedLanes)
+            : []) || [];
+
+      const activeLanes: Array<{ id: string; title: string }> = Array.isArray(rawLanes)
+        ? rawLanes.map((l: any, idx: number) => ({
+            id: l.laneId || l.id || `lane_${idx + 1}`,
+            title: l.title || l.name || l.laneName || `Strategic Lane ${idx + 1}`,
+          }))
+        : [];
+
+      // D. Product Truth from Canonical Plan / Brand Spine
+      const campaignOffering = planData.campaignOffering || {};
       const productTruth = {
-        name: campaign.name,
-        type: "Software / SaaS",
-        coreProblemSolved: "Streamlined workflow and execution",
-        differentiatingFeature: "Automated AI-assisted optimization",
+        name: brandSpine?.productName || campaignOffering.offeringName || planData.businessName || campaign.name,
+        type: brandSpine?.productType || campaignOffering.offeringType || planData.category || "Product / Service",
+        coreProblemSolved: brandSpine?.coreProblemSolved || rootRow?.contrastAxisText || "",
+        differentiatingFeature:
+          brandSpine?.mechanismName ||
+          (Array.isArray(brandSpine?.coreDifferentiationPillars) ? brandSpine.coreDifferentiationPillars[0] : "") ||
+          "",
+        productUrl: campaignOffering.productUrl || planData.websiteUrl || "",
       };
 
-      // E. WTDT Creative Queue
-      const taskRows = await db
-        .select()
-        .from(schema.executionTasks)
-        .where(
-          and(
-            eq(schema.executionTasks.accountId, accountId),
-            eq(schema.executionTasks.campaignId, campaignId)
-          )
-        )
-        .orderBy(desc(schema.executionTasks.createdAt))
-        .limit(10);
+      // E. WTDT Creative Queue (scoped to active plan's latest ACTIVE execution_days row)
+      const [latestExecDay] = plan?.id
+        ? await db
+            .select()
+            .from(schema.executionDays)
+            .where(
+              and(
+                eq(schema.executionDays.campaignId, campaignId),
+                eq(schema.executionDays.strategicPlanId, plan.id),
+                eq(schema.executionDays.status, "ACTIVE")
+              )
+            )
+            .orderBy(desc(schema.executionDays.generatedAt))
+            .limit(1)
+        : [null];
 
-      const creativeQueue = taskRows
-        .filter(t => t.status !== "CANCELLED" && t.status !== "REPLACED")
-        .slice(0, 5)
-        .map((t, idx) => ({
+      const wtdtTasks = latestExecDay
+        ? await db
+            .select()
+            .from(schema.dailyExecutionTasks)
+            .where(eq(schema.dailyExecutionTasks.executionDayId, latestExecDay.id))
+            .orderBy(schema.dailyExecutionTasks.sequenceOrder)
+        : [];
+
+      const creativeQueue = wtdtTasks
+        .filter(t => t.status !== "CANCELLED" && t.status !== "REPLACED" && t.status !== "STALE")
+        .slice(0, 6)
+        .map((t) => ({
           id: t.id,
           title: t.title,
-          priorityBadge: idx === 0 ? "MUST DO" : (idx === 1 ? "STRATEGY UPDATED" : "SHOULD DO"),
-          priorityColor: idx === 0 ? "red" : (idx === 1 ? "orange" : "blue"),
+          priorityBadge: t.priority === "MUST_DO" ? "MUST DO" : (t.priority === "SHOULD_DO" ? "SHOULD DO" : "OPTIONAL"),
+          priorityColor: t.priority === "MUST_DO" ? "red" : (t.priority === "SHOULD_DO" ? "blue" : "orange"),
           status: t.status,
-          laneId: t.strategicLaneId || activeLanes[0]?.id || "lane_default",
-          laneTitle: activeLanes.find(l => l.id === t.strategicLaneId)?.title || activeLanes[0]?.title || "Primary Strategic Lane",
-          channel: t.channel || "Instagram",
-          format: t.channel === "youtube" ? "Video" : "Post",
+          laneId: t.laneId || activeLanes[0]?.id || "",
+          laneTitle: activeLanes.find(l => l.id === t.laneId)?.title || activeLanes[0]?.title || "",
+          channel: t.channel || "INSTAGRAM",
+          channelRole: t.channelRole || "PRIMARY",
+          format: String(t.taskType || "").toUpperCase().includes("VIDEO") || String(t.channel || "").toUpperCase() === "TIKTOK" ? "Video" : "Post",
         }));
+
+      const approvedChannelsList = Array.isArray(planData.contentDistribution?.channels) && planData.contentDistribution.channels.length > 0
+        ? planData.contentDistribution.channels.map((c: any) => c.channelName || c.channel || c.platform).filter(Boolean)
+        : ["Instagram", "TikTok"];
 
       return res.json({
         success: true,
         data: {
           campaign,
+          planId: plan?.id || null,
+          strategyRootId: rootRow?.id || null,
+          rootBundleId: plan?.rootBundleId || null,
           brandAssets,
           productTruth,
           currentOffer,
           strategyDirection,
           activeLanes,
-          supportedChannels: ["Instagram", "Facebook", "LinkedIn", "TikTok", "X"],
+          supportedChannels: approvedChannelsList,
           creativeQueue,
         },
       });

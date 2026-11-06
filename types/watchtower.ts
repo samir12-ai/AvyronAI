@@ -152,6 +152,22 @@ export interface WatchtowerEventDetailResponse {
       prev?: unknown;
       curr?: unknown;
     } | null;
+    structuredComparison?: {
+      kind: string;
+      categoryLabel: string;
+      beforeSummary: string;
+      afterSummary: string;
+      beforeValueState: string;
+      afterValueState: string;
+      rows: {
+        label: string;
+        before: string;
+        after: string;
+        changeType?: 'added' | 'removed' | 'modified' | 'unchanged' | 'context';
+      }[];
+      methodologyNote: string | null;
+      rawTechnicalJson: string;
+    } | null;
   };
   strategicBrief?: WatchtowerStrategicBriefData | null;
   competitors: {

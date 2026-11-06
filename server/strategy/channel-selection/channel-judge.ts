@@ -40,7 +40,8 @@ export async function judgeChannelProposal(input: {
   ownedChannels: OwnedChannelContext[];
   competitorPlatforms: CompetitorPlatformData[];
   marketVoiceEvidence: MarketVoiceChannelEvidence[];
-  budgetMax: number;
+  budgetMax: number | null;
+  budgetCurrency?: string;
   priorDecisions: { engineId: string; summary: string }[];
   accountId: string;
 }): Promise<ChannelJudgeVerdict> {
@@ -58,9 +59,15 @@ export async function judgeChannelProposal(input: {
     competitorPlatforms,
     marketVoiceEvidence,
     budgetMax,
+    budgetCurrency = "USD",
     priorDecisions,
     accountId,
   } = input;
+
+  const budgetLine =
+    budgetMax != null && budgetMax > 0
+      ? `${budgetMax.toLocaleString("en-US")} ${budgetCurrency}/month`
+      : "Not specified (organic-first validation)";
 
   const ownedChannelsText = ownedChannels.length > 0
     ? ownedChannels
@@ -102,7 +109,7 @@ export async function judgeChannelProposal(input: {
 - Validated Pains: ${audiencePains.join("; ")}
 - Awareness Stage: ${awarenessStage}
 - Persuasion Mode: ${persuasionMode}
-- Test Budget Ceiling: $${budgetMax}
+- Campaign Budget: ${budgetLine}
 
 ═══ OWNED ASSETS & PROVENANCE ═══
 ${ownedChannelsText}
@@ -123,7 +130,7 @@ ${JSON.stringify(proposal, null, 2)}
 1. Business Model & Audience Fit: Does the primary recommended channel make genuine strategic sense for this specific business model (e.g. B2C visual eCommerce vs B2B enterprise)?
 2. Owned Asset Consideration: If the business has a confirmed owned asset (e.g. Instagram with confirmed identity/followers), did the recommendation explicitly evaluate its distribution advantage (lower activation friction) rather than ignoring it or forcing a brand-new channel from scratch without justification?
 3. Competitor Evidence Groundedness: Did the proposal ground its competitor reasoning in actual data (${compText}) without hallucinating fake numbers or non-existent competitor usage?
-4. Budget & Execution Realism: Are recommended channels realistic for a $${budgetMax} test budget?
+4. Budget & Execution Realism: Are recommended and rejected channels evaluated against the exact confirmed campaign budget (${budgetLine})? Reject any proposal that fabricates a "$500 budget" or "$0 budget constraint" when a positive confirmed budget (${budgetLine}) is provided, or that conflates paid advertising rejection (e.g., YouTube Paid Ads) with organic channel viability without explicit mode separation.
 5. Factual Groundedness vs Clichés: Is the rationale specific to this product, audience, and market, or is it generic marketing fluff / clichés? Did the proposal invent unevidenced factual claims (e.g. "90% of buyers are on X")?
 6. No Contradictions: Does the recommendation align with prior validated decisions?
 

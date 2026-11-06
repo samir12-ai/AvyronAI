@@ -80,7 +80,12 @@ export function judgeReasoningAnalysis(
     h => h.hypothesisType === "EXECUTION_OR_DISTRIBUTION_FLUCTUATION" ||
          h.hypothesisType === "FUNNEL_OR_OFFER_FRICTION" ||
          h.hypothesisType === "STATISTICAL_NOISE" ||
-         h.hypothesisType === "MEASUREMENT_OR_TRUTH_GAP"
+         h.hypothesisType === "MEASUREMENT_OR_TRUTH_GAP" ||
+         h.hypothesisType === "SINGLE_WINDOW_SAMPLE_LIMITATION" ||
+         h.hypothesisType === "LOCAL_COMPETITOR_COPY_OR_OFFER_ITERATION" ||
+         h.hypothesisType === "PROMOTIONAL_DISCOUNT_FRAMING_ONLY" ||
+         h.hypothesisType === "COLLECTION_COVERAGE_CUMULATIVE_COUNT" ||
+         h.hypothesisType === "EXTRACTION_OR_SCOPE_CONTRADICTION"
   );
 
   if (performanceSignals.length > 0 && !hasAlternativeCauses) {

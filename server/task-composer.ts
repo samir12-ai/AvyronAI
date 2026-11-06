@@ -2,6 +2,7 @@ import { Express, Request, Response } from "express";
 import { db } from "./db";
 import { eq, and, desc } from "drizzle-orm";
 import { executionTasks, strategicPlans, requiredWork } from "../shared/schema";
+import { resolveExecutionPlan } from "./orchestrator/execution-plan-resolver";
 
 import { resolveAccountId } from "./auth";
 interface TaskTemplate {
@@ -12,7 +13,7 @@ interface TaskTemplate {
   priority: string;
 }
 
-function generateTasksFromPlan(planData: any, periodDays: number): TaskTemplate[] {
+export function generateTasksFromPlan(planData: any, periodDays: number): TaskTemplate[] {
   const tasks: TaskTemplate[] = [];
   const weeks = Math.ceil(periodDays / 7);
 
@@ -58,13 +59,55 @@ function generateTasksFromPlan(planData: any, periodDays: number): TaskTemplate[
     }
 
     if (w === 1) {
-      tasks.push({
-        taskType: "launch",
-        title: "Launch initial ad sets",
-        description: "Set up and launch the first round of paid promotion",
-        category: "ads",
-        priority: "high",
-      });
+      const ba = planData?.budgetAllocation || {};
+      const spendAction = String(
+        ba?.holdPolicy?.spendAction || ba?.testingAndScalingGuidance?.spendAction || "hold",
+      ).toLowerCase();
+      const paidMediaBudget = Number(ba?.budgetDenominators?.paidMediaBudget || 0);
+      const initialAllowance = Number(
+        ba?.initialTestingAllowance?.amount ||
+          ba?.testingAndScalingGuidance?.initialValidationTestBudget ||
+          1000,
+      );
+      const reserveAmt = Number(
+        ba?.unreleasedReserve?.amount ||
+          ba?.testingAndScalingGuidance?.unreleasedReserveBudget ||
+          4000,
+      );
+      const currency = ba?.currency || "USD";
+      const prereqList: any[] = Array.isArray(ba?.channelPrerequisites) ? ba.channelPrerequisites : [];
+      const gatedRetargeting = prereqList.find((cp: any) => cp?.readinessStatus === "PREREQUISITE_GATED");
+      const eligibleInitialPaid = prereqList.find(
+        (cp: any) => !cp?.isOrganic && cp?.initialTestingEligibility === "ELIGIBLE_WITHIN_1000_CARVEOUT",
+      );
+
+      if (spendAction === "hold" && paidMediaBudget > 0) {
+        const primaryPaidName = eligibleInitialPaid?.channelName || "TikTok Paid Ads";
+        tasks.push({
+          taskType: "validation_setup",
+          title: `Configure conversion tracking & controlled ${initialAllowance.toLocaleString("en-US")} ${currency} (20%) validation test on ${primaryPaidName}`,
+          description: `Verify pixel/conversion tracking and deploy controlled initial validation testing up to ${initialAllowance.toLocaleString("en-US")} ${currency} (inside the ${Number(ba?.totalMonthlyBudget || 5000).toLocaleString("en-US")} ${currency} monthly envelope — not extra spend) on ${primaryPaidName} while holding ${reserveAmt.toLocaleString("en-US")} ${currency} (80%) in reserve under spendAction = hold.`,
+          category: "validation",
+          priority: "high",
+        });
+        if (gatedRetargeting) {
+          tasks.push({
+            taskType: "prerequisite_gate",
+            title: `[PREREQUISITE GATED] Build >= ${gatedRetargeting.requiredWarmAudiencePool || 1000} engaged TikTok retargeting pool & >= ${gatedRetargeting.requiredLandingPageVisits || 1500} landing page visits before ${gatedRetargeting.channelName}`,
+            description: `${gatedRetargeting.prerequisiteSummary || "Hold secondary retargeting allocation until warm audience pool (>= 1,000 engaged users), landing page traffic (>= 1,500 visits within 21 days), and conversion event measurement are verified."}`,
+            category: "prerequisites",
+            priority: "high",
+          });
+        }
+      } else if (spendAction !== "hold" && paidMediaBudget > 0) {
+        tasks.push({
+          taskType: "launch",
+          title: "Launch initial ad sets",
+          description: "Set up and launch the first round of paid promotion",
+          category: "ads",
+          priority: "high",
+        });
+      }
     }
 
     if (w > 1) {
@@ -118,7 +161,7 @@ function applyStrategicGuards(templates: TaskTemplate[], context: TaskComposerCo
     const contentTasks = filtered.filter(t => t.taskType === "content_production");
     const nonContentTasks = filtered.filter(t => t.taskType !== "content_production");
     const reducedContent = contentTasks.filter((_, i) => i % 2 === 0);
-    filtered = [...reducedContent, ...nonContentTasks];
+    filtered = [...nonContentTasks, ...reducedContent].sort((a, b) => ((a as any).dayNumber || 0) - ((b as any).dayNumber || 0));
     console.log(`[TaskComposer] HOLD_RESTRICTION | Removed launch/ad tasks, reduced content by 50% | ${templates.length}→${filtered.length} tasks`);
   }
 
@@ -181,7 +224,6 @@ export async function composeTasks(
 
   const weeks = Math.ceil(periodDays / 7);
   let sortOrder = 0;
-  let taskIdx = 0;
 
   const values = templates.map((t, i) => {
     const weekNum = Math.min(Math.floor(i / (templates.length / weeks)) + 1, weeks);
@@ -206,7 +248,9 @@ export async function composeTasks(
     };
   });
 
-  await db.insert(executionTasks).values(values);
+  if (values.length > 0) {
+    await db.insert(executionTasks).values(values);
+  }
   console.log(`[TaskComposer] Generated ${values.length} tasks for plan ${planId} with status ${initialStatus}`);
   return values;
 }
@@ -215,14 +259,37 @@ export function registerTaskComposerRoutes(app: Express) {
   app.get("/api/execution-tasks/:campaignId", async (req: Request, res: Response) => {
     try {
       const accountId = resolveAccountId(req);
-      const [plan] = await db.select().from(strategicPlans)
-        .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, req.params.campaignId as string)))
-        .orderBy(desc(strategicPlans.createdAt)).limit(1);
+      const campaignId = req.params.campaignId as string;
+      const requestedPlanId = typeof req.query.planId === "string" && req.query.planId.trim() ? req.query.planId.trim() : null;
+
+      let plan: typeof strategicPlans.$inferSelect | undefined;
+      if (requestedPlanId) {
+        [plan] = await db
+          .select()
+          .from(strategicPlans)
+          .where(and(eq(strategicPlans.id, requestedPlanId), eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, campaignId)))
+          .limit(1);
+      } else {
+        const resolved = await resolveExecutionPlan({
+          accountId,
+          campaignId,
+          intent: "read",
+        });
+        plan = resolved.plan || undefined;
+        if (!plan) {
+          [plan] = await db
+            .select()
+            .from(strategicPlans)
+            .where(and(eq(strategicPlans.accountId, accountId), eq(strategicPlans.campaignId, campaignId)))
+            .orderBy(desc(strategicPlans.isDesignatedActive), desc(strategicPlans.createdAt))
+            .limit(1);
+        }
+      }
 
       if (!plan) return res.json({ hasTasks: false, tasks: [] });
 
       const tasks = await db.select().from(executionTasks)
-        .where(and(eq(executionTasks.planId, plan.id), eq(executionTasks.campaignId, req.params.campaignId as string)));
+        .where(and(eq(executionTasks.planId, plan.id), eq(executionTasks.campaignId, campaignId)));
 
       const today = tasks.filter(t => t.dayNumber === 1 || t.priority === "high");
       const thisWeek = tasks.filter(t => t.weekNumber === 1);
@@ -232,6 +299,8 @@ export function registerTaskComposerRoutes(app: Express) {
       res.json({
         hasTasks: tasks.length > 0,
         planId: plan.id,
+        planStatus: plan.status,
+        isDesignatedActive: Boolean(plan.isDesignatedActive),
         total: tasks.length,
         byStatus: {
           pending: pending.length,

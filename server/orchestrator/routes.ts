@@ -23,6 +23,8 @@ import {
   differentiationSnapshots,
   positioningSnapshots,
   budgetAllocationSnapshots,
+  budgetGovernorSnapshots,
+  channelSelectionSnapshots,
 } from "@shared/schema";
 import { eq, and, or, desc, sql, inArray } from "drizzle-orm";
 import { validateRootIntegrity, detectStaleness, computeCalendarDeviation } from "../root-bundle";
@@ -30,6 +32,7 @@ import { casUpdateStrategicPlan, casUpdateStrategicPlanByVersion } from "../stra
 import { computeFulfillment } from "../fulfillment-engine";
 import { buildCausalNarrative } from "../narrative-layer";
 import { computeAdaptiveRhythm } from "../adaptive-rhythm/engine";
+import { buildCanonicalBudgetAuthorityModel } from "./plan-synthesis";
 
 import { resolveAccountId } from "../auth";
 import { resolveRunId } from "./run-resolver";
@@ -242,14 +245,17 @@ export function registerOrchestratorV2Routes(app: Express) {
       const planCtx = await resolvePlanContext({
         campaignId: req.params.campaignId,
         accountId,
-        specificPlanId: requestedPlanId || (!requestedRunId ? undefined : null),
-        specificRunId: requestedRunId || resolved.runId || null,
+        specificPlanId: requestedPlanId || null,
+        specificRunId: requestedRunId || null,
         mode: "LATEST_VIEWABLE",
       });
 
+      if (!requestedRunId && planCtx.jobId) {
+        resolved = { ...resolved, runId: planCtx.jobId, planId: planCtx.planId };
+      }
       const effectiveRunId = planCtx.jobId || resolved.runId;
 
-      const [selectedJob] = effectiveRunId
+      const [selectedJob] = resolved.runId
         ? await db
             .select({
               id: orchestratorJobs.id,
@@ -262,7 +268,7 @@ export function registerOrchestratorV2Routes(app: Express) {
             .from(orchestratorJobs)
             .where(
               and(
-                eq(orchestratorJobs.id, effectiveRunId),
+                eq(orchestratorJobs.id, resolved.runId!),
                 eq(orchestratorJobs.campaignId, req.params.campaignId),
                 eq(orchestratorJobs.accountId, accountId)
               )
@@ -639,44 +645,173 @@ export function registerOrchestratorV2Routes(app: Express) {
         }
       }
 
-      // 6. Hydrate Budget Allocation Snapshot from pinned snapshot or targetJobId if missing
-      if (planData && !planData.budgetAllocation && (planCtx.snapshotIds.budgetSnapshotId || targetJobId)) {
-        const [budgetSnap] = planCtx.snapshotIds.budgetSnapshotId
-          ? await db.select().from(budgetAllocationSnapshots).where(eq(budgetAllocationSnapshots.id, planCtx.snapshotIds.budgetSnapshotId)).limit(1)
-          : await db.select().from(budgetAllocationSnapshots).where(
-              and(
-                eq(budgetAllocationSnapshots.accountId, accountId),
-                eq(budgetAllocationSnapshots.campaignId, req.params.campaignId),
-                eq(budgetAllocationSnapshots.jobId, targetJobId!)
-              )
-            ).orderBy(desc(budgetAllocationSnapshots.createdAt)).limit(1);
+      // 6. Hydrate & enrich Budget Allocation with canonical Budget Governor authority + Channel Selection preliminary recommendation
+      if (planData) {
+        let bgGovResult: any = null;
+        if (planCtx.snapshotIds.budgetSnapshotId) {
+          const [bgSnap] = await db
+            .select()
+            .from(budgetGovernorSnapshots)
+            .where(eq(budgetGovernorSnapshots.id, planCtx.snapshotIds.budgetSnapshotId))
+            .limit(1);
+          if (bgSnap) {
+            bgGovResult = safeParse(bgSnap.result) || null;
+          }
+        }
+        let chanSelResult: any = null;
+        if (planCtx.snapshotIds.channelSelectionSnapshotId) {
+          const [csSnap] = await db
+            .select()
+            .from(channelSelectionSnapshots)
+            .where(eq(channelSelectionSnapshots.id, planCtx.snapshotIds.channelSelectionSnapshotId))
+            .limit(1);
+          if (csSnap) {
+            chanSelResult = safeParse(csSnap.result) || null;
+          }
+        }
 
-        if (budgetSnap) {
-          const channelAllocs = (safeParse(budgetSnap.channelAllocations) || []).map((alloc: any) => ({
-            ...alloc,
-            channelId: alloc.channelId || alloc.id || String(alloc.channel || alloc.channelName || "").toLowerCase().replace(/\s+/g, "_"),
-            channelName: alloc.channelName || alloc.channel || alloc.category || "Channel",
-            channel: alloc.channel || alloc.channelName || alloc.category || "Channel",
-            platform: alloc.platform || (String(alloc.channel || "").toLowerCase().includes("instagram") ? "Instagram" : String(alloc.channel || "").toLowerCase().includes("tiktok") ? "TikTok" : alloc.channel),
-            mode: alloc.mode || (String(alloc.channel || "").toLowerCase().includes("organic") ? "ORGANIC" : "PAID"),
-            costCategory: alloc.costCategory || (String(alloc.channel || "").toLowerCase().includes("organic") ? "ORGANIC_PRODUCTION_EFFORT" : "PAID_MEDIA_AD_SPEND"),
-            percentage: Number(alloc.percentage ?? alloc.sharePercent ?? 0),
-            monthlyAmount: Number(alloc.monthlyAmount ?? alloc.monthlyBudget ?? alloc.allocatedAmount ?? 0),
-            monthlyBudget: Number(alloc.monthlyBudget ?? alloc.monthlyAmount ?? alloc.allocatedAmount ?? 0),
-            allocatedAmount: Number(alloc.allocatedAmount ?? alloc.monthlyAmount ?? alloc.monthlyBudget ?? 0),
-          }));
+        if (!planData.budgetAllocation && (planCtx.snapshotIds.budgetSnapshotId || targetJobId)) {
+          const [budgetSnap] = planCtx.snapshotIds.budgetSnapshotId
+            ? await db.select().from(budgetAllocationSnapshots).where(eq(budgetAllocationSnapshots.id, planCtx.snapshotIds.budgetSnapshotId)).limit(1)
+            : await db.select().from(budgetAllocationSnapshots).where(
+                and(
+                  eq(budgetAllocationSnapshots.accountId, accountId),
+                  eq(budgetAllocationSnapshots.campaignId, req.params.campaignId),
+                  eq(budgetAllocationSnapshots.jobId, targetJobId!)
+                )
+              ).orderBy(desc(budgetAllocationSnapshots.createdAt)).limit(1);
+
+          if (budgetSnap) {
+            const channelAllocs = (safeParse(budgetSnap.channelAllocations) || []).map((alloc: any) => ({
+              ...alloc,
+              channelId: alloc.channelId || alloc.id || String(alloc.channel || alloc.channelName || "").toLowerCase().replace(/\s+/g, "_"),
+              channelName: alloc.channelName || alloc.channel || alloc.category || "Channel",
+              channel: alloc.channel || alloc.channelName || alloc.category || "Channel",
+              platform: alloc.platform || (String(alloc.channel || "").toLowerCase().includes("instagram") ? "Instagram" : String(alloc.channel || "").toLowerCase().includes("tiktok") ? "TikTok" : alloc.channel),
+              mode: alloc.mode || (String(alloc.channel || "").toLowerCase().includes("organic") ? "ORGANIC" : "PAID"),
+              costCategory: alloc.costCategory || (String(alloc.channel || "").toLowerCase().includes("organic") ? "ORGANIC_PRODUCTION_EFFORT" : "PAID_MEDIA_AD_SPEND"),
+              percentage: Number(alloc.percentage ?? alloc.sharePercent ?? 0),
+              monthlyAmount: Number(alloc.monthlyAmount ?? alloc.monthlyBudget ?? alloc.allocatedAmount ?? 0),
+              monthlyBudget: Number(alloc.monthlyBudget ?? alloc.monthlyAmount ?? alloc.allocatedAmount ?? 0),
+              allocatedAmount: Number(alloc.allocatedAmount ?? alloc.monthlyAmount ?? alloc.monthlyBudget ?? 0),
+            }));
+            planData.budgetAllocation = {
+              snapshotId: budgetSnap.id,
+              jobId: budgetSnap.jobId,
+              status: budgetSnap.status,
+              totalMonthlyBudget: budgetSnap.totalMonthlyBudget,
+              currency: budgetSnap.currency || "USD",
+              channelAllocations: channelAllocs,
+              paidVsOrganicSplit: safeParse(budgetSnap.paidVsOrganicSplit),
+              creativeProductionReserve: safeParse(budgetSnap.creativeProductionReserve),
+              experimentBudget: safeParse(budgetSnap.experimentBudget),
+              scalingRules: safeParse(budgetSnap.scalingRules),
+            };
+          }
+        }
+
+        const existingBa = planData.budgetAllocation || {};
+        if (bgGovResult || Array.isArray(existingBa.channels)) {
+          const canonicalBa = buildCanonicalBudgetAuthorityModel({
+            totalMonthlyBudget: Number(
+              existingBa.totalMonthlyBudget ?? bgGovResult?.totalMonthlyBudget ?? 5000,
+            ),
+            currency: existingBa.currency || bgGovResult?.currency || "USD",
+            budgetSettingsVersion: Number(
+              existingBa.budgetSettingsVersion ?? bgGovResult?.budgetSettingsVersion ?? 1,
+            ),
+            budgetConfirmation:
+              existingBa.budgetConfirmation === "unconfirmed" ? "unconfirmed" : "user_confirmed",
+            budgetGovernorOutput:
+              bgGovResult || {
+                totalMonthlyBudget: existingBa.totalMonthlyBudget ?? 5000,
+                currency: existingBa.currency || "USD",
+                spendAction: existingBa.testingAndScalingGuidance?.spendAction || "hold",
+                commercialStrategy: {
+                  spendPace: existingBa.testingAndScalingGuidance?.spendPace || "cautious",
+                  learningBudgetCarveOutPct:
+                    existingBa.testingAndScalingGuidance?.learningBudgetCarveOutPct ?? 20,
+                },
+                allocations: existingBa.channels || existingBa.channelAllocations || [],
+              },
+            channelSelectionOutput: chanSelResult || planData.channelSelection || null,
+            weeklyCadence: planData.contentDistribution
+              ? {
+                  reelsPerWeek: Number(planData.contentDistribution.reelsPerWeek || 2),
+                  postsPerWeek: Number(planData.contentDistribution.postsPerWeek || 2),
+                  storiesPerDay: Number(planData.contentDistribution.storiesPerDay || 1),
+                  carouselsPerWeek: Number(planData.contentDistribution.carouselsPerWeek || 1),
+                  videosPerWeek: Number(planData.contentDistribution.videosPerWeek || 1),
+                }
+              : undefined,
+          });
           planData.budgetAllocation = {
-            snapshotId: budgetSnap.id,
-            jobId: budgetSnap.jobId,
-            status: budgetSnap.status,
-            totalMonthlyBudget: budgetSnap.totalMonthlyBudget,
-            currency: budgetSnap.currency || "USD",
-            channelAllocations: channelAllocs,
-            paidVsOrganicSplit: safeParse(budgetSnap.paidVsOrganicSplit),
-            creativeProductionReserve: safeParse(budgetSnap.creativeProductionReserve),
-            experimentBudget: safeParse(budgetSnap.experimentBudget),
-            scalingRules: safeParse(budgetSnap.scalingRules),
+            ...existingBa,
+            ...canonicalBa,
           };
+        }
+
+        // Normalize fallback "Primary Strategic Channel, Secondary Strategic Channel" placeholder in contentDistribution at read time
+        if (planData.contentDistribution) {
+          const cs = chanSelResult || planData.channelSelection || {};
+          const actualPrimary =
+            cs?.primaryChannel?.channelName ||
+            cs?.aiChannelProposal?.proposedPrimary ||
+            cs?.primaryChannel ||
+            planData.contentDistribution?.channels?.[0]?.channel ||
+            null;
+          const actualSecondary =
+            cs?.secondaryChannel?.channelName ||
+            cs?.aiChannelProposal?.secondary ||
+            cs?.secondaryChannel ||
+            planData.contentDistribution?.channels?.[1]?.channel ||
+            null;
+          const actualSupporting = (Array.isArray(cs?.aiChannelProposal?.dynamicRecommendations)
+            ? cs.aiChannelProposal.dynamicRecommendations
+            : []
+          )
+            .filter(
+              (dr: any) =>
+                dr?.channelName &&
+                dr.channelName !== actualPrimary &&
+                dr.channelName !== actualSecondary &&
+                String(dr?.tier || "").toUpperCase() === "SUPPORTING",
+            )
+            .map((dr: any) => String(dr.channelName));
+          const resolvedChannelsLabel = [actualPrimary, actualSecondary, ...actualSupporting]
+            .filter((x) => typeof x === "string" && x.trim().length > 0)
+            .join(", ");
+          if (resolvedChannelsLabel) {
+            if (
+              typeof planData.contentDistribution.rationale === "string" &&
+              planData.contentDistribution.rationale.includes("Primary Strategic Channel")
+            ) {
+              planData.contentDistribution.rationale = planData.contentDistribution.rationale.replace(
+                /Primary Strategic Channel,\s*Secondary Strategic Channel/g,
+                resolvedChannelsLabel,
+              );
+            }
+            if (
+              typeof planData.executionBlueprintDnaLink?.weeklyDnaApplication === "string" &&
+              planData.executionBlueprintDnaLink.weeklyDnaApplication.includes("Primary Strategic Channel")
+            ) {
+              planData.executionBlueprintDnaLink.weeklyDnaApplication =
+                planData.executionBlueprintDnaLink.weeklyDnaApplication.replace(
+                  /Primary Strategic Channel,\s*Secondary Strategic Channel/g,
+                  resolvedChannelsLabel,
+                );
+            }
+            if (
+              typeof planData.businessRepresentation?.executionBlueprintDnaLink?.weeklyDnaApplication === "string" &&
+              planData.businessRepresentation.executionBlueprintDnaLink.weeklyDnaApplication.includes("Primary Strategic Channel")
+            ) {
+              planData.businessRepresentation.executionBlueprintDnaLink.weeklyDnaApplication =
+                planData.businessRepresentation.executionBlueprintDnaLink.weeklyDnaApplication.replace(
+                  /Primary Strategic Channel,\s*Secondary Strategic Channel/g,
+                  resolvedChannelsLabel,
+                );
+            }
+          }
         }
       }
 
@@ -776,11 +911,12 @@ export function registerOrchestratorV2Routes(app: Express) {
       const totalPlanRevisions = allCampaignPlans.length;
       const activePlanVersion = designatedActivePlan?.version ?? plan.version ?? null;
       const rootBundleVersion =
-        designatedActivePlan?.rootBundleVersion ??
         plan.rootBundleVersion ??
+        designatedActivePlan?.rootBundleVersion ??
         planData?.rootBundle?.bundleVersion ??
         planData?.rootBundle?.version ??
         null;
+      const candidateDraftRow = planCtx.candidateDraftPlan || (plan && plan.status === "DRAFT" ? plan : null);
 
       res.json({
         runId: resolved.runId,
@@ -822,15 +958,17 @@ export function registerOrchestratorV2Routes(app: Express) {
           createdAt: designatedActivePlan.createdAt,
           updatedAt: designatedActivePlan.updatedAt,
         } : null,
-        candidateDraftPlan: plan && plan.status === "DRAFT" ? {
-          id: plan.id,
-          status: plan.status,
-          executionStatus: plan.executionStatus,
-          summary: plan.planSummary,
-          rootBundleId: plan.rootBundleId,
-          version: plan.version,
-          createdAt: plan.createdAt,
-          updatedAt: plan.updatedAt,
+        candidateDraftPlan: candidateDraftRow ? {
+          id: candidateDraftRow.id,
+          status: candidateDraftRow.status,
+          executionStatus: candidateDraftRow.executionStatus,
+          isDesignatedActive: false,
+          summary: candidateDraftRow.planSummary,
+          rootBundleId: candidateDraftRow.rootBundleId,
+          rootBundleVersion: candidateDraftRow.rootBundleVersion,
+          version: candidateDraftRow.version,
+          createdAt: candidateDraftRow.createdAt,
+          updatedAt: candidateDraftRow.updatedAt,
         } : null,
         plan: {
           id: plan.id,

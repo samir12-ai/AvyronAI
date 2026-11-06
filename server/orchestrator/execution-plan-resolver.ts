@@ -12,7 +12,7 @@ import { db } from "../db";
 import * as schema from "@shared/schema";
 import { and, eq, desc } from "drizzle-orm";
 
-export type RunResolutionIntent = "execution" | "draft_review" | "historical_inspection" | "resume";
+export type RunResolutionIntent = "execution" | "draft_review" | "historical_inspection" | "resume" | "read";
 
 export interface ExecutionPlanResolutionResult {
   canExecute: boolean;
@@ -428,6 +428,87 @@ export async function designateActiveExecutionPlan(args: {
           .where(eq(schema.executionTasks.id, t.id));
       }
     }
+
+    const todayDateStr = new Date().toISOString().split("T")[0];
+
+    // Supersede current/future draft/pending calendar entries from superseded plans while preserving published/completed/historical items
+    const allCalendarEntries = await tx
+      .select({
+        id: schema.calendarEntries.id,
+        planId: schema.calendarEntries.planId,
+        status: schema.calendarEntries.status,
+        scheduledDate: schema.calendarEntries.scheduledDate,
+      })
+      .from(schema.calendarEntries)
+      .where(eq(schema.calendarEntries.campaignId, campaignId));
+    for (const ce of allCalendarEntries) {
+      const ceDateStr = ce.scheduledDate ? new Date(ce.scheduledDate).toISOString().split("T")[0] : todayDateStr;
+      if (
+        ce.planId !== planId &&
+        ceDateStr >= todayDateStr &&
+        (ce.status === "DRAFT" || ce.status === "PENDING" || ce.status === "PLANNED")
+      ) {
+        await tx
+          .update(schema.calendarEntries)
+          .set({ status: "SUPERSEDED", updatedAt: new Date() })
+          .where(eq(schema.calendarEntries.id, ce.id));
+      }
+    }
+
+    // Supersede non-user-edited draft studio items from superseded plans while preserving published/completed/user-edited items
+    const allStudioItems = await tx
+      .select()
+      .from(schema.studioItems)
+      .where(eq(schema.studioItems.campaignId, campaignId));
+    for (const si of allStudioItems) {
+      if (si.planId !== planId && !(si as any).userEdited && (si.status === "DRAFT" || si.status === "PENDING")) {
+        await tx
+          .update(schema.studioItems)
+          .set({ status: "SUPERSEDED", updatedAt: new Date() })
+          .where(eq(schema.studioItems.id, si.id));
+      }
+    }
+
+    // Supersede current/future active execution_days and non-completed daily_execution_tasks from superseded plans
+    // Historical execution_days (businessDate < todayDateStr) are preserved intact with their original lineage.
+    const allExecDays = await tx
+      .select({
+        id: schema.executionDays.id,
+        strategicPlanId: schema.executionDays.strategicPlanId,
+        status: schema.executionDays.status,
+        businessDate: schema.executionDays.businessDate,
+      })
+      .from(schema.executionDays)
+      .where(eq(schema.executionDays.campaignId, campaignId));
+    for (const ed of allExecDays) {
+      if (
+        ed.strategicPlanId !== planId &&
+        ed.businessDate >= todayDateStr &&
+        (ed.status === "ACTIVE" || ed.status === "PLANNED")
+      ) {
+        await tx
+          .update(schema.executionDays)
+          .set({ status: "SUPERSEDED", updatedAt: new Date() })
+          .where(eq(schema.executionDays.id, ed.id));
+        const dayTasks = await tx
+          .select({ id: schema.dailyExecutionTasks.id, status: schema.dailyExecutionTasks.status })
+          .from(schema.dailyExecutionTasks)
+          .where(eq(schema.dailyExecutionTasks.executionDayId, ed.id));
+        for (const dt of dayTasks) {
+          if (
+            dt.status !== "DONE" &&
+            dt.status !== "COMPLETED" &&
+            dt.status !== "SKIPPED" &&
+            dt.status !== "PUBLISHED"
+          ) {
+            await tx
+              .update(schema.dailyExecutionTasks)
+              .set({ status: "STALE", updatedAt: new Date() })
+              .where(eq(schema.dailyExecutionTasks.id, dt.id));
+          }
+        }
+      }
+    }
   });
 
   console.log(
@@ -441,10 +522,14 @@ export type PlanContextResolutionMode =
   | "APPROVED_ACTIVE"
   | "CANDIDATE_DRAFT"
   | "HISTORICAL_VERSION"
-  | "LATEST_VIEWABLE";
+  | "LATEST_VIEWABLE"
+  | "SPECIFIC_PLAN";
 
 export interface ResolvedPlanContext {
   accountId: string;
+  businessId?: string | null;
+  productId?: string | null;
+  offeringId?: string | null;
   campaignId: string;
   mode: PlanContextResolutionMode;
   selectedPlan: typeof schema.strategicPlans.$inferSelect | null;
@@ -454,17 +539,31 @@ export interface ResolvedPlanContext {
   rootBundle: typeof schema.rootBundles.$inferSelect | null;
   jobId: string | null;
   planId: string | null;
+  planVersion?: number | null;
   strategyRootId: string | null;
+  strategyRootVersion?: number | null;
   rootBundleId: string | null;
+  rootBundleVersion?: number | null;
   isDraftPreview: boolean;
   isDesignatedActive: boolean;
   isHistoricalOnly: boolean;
   snapshotIds: {
+    businessUnderstandingSnapshotId?: string | null;
+    miSnapshotId?: string | null;
     audienceSnapshotId: string | null;
     positioningSnapshotId: string | null;
     differentiationSnapshotId: string | null;
     mechanismSnapshotId: string | null;
     offerSnapshotId: string | null;
+    awarenessSnapshotId?: string | null;
+    funnelSnapshotId?: string | null;
+    funnelSnapshotIds?: string[];
+    persuasionSnapshotId?: string | null;
+    persuasionSnapshotIds?: string[];
+    channelSelectionSnapshotId?: string | null;
+    budgetGovernorSnapshotId?: string | null;
+    integritySnapshotId?: string | null;
+    statisticalValidationSnapshotId?: string | null;
   };
 }
 
@@ -562,21 +661,16 @@ export async function resolvePlanContext(args: {
   } else if (mode === "CANDIDATE_DRAFT") {
     selectedPlan = candidateDraftPlan;
   } else {
-    // LATEST_VIEWABLE: if a newer candidate draft exists, surface it as a draft preview
-    // while retaining designatedActivePlan as the explicit approved baseline.
-    const isDraftNewer = Boolean(
-      candidateDraftPlan &&
-        (!designatedActivePlan ||
-          (candidateDraftPlan.createdAt &&
-            designatedActivePlan.createdAt &&
-            candidateDraftPlan.createdAt.getTime() > designatedActivePlan.createdAt.getTime()))
-    );
-    selectedPlan = isDraftNewer ? candidateDraftPlan : designatedActivePlan || candidateDraftPlan || null;
+    // LATEST_VIEWABLE: when an approved designatedActivePlan exists, it remains the canonical
+    // strategy & execution authority across all views unless the caller explicitly requests
+    // CANDIDATE_DRAFT or a specific draft planId. candidateDraftPlan is still returned on
+    // the context so Strategy Plan UI can surface a review banner for newer unapproved drafts.
+    selectedPlan = designatedActivePlan || candidateDraftPlan || null;
     effectiveMode =
-      selectedPlan && candidateDraftPlan && selectedPlan.id === candidateDraftPlan.id
-        ? "CANDIDATE_DRAFT"
-        : selectedPlan && designatedActivePlan && selectedPlan.id === designatedActivePlan.id
+      selectedPlan && designatedActivePlan && selectedPlan.id === designatedActivePlan.id
         ? "APPROVED_ACTIVE"
+        : selectedPlan && candidateDraftPlan && selectedPlan.id === candidateDraftPlan.id
+        ? "CANDIDATE_DRAFT"
         : mode;
   }
 
@@ -594,13 +688,15 @@ export async function resolvePlanContext(args: {
   }
 
   let resolvedRootIdFromPlanOrBundle: string | null = null;
-  let planSnapshotIds: Record<string, string | null | undefined> = {};
+  let planSnapshotIds: Record<string, any> = {};
+  let parsedPlanObj: any = null;
   if (selectedPlan?.planJson) {
     try {
       const parsedPlan =
         typeof selectedPlan.planJson === "string"
           ? JSON.parse(selectedPlan.planJson)
           : selectedPlan.planJson;
+      parsedPlanObj = parsedPlan;
       resolvedRootIdFromPlanOrBundle =
         parsedPlan?.strategyRootId ||
         parsedPlan?.rootId ||
@@ -675,6 +771,102 @@ export async function resolvePlanContext(args: {
     rootBundle = bundleByRoot || null;
   }
 
+  // Resolve businessId, productId, offeringId from campaign_offerings / businesses / business_products
+  let businessId: string | null = parsedPlanObj?.businessId || null;
+  let productId: string | null = parsedPlanObj?.productId || null;
+  let offeringId: string | null = parsedPlanObj?.offeringId || parsedPlanObj?.selectedOfferingId || null;
+  try {
+    const [offRow] = await db
+      .select({
+        id: schema.campaignOfferings.id,
+        businessId: schema.campaignOfferings.businessId,
+        productId: schema.campaignOfferings.productId,
+      })
+      .from(schema.campaignOfferings)
+      .where(eq(schema.campaignOfferings.campaignId, campaignId))
+      .orderBy(desc(schema.campaignOfferings.createdAt))
+      .limit(1);
+    if (offRow) {
+      offeringId = offRow.id || offeringId;
+      businessId = offRow.businessId || businessId;
+      productId = offRow.productId || productId;
+    }
+    if (!businessId) {
+      const [bizRow] = await db
+        .select({ id: schema.businesses.id })
+        .from(schema.businesses)
+        .where(eq(schema.businesses.accountId, accountId))
+        .orderBy(desc(schema.businesses.createdAt))
+        .limit(1);
+      if (bizRow) businessId = bizRow.id;
+    }
+    if (!productId && businessId) {
+      const [prodRow] = await db
+        .select({ id: schema.businessProducts.id })
+        .from(schema.businessProducts)
+        .where(eq(schema.businessProducts.businessId, businessId))
+        .orderBy(desc(schema.businessProducts.createdAt))
+        .limit(1);
+      if (prodRow) productId = prodRow.id;
+    }
+  } catch {}
+
+  const rawFunnel = planSnapshotIds.funnel || planSnapshotIds.funnelSnapshotIds;
+  const funnelIdSet = new Set<string>(
+    Array.isArray(rawFunnel)
+      ? rawFunnel.filter((x: any) => typeof x === "string" && x.length > 0)
+      : typeof rawFunnel === "string" && rawFunnel.length > 0
+        ? [rawFunnel]
+        : []
+  );
+  const rawPersuasion = planSnapshotIds.persuasion || planSnapshotIds.persuasionSnapshotIds;
+  const persuasionIdSet = new Set<string>(
+    Array.isArray(rawPersuasion)
+      ? rawPersuasion.filter((x: any) => typeof x === "string" && x.length > 0)
+      : typeof rawPersuasion === "string" && rawPersuasion.length > 0
+        ? [rawPersuasion]
+        : []
+  );
+
+  if (Array.isArray(parsedPlanObj?.buyerConversionJourneys)) {
+    for (const j of parsedPlanObj.buyerConversionJourneys) {
+      if (typeof j?.sourceFunnelSnapshotId === "string" && j.sourceFunnelSnapshotId) {
+        funnelIdSet.add(j.sourceFunnelSnapshotId);
+      }
+      if (typeof j?.sourcePersuasionSnapshotId === "string" && j.sourcePersuasionSnapshotId) {
+        persuasionIdSet.add(j.sourcePersuasionSnapshotId);
+      }
+    }
+  }
+  if (Array.isArray(parsedPlanObj?.strategicFunnels)) {
+    for (const sf of parsedPlanObj.strategicFunnels) {
+      if (typeof sf?.snapshotId === "string" && sf.snapshotId) {
+        funnelIdSet.add(sf.snapshotId);
+      }
+      if (typeof sf?.sourceFunnelSnapshotId === "string" && sf.sourceFunnelSnapshotId) {
+        funnelIdSet.add(sf.sourceFunnelSnapshotId);
+      }
+    }
+  }
+  if (selectedPlan?.jobId && (funnelIdSet.size < 2 || persuasionIdSet.size < 2)) {
+    try {
+      const jobFunnels = await db
+        .select({ id: schema.funnelSnapshots.id })
+        .from(schema.funnelSnapshots)
+        .where(and(eq(schema.funnelSnapshots.campaignId, campaignId), eq(schema.funnelSnapshots.jobId, selectedPlan.jobId)));
+      for (const jf of jobFunnels) funnelIdSet.add(jf.id);
+
+      const jobPers = await db
+        .select({ id: schema.persuasionSnapshots.id })
+        .from(schema.persuasionSnapshots)
+        .where(and(eq(schema.persuasionSnapshots.campaignId, campaignId), eq(schema.persuasionSnapshots.jobId, selectedPlan.jobId)));
+      for (const jp of jobPers) persuasionIdSet.add(jp.id);
+    } catch {}
+  }
+
+  const funnelSnapshotIds: string[] = Array.from(funnelIdSet);
+  const persuasionSnapshotIds: string[] = Array.from(persuasionIdSet);
+
   const isDraftPreview = Boolean(selectedPlan && selectedPlan.status === "DRAFT");
   const isDesignatedActive = Boolean(
     selectedPlan &&
@@ -683,6 +875,9 @@ export async function resolvePlanContext(args: {
 
   return {
     accountId,
+    businessId,
+    productId,
+    offeringId,
     campaignId,
     mode: effectiveMode,
     selectedPlan,
@@ -692,21 +887,35 @@ export async function resolvePlanContext(args: {
     rootBundle,
     jobId: selectedPlan?.jobId || strategyRoot?.runId || specificRunId || null,
     planId: selectedPlan?.id || null,
+    planVersion: (selectedPlan as any)?.versionNumber || (selectedPlan as any)?.version || null,
     strategyRootId: strategyRoot?.id || null,
+    strategyRootVersion: null,
     rootBundleId: rootBundle?.id || selectedPlan?.rootBundleId || null,
+    rootBundleVersion: rootBundle?.version || selectedPlan?.rootBundleVersion || null,
     isDraftPreview,
     isDesignatedActive,
     isHistoricalOnly,
     snapshotIds: {
-      miSnapshotId: strategyRoot?.miSnapshotId || planSnapshotIds.market_intelligence || null,
-      audienceSnapshotId: strategyRoot?.audienceSnapshotId || planSnapshotIds.audience || null,
-      positioningSnapshotId: strategyRoot?.positioningSnapshotId || planSnapshotIds.positioning || null,
-      differentiationSnapshotId: strategyRoot?.differentiationSnapshotId || planSnapshotIds.differentiation || null,
-      mechanismSnapshotId: strategyRoot?.mechanismSnapshotId || planSnapshotIds.mechanism || null,
-      offerSnapshotId: strategyRoot?.offerSnapshotId || planSnapshotIds.offer || null,
+      businessUnderstandingSnapshotId:
+        planSnapshotIds.businessUnderstanding || planSnapshotIds.business_understanding || null,
+      miSnapshotId: planSnapshotIds.market_intelligence || strategyRoot?.miSnapshotId || null,
+      audienceSnapshotId: planSnapshotIds.audience || strategyRoot?.audienceSnapshotId || null,
+      positioningSnapshotId: planSnapshotIds.positioning || strategyRoot?.positioningSnapshotId || null,
+      differentiationSnapshotId: planSnapshotIds.differentiation || strategyRoot?.differentiationSnapshotId || null,
+      mechanismSnapshotId: planSnapshotIds.mechanism || strategyRoot?.mechanismSnapshotId || null,
+      offerSnapshotId: planSnapshotIds.offer || (strategyRoot as any)?.offerSnapshotId || null,
       awarenessSnapshotId: planSnapshotIds.awareness || null,
-      funnelSnapshotId: planSnapshotIds.funnel || null,
-      persuasionSnapshotId: planSnapshotIds.persuasion || null,
+      funnelSnapshotId: funnelSnapshotIds[0] || null,
+      funnelSnapshotIds,
+      persuasionSnapshotId: persuasionSnapshotIds[0] || null,
+      persuasionSnapshotIds,
+      channelSelectionSnapshotId:
+        planSnapshotIds.channel_selection || planSnapshotIds.channelSelection || null,
+      budgetGovernorSnapshotId:
+        planSnapshotIds.budget_governor || planSnapshotIds.budgetGovernor || null,
+      integritySnapshotId: planSnapshotIds.integrity || null,
+      statisticalValidationSnapshotId:
+        planSnapshotIds.statistical_validation || planSnapshotIds.statisticalValidation || null,
     },
   };
 }

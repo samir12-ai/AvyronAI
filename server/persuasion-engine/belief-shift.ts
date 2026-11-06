@@ -21,6 +21,7 @@ export interface BeliefShiftInput {
   marketDiagnosis?: string | null;
   enemyDefinition?: string | null;
   productTruthFacts?: Array<{ id: string; capability?: string; text?: string }>;
+  competitorPreviewCounterexamples?: Array<{ competitorName: string; evidenceText: string; previewTiming?: string }>;
   doctrineBlock?: string | null;
   accountId: string;
 }
@@ -37,6 +38,10 @@ function buildBeliefShiftPrompt(input: BeliefShiftInput, judgeFeedback?: string)
     .slice(0, 15)
     .map(f => `- ${f.id}: ${f.text || f.capability}`)
     .join("\n") || "(none supplied)";
+
+  const compCounterBlock = (input.competitorPreviewCounterexamples && input.competitorPreviewCounterexamples.length > 0)
+    ? `\n═══ VERIFIED COMPETITOR COUNTEREXAMPLES (Do Not Contradict) ═══\n${input.competitorPreviewCounterexamples.map(c => `- ${c.competitorName} (${c.previewTiming || "PRE_PAYMENT_FREE_PREVIEW"}): ${c.evidenceText}`).join("\n")}\n`
+    : "";
 
   const judgePreface = judgeFeedback
     ? `\n═══ PRIOR ATTEMPT WAS REJECTED ═══\nReason: ${judgeFeedback}\nFix the defect. Do NOT repeat generic or ungrounded claims.\n`
@@ -63,15 +68,16 @@ Awareness Stage: ${input.awarenessStage || "problem_aware"}
 
 ═══ CANONICAL PRODUCT TRUTH (Strict Boundary) ═══
 ${ptBlock}
-
+${compCounterBlock}
 ═══ HARD RULES ═══
 1. currentBelief MUST be a non-empty, substantive statement of the buyer's current flawed assumption.
 2. desiredBelief MUST be a non-empty, substantive statement of the required conviction.
 3. PRODUCT TRUTH BOUNDARY:
-   - desiredBelief and contradictionLogic MUST NOT claim features, human staffing, or operational guarantees outside the Product Truth above.
-   - Specifically: Do NOT claim "a human-driven process over automation", "human studio musicians/composers", "phonetic pronunciation control", "specify name pronunciation", "permanent/lifetime cloud link hosting", or "automated billing/refund portals" unless explicitly stated in CANONICAL PRODUCT TRUTH.
+   - desiredBelief and contradictionLogic MUST NOT claim features, staffing models, hosting duration guarantees, or refund/billing policies absent from CANONICAL PRODUCT TRUTH above.
    - Ground desiredBelief and contradictionLogic strictly in how the verified product workflow, customization steps, evaluation/preview mechanism, and delivery format stated in CANONICAL PRODUCT TRUTH resolve buyer skepticism.
-4. COMPETITOR ATTRIBUTION BOUNDARY: Do NOT state or imply that our business had expired links or hidden fees; treat those as market/competitor experiences that make buyers cautious.
+4. COMPETITOR & EVIDENCE ATTRIBUTION BOUNDARY:
+   - Do NOT make universal claims about all competitors (e.g., "all competitors force buyers to pay upfront without preview") when verified competitor counterexamples show some competitors offer that capability.
+   - Attribute customer complaints accurately to buyer concerns or observed market patterns without asserting unverified competitor internal operations.
 5. desiredBelief must be distinct and contradictory to currentBelief.
 6. Return ONLY valid JSON.
 
@@ -98,6 +104,93 @@ function safeJsonParse(raw: string): any {
     try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
   }
   return null;
+}
+
+export function evaluateBeliefShiftGrounding(
+  inp: BeliefShiftInput,
+  candidate: CanonicalBeliefShift
+): JudgeResult<CanonicalBeliefShift> {
+  const cur = (candidate.currentBelief || "").trim();
+  const des = (candidate.desiredBelief || "").trim();
+  const logic = (candidate.contradictionLogic || "").trim();
+  const combined = `${des} ${logic}`;
+  const ptText = (inp.productTruthFacts || []).map(f => f.text || f.capability || "").join(" ").toLowerCase();
+
+  if (!cur || cur.length < 15 || !des || des.length < 15) {
+    return {
+      valid: false,
+      failureClass: "GENERATION_QUALITY_FAILURE",
+      rejections: [{
+        rule: "coreBeliefTransformation",
+        reason: `BELIEF_SHIFT_INCOMPLETE: currentBelief or desiredBelief is empty or too brief (cur=${cur.length}, des=${des.length})`,
+      }],
+    };
+  }
+
+  if (cur.toLowerCase() === des.toLowerCase()) {
+    return {
+      valid: false,
+      failureClass: "GENERATION_QUALITY_FAILURE",
+      rejections: [{
+        rule: "coreBeliefTransformation",
+        reason: "BELIEF_SHIFT_INCOMPLETE: desiredBelief is identical to currentBelief",
+      }],
+    };
+  }
+
+  if (/refund|billing\s*dispute|automated\s*chargeback/i.test(des) && !ptText.includes("refund")) {
+    return {
+      valid: false,
+      failureClass: "EVIDENCE_FAILURE",
+      rejections: [{
+        rule: "desiredBelief",
+        reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief claims billing/refund capability outside Product Truth",
+      }],
+    };
+  }
+
+  if (/\bhuman[- ]driven\b|\bhuman[- ]led\b|\bover automation\b|\breplacing automation with human\b/i.test(combined) && !ptText.includes("human")) {
+    return {
+      valid: false,
+      failureClass: "EVIDENCE_FAILURE",
+      rejections: [{
+        rule: "desiredBelief",
+        reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief or contradictionLogic claims a human-driven staffing model not present in Product Truth.",
+      }],
+    };
+  }
+
+  if (
+    /\bpermanen(?:t|tly)\b|\blifetime\s+(?:access|hosting|link)\b|\bnever\s+expir\w*\b/i.test(combined) &&
+    !ptText.includes("lifetime") &&
+    !ptText.includes("permanent")
+  ) {
+    return {
+      valid: false,
+      failureClass: "EVIDENCE_FAILURE",
+      rejections: [{
+        rule: "desiredBelief",
+        reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief claims lifetime or permanent hosting/access guarantees not present in Product Truth. Ground strictly in verified Product Truth delivery terms.",
+      }],
+    };
+  }
+
+  if (
+    Array.isArray(inp.competitorPreviewCounterexamples) &&
+    inp.competitorPreviewCounterexamples.length > 0 &&
+    /\b(all\s+competitors\s+force|competitors\s+universally\s+force|no\s+competitor\s+offers?\s+(?:a\s+)?preview)\b/i.test(combined)
+  ) {
+    return {
+      valid: false,
+      failureClass: "EVIDENCE_FAILURE",
+      rejections: [{
+        rule: "contradictionLogic",
+        reason: "COMPETITOR_COUNTEREXAMPLE_VIOLATION: contradictionLogic asserts a universal claim that no competitor offers previews, contradicting verified competitor counterexamples.",
+      }],
+    };
+  }
+
+  return { valid: true };
 }
 
 export async function designBeliefShift(input: BeliefShiftInput): Promise<CanonicalBeliefShift> {
@@ -129,68 +222,7 @@ export async function designBeliefShift(input: BeliefShiftInput): Promise<Canoni
       };
     },
     judge: async (inp, candidate): Promise<JudgeResult<CanonicalBeliefShift>> => {
-      const cur = (candidate.currentBelief || "").trim();
-      const des = (candidate.desiredBelief || "").trim();
-      const logic = (candidate.contradictionLogic || "").trim();
-      const combined = `${des} ${logic}`;
-      const ptText = (inp.productTruthFacts || []).map(f => f.text || f.capability || "").join(" ").toLowerCase();
-
-      if (!cur || cur.length < 15 || !des || des.length < 15) {
-        return {
-          valid: false,
-          failureClass: "SEMANTIC_FAILURE",
-          rejections: [{
-            field: "coreBeliefTransformation",
-            reason: `BELIEF_SHIFT_INCOMPLETE: currentBelief or desiredBelief is empty or too brief (cur=${cur.length}, des=${des.length})`,
-          }],
-        };
-      }
-
-      if (cur.toLowerCase() === des.toLowerCase()) {
-        return {
-          valid: false,
-          failureClass: "SEMANTIC_FAILURE",
-          rejections: [{
-            field: "coreBeliefTransformation",
-            reason: "BELIEF_SHIFT_INCOMPLETE: desiredBelief is identical to currentBelief",
-          }],
-        };
-      }
-
-      if (/refund|billing\s*dispute|automated\s*chargeback/i.test(des) && !ptText.includes("refund")) {
-        return {
-          valid: false,
-          failureClass: "HALLUCINATION",
-          rejections: [{
-            field: "desiredBelief",
-            reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief claims billing/refund capability outside Product Truth",
-          }],
-        };
-      }
-
-      if (/\bhuman[- ]driven\b|\bhuman composer|\bhuman musician|\bover automation\b|\breplacing automation with human\b/i.test(combined) && !ptText.includes("human composer")) {
-        return {
-          valid: false,
-          failureClass: "HALLUCINATION",
-          rejections: [{
-            field: "desiredBelief",
-            reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief or contradictionLogic claims a human-driven process over automation, which is not supported by Product Truth.",
-          }],
-        };
-      }
-
-      if (/\bphonetic\b|\bspecify name pronunciation\b|\bpronunciation guide\b|\blifetime access\b|\bpermanent link\b|\bpermanent access\b|\bnever generic\b/i.test(combined) && !ptText.includes("phonetic") && !ptText.includes("lifetime access")) {
-        return {
-          valid: false,
-          failureClass: "HALLUCINATION",
-          rejections: [{
-            field: "desiredBelief",
-            reason: "PRODUCT_TRUTH_VIOLATION: desiredBelief claims phonetic pronunciation input, lifetime/permanent link hosting, or unsupported absolutes not present in Product Truth. Ground strictly in verified Product Truth capabilities.",
-          }],
-        };
-      }
-
-      return { valid: true };
+      return evaluateBeliefShiftGrounding(inp, candidate);
     },
     repair: async (inp, failedCandidate, rejections) => {
       const feedback = rejections.map(r => r.reason).join("; ");

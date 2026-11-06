@@ -69,6 +69,7 @@ import {
   humanizeSemanticValue,
   translateDistributionTrend,
   buildMonitoringLines,
+  formatWatchtowerComparison,
   Q1_PENDING_FIRST_RUN,
   Q2_PENDING_FIRST_RUN,
   Q1_UNRECOGNIZED,
@@ -1165,8 +1166,15 @@ export function registerPerceptionRoutes(app: Express) {
               typeof parsedEvidence?.confidence === "number"
                 ? parsedEvidence.confidence
                 : null,
-            prevValue: parsedEvidence?.prev ?? null,
-            currValue: parsedEvidence?.curr ?? null,
+            prevValue: parsedEvidence?.prev !== undefined ? parsedEvidence.prev : null,
+            currValue: parsedEvidence?.curr !== undefined ? parsedEvidence.curr : null,
+            structuredComparison: formatWatchtowerComparison({
+              kind: row.kind,
+              evidence: parsedEvidence,
+              prev: parsedEvidence?.prev,
+              curr: parsedEvidence?.curr,
+              hasBaseline: Boolean(row.baselineSnapshotId) || parsedEvidence?.prev !== undefined,
+            }),
             productReferenced: parsedEvidence?.productReferenced ?? null,
             segmentName: parsedEvidence?.segmentName ?? null,
             laneId: parsedEvidence?.laneId ?? null,
@@ -1670,6 +1678,17 @@ export function registerPerceptionRoutes(app: Express) {
         isLatest: briefRow.isLatest,
       } : null;
 
+      const structuredComparison = formatWatchtowerComparison({
+        kind: row.event.kind,
+        evidence: evidenceParsed,
+        prev: prevValue,
+        curr: currValue,
+        fromValue: row.event.fromValue,
+        toValue: row.event.toValue,
+        hasBaseline: Boolean(row.event.baselineSnapshotId) || prevValue !== undefined,
+        failureCode: briefRow?.failureCode ?? null,
+      });
+
       return res.json({
         success: true,
         data: {
@@ -1740,6 +1759,7 @@ export function registerPerceptionRoutes(app: Express) {
               prev: prevValue,
               curr: currValue,
             } : null,
+            structuredComparison,
           },
           strategicBrief: strategicBriefData,
           competitors: [{

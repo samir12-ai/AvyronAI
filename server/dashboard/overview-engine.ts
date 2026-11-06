@@ -4,6 +4,7 @@ import { eq, and, desc, sql, gte, lte, inArray } from "drizzle-orm";
 import { calculatePeriodBounds } from "../reports/monthly-report-engine";
 import { resolveExecutionPlan } from "../orchestrator/execution-plan-resolver";
 import { normalizeTimestampToIsoUtc, normalizeTimestampToUtcDate } from "../utils/timestamp";
+import { formatWatchtowerComparison } from "@shared/perception-translator";
 
 export interface DashboardOverviewPayload {
   user: {
@@ -269,7 +270,7 @@ export async function assembleDashboardOverview(
       )
     );
   const totalPlanRevisions = allCampaignPlans.length;
-  const activePlanVersion = hasPlan ? (activePlan?.version || 1) : 0;
+  const activePlanVersion = hasPlan ? ((activePlan as any)?.versionNumber || (activePlan as any)?.version || 1) : 0;
   const rootBundleVersion = hasPlan
     ? ((activePlan as any)?.rootBundleVersion || rootBundle?.bundleVersion || rootBundle?.version || activePlanVersion)
     : 0;
@@ -382,14 +383,21 @@ export async function assembleDashboardOverview(
       }
     }
 
+    const formattedComp = formatWatchtowerComparison({
+      eventKind: ev.kind,
+      oldValue: evObj.oldValue || (ev as any).beforeState,
+      newValue: evObj.newValue || (ev as any).afterState,
+      diffSummary: evObj.summary || (ev as any).evidenceSummary || title,
+    });
+
     recentConfirmedEvents.push({
       id: ev.id,
       competitorName: compName,
-      kind: ev.kind,
+      kind: ev.kind || "market_signal",
       title,
-      oldValue: evObj.oldValue || (ev as any).beforeState || undefined,
-      newValue: evObj.newValue || (ev as any).afterState || undefined,
-      occurredAt: ev.createdAt.toISOString(),
+      oldValue: formattedComp.beforeSummary,
+      newValue: formattedComp.afterSummary,
+      occurredAt: (ev.createdAt || new Date()).toISOString(),
     });
   }
 
@@ -498,11 +506,73 @@ export async function assembleDashboardOverview(
     }
   }
 
-  // 6. WTDT Tasks (Today) - scoped strictly to designated active execution plan or dailyExecutionTasks
-  let taskRows: (typeof schema.executionTasks.$inferSelect)[] = [];
+  // 6. WTDT Tasks (Today) - scoped strictly to designated active execution plan's active execution_days (or executionTasks fallback)
   const execPlanRes = await resolveExecutionPlan({ accountId, campaignId, intent: "execution" });
+
+  const approvedLaneList: any[] = Array.isArray(planData?.approvedLanes)
+    ? planData.approvedLanes
+    : Array.isArray(rootBundle?.lanes)
+      ? rootBundle.lanes
+      : [];
+  const resolveLaneTitle = (laneId?: string | null): string => {
+    if (laneId) {
+      const match = approvedLaneList.find(
+        (l: any) => l?.laneId === laneId || l?.id === laneId || l?.title === laneId
+      );
+      if (match?.title || match?.name) return match.title || match.name;
+    }
+    if (approvedLaneList[0]?.title || approvedLaneList[0]?.name) {
+      return approvedLaneList[0].title || approvedLaneList[0].name;
+    }
+    return laneId || "Primary Strategic Lane";
+  };
+
+  let priorityTasks: DashboardOverviewPayload["whatToDoTodayCard"]["tasks"] = [];
+  let completedTodayCount = 0;
+
   if (execPlanRes.canExecute && execPlanRes.plan) {
-    taskRows = await db
+    const [latestActiveExecDay] = await db
+      .select()
+      .from(schema.executionDays)
+      .where(
+        and(
+          eq(schema.executionDays.campaignId, campaignId),
+          eq(schema.executionDays.strategicPlanId, execPlanRes.plan.id),
+          eq(schema.executionDays.status, "ACTIVE")
+        )
+      )
+      .orderBy(desc(schema.executionDays.businessDate), desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt))
+      .limit(1);
+
+    const dailyRows = latestActiveExecDay
+      ? await db
+          .select()
+          .from(schema.dailyExecutionTasks)
+          .where(eq(schema.dailyExecutionTasks.executionDayId, latestActiveExecDay.id))
+          .orderBy(schema.dailyExecutionTasks.sequenceOrder)
+          .limit(10)
+      : [];
+
+    const validDailyRows = dailyRows.filter(
+      t => t.status !== "STALE" && t.status !== "CANCELLED" && t.status !== "REPLACED"
+    );
+    if (validDailyRows.length > 0) {
+      completedTodayCount = validDailyRows.filter(t => t.status === "DONE").length;
+      priorityTasks = validDailyRows.slice(0, 3).map((t, idx) => ({
+        id: t.id,
+        order: idx + 1,
+        title: t.title,
+        priorityBadge: t.priority === "MUST_DO" ? "MUST DO" : t.priority === "SHOULD_DO" ? "SHOULD DO" : "OPTIONAL",
+        priorityColor: t.priority === "MUST_DO" ? "red" : t.priority === "SHOULD_DO" ? "orange" : "blue",
+        status: t.status === "DONE" ? "COMPLETED" : t.status,
+        laneTitle: resolveLaneTitle(t.laneId),
+        channel: t.channel || (latestActiveExecDay as any)?.primaryChannel || "INSTAGRAM",
+      }));
+    }
+  }
+
+  if (priorityTasks.length === 0 && execPlanRes.canExecute && execPlanRes.plan) {
+    const taskRows = await db
       .select()
       .from(schema.executionTasks)
       .where(
@@ -514,41 +584,27 @@ export async function assembleDashboardOverview(
       )
       .orderBy(desc(schema.executionTasks.createdAt))
       .limit(10);
-  }
 
-  const activeTasks = taskRows.filter(t => t.status !== "CANCELLED" && t.status !== "REPLACED" && t.status !== "SUPERSEDED_UNAPPROVED_DRAFT" && t.status !== "DRAFT");
-  let priorityTasks: DashboardOverviewPayload["whatToDoTodayCard"]["tasks"] = activeTasks.slice(0, 3).map((t, idx) => ({
-    id: t.id,
-    order: idx + 1,
-    title: t.title,
-    priorityBadge: idx === 0 ? "MUST DO" : (idx === 1 ? "STRATEGY UPDATED" : "SHOULD DO"),
-    priorityColor: idx === 0 ? "red" : (idx === 1 ? "orange" : "blue"),
-    status: t.status,
-    laneTitle: t.strategicLaneId || "Primary Strategic Lane",
-    channel: t.channel || "general",
-  }));
-  let completedTodayCount = activeTasks.filter(t => t.status === "COMPLETED").length;
-
-  if (priorityTasks.length === 0) {
-    const dailyRows = await db
-      .select()
-      .from(schema.dailyExecutionTasks)
-      .where(eq(schema.dailyExecutionTasks.campaignId, campaignId))
-      .orderBy(schema.dailyExecutionTasks.sequenceOrder)
-      .limit(10);
-    if (dailyRows.length > 0) {
-      completedTodayCount = dailyRows.filter(t => t.status === "DONE").length;
-      priorityTasks = dailyRows.slice(0, 3).map((t, idx) => ({
-        id: t.id,
-        order: idx + 1,
-        title: t.title,
-        priorityBadge: t.priority === "MUST_DO" ? "MUST DO" : t.priority === "SHOULD_DO" ? "SHOULD DO" : "OPTIONAL",
-        priorityColor: t.priority === "MUST_DO" ? "red" : t.priority === "SHOULD_DO" ? "orange" : "blue",
-        status: t.status === "DONE" ? "COMPLETED" : t.status,
-        laneTitle: t.laneId || "Primary Gift Box Lane",
-        channel: t.channel || "instagram",
-      }));
-    }
+    const activeTasks = taskRows.filter(
+      t =>
+        t.status !== "CANCELLED" &&
+        t.status !== "REPLACED" &&
+        t.status !== "SUPERSEDED_UNAPPROVED_DRAFT" &&
+        t.status !== "SUPERSEDED" &&
+        t.status !== "superseded" &&
+        t.status !== "DRAFT"
+    );
+    completedTodayCount = activeTasks.filter(t => t.status === "COMPLETED").length;
+    priorityTasks = activeTasks.slice(0, 3).map((t, idx) => ({
+      id: t.id,
+      order: idx + 1,
+      title: t.title,
+      priorityBadge: idx === 0 ? "MUST DO" : (idx === 1 ? "STRATEGY UPDATED" : "SHOULD DO"),
+      priorityColor: idx === 0 ? "red" : (idx === 1 ? "orange" : "blue"),
+      status: t.status,
+      laneTitle: resolveLaneTitle((t as any).strategicLaneId),
+      channel: (t as any).channel || "INSTAGRAM",
+    }));
   }
   const tasksTodayCount = priorityTasks.length;
 

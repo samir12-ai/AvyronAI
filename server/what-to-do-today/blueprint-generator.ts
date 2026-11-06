@@ -97,7 +97,7 @@ export class TaskBlueprintGenerator {
     const context = await buildExecutionPlanningContext(task.campaignId);
 
     // 4. Validate Task Eligibility with structured operational purpose and verified evidence
-    const taskEligibility = evaluateTaskEligibility(task, {
+    const taskEligibility = evaluateTaskEligibility(task as any, {
       planStatus: "APPROVED",
       isPlanDesignatedActive: true,
       verifiedEvidenceTexts: [
@@ -114,36 +114,48 @@ export class TaskBlueprintGenerator {
     }
 
     // 4. Generate with LLM
-    const systemPrompt = `You are the Video Production Director & B2B SaaS Content Architect.
+    const taskLane =
+      context.approvedLanes.find(l => l.laneId === task.laneId) || context.approvedLanes[0];
+    const resolvedCtaUrl =
+      context.productUrl ||
+      taskLane?.destinationUrl ||
+      (task.ctaDestination && task.ctaDestination.includes("http") ? task.ctaDestination : "");
+    const resolvedCtaDestination =
+      task.ctaDestination ||
+      `${taskLane?.primaryCta || context.funnelJourney?.ctaPrimary || "Start Free Trial"}${resolvedCtaUrl ? ` (${resolvedCtaUrl})` : ""}`;
+
+    const systemPrompt = `You are the Creative Production Director & Strategic Content Architect for ${context.businessName || "the brand"}.
 Your role is to produce a comprehensive, broadcast-ready, professional production script and shooting blueprint for an approved marketing task.
 
 CONSTITUTIONAL PRINCIPLES:
 1. STRICT STRATEGY FIDELITY:
-   - Deeply ground the script in the approved strategy: "${context.strategyName}".
+   - Deeply ground the script in the approved positioning umbrella: "${context.strategyName}".
+   - Positioning Narrative: "${context.positioningSummary}".
    - Core Mechanism: "${context.approvedMechanism.mechanismName}" (${context.approvedMechanism.corePrinciple || "Approved Principle"}).
    - Contrast Axis: "${context.contrastAxis}".
-   - Proof Artifact to demonstrate: "${context.approvedMechanism.proofArtifact || "Approved Workflow Demonstration"}".
-   - Target Audience & Pains: ${context.approvedLanes.map(l => `${l.title} (Pain: ${l.primaryPain || "Target Pain"})`).join("; ")}.
-   - Funnel CTA Destination: "${task.ctaDestination || context.funnelJourney?.conversionPath || "Approved Conversion Path"}".
+   - Proof Artifact to demonstrate: "${task.proofRequired || context.approvedMechanism.proofArtifact || "Approved Product Demonstration"}".
+   - Target Audience Lane: [${taskLane?.laneId || "lane_1"}] "${taskLane?.title || "Target Segment"}" (Core Buying Tension: ${taskLane?.primaryPain || "Target Pain"}; Objections: ${(taskLane?.objections || []).slice(0, 3).join("; ")}).
+   - Funnel Conversion CTA & Destination: "${resolvedCtaDestination}".
+   - NEVER use generic B2B phrases like "Webinar / Demo", "Target audience operators", or "Serious operators" unless explicitly present in the approved strategy.
 
 2. ACTIONABLE PRODUCTION SPECIFICATIONS:
    - Provide concrete, word-for-word spoken dialogue (NO generic placeholder sentences like "insert explanation here").
    - Include exact scene-by-scene timestamps and durations (e.g. 0:00 - 0:07, 7s).
-   - Detail specific professional camera shooting angles (e.g., "Close-Up Talking Head at Eye Level", "Full Screen Share: Product Dashboard with Zoom on Core Workflow", "Medium Shot with Lower-Third Infographic", "Over-the-Shoulder Working Shot").
+   - Detail specific professional camera shooting angles and visual directions tailored to the product and audience.
    - Detail exact visual cues, b-roll footage, and on-screen text for every single scene.
 
 3. CHANNEL-SPECIFIC NATIVENESS:
-   - If YOUTUBE: Generate a 5–10 minute structured video blueprint (8–12 scenes) with punchy pattern-interrupt hook, clear problem breakdown, live UI mechanism demo, proof walkthrough, objection handling, and clear webinar/strategy demo CTA.
-   - If TIKTOK / REELS / SHORTS: Generate a fast-paced 30–60s vertical (9:16) video blueprint (4–6 scenes) with 2-second visual hook, fast contrast, live demonstration, and profile/link CTA.
-   - If INSTAGRAM CAROUSEL: Generate 6–8 visually rich slides with slide headlines, visual layout prompts, body copy, and swipe prompts.
+   - If TIKTOK / INSTAGRAM REELS / SHORTS: Generate a fast-paced 30–60s vertical (9:16) video blueprint (4–6 scenes) with an emotional or curiosity 2-second visual hook, clear contrast against generic alternatives, authentic product/keepsake demonstration, and clear CTA to ${resolvedCtaDestination}.
+   - If INSTAGRAM CAROUSEL: Generate 6–8 visually rich slides with slide headlines, visual layout prompts, body copy, and swipe prompts leading to ${resolvedCtaDestination}.
+   - If YOUTUBE: Generate a structured video blueprint with punchy hook, problem breakdown, mechanism demonstration, proof walkthrough, objection handling, and clear CTA to ${resolvedCtaDestination}.
    - If X / FACEBOOK: Generate structured scene/thread beats with visual asset recommendations.
 
 Return a structured JSON object strictly matching this format:
 {
-  "targetFormat": "e.g. YouTube Proof Breakdown (16:9 4K)",
-  "estimatedTotalDuration": "e.g. 6 mins 30 secs" or "45 secs",
+  "targetFormat": "e.g. Instagram Reel (9:16 Vertical) or Instagram Carousel (4:5)",
+  "estimatedTotalDuration": "e.g. 45 secs",
   "aspectRatio": "16:9" | "9:16" | "4:5" | "1:1" | "TEXT_THREAD",
-  "strategicIntent": "One clear sentence explaining the strategic conversion goal",
+  "strategicIntent": "One clear sentence explaining the strategic conversion goal for ${taskLane?.title || "the audience"}",
   "keyTakeaway": "Core insight the viewer will remember",
   "scenes": [
     {
@@ -170,21 +182,21 @@ Return a structured JSON object strictly matching this format:
     }
   ],
   "platformPost": {
-    "postTitle": "SEO-optimized title",
+    "postTitle": "Platform-optimized title",
     "caption": "Full platform-native post caption with line breaks",
-    "hashtags": ["#marketing", "#workflow"],
+    "hashtags": ["#relevant", "#hashtags"],
     "firstComment": "Engaging first comment / discussion starter",
-    "ctaLinkText": "Learn more at official link",
-    "ctaUrl": "${task.ctaDestination || ""}",
-    "thumbnailHookText": "Punchy 3-4 word text for thumbnail"
+    "ctaLinkText": "${taskLane?.primaryCta || context.funnelJourney?.ctaPrimary || "Start Free Trial"}",
+    "ctaUrl": "${resolvedCtaUrl}",
+    "thumbnailHookText": "Punchy 3-4 word text for cover/thumbnail"
   },
   "teleprompterFullScript": "Complete continuous script for teleprompter reading",
   "productionChecklist": [
     { "step": "Review & customize script talking points", "isCompleted": true },
-    { "step": "Record A-Roll talking head scenes", "isCompleted": false },
-    { "step": "Capture product UI screen recordings", "isCompleted": false },
-    { "step": "Edit video & add lower thirds and sound cues", "isCompleted": false },
-    { "step": "Prepare thumbnail & copy platform caption", "isCompleted": false }
+    { "step": "Record primary scenes & emotional reaction clips", "isCompleted": false },
+    { "step": "Capture product / keepsake visual showcase", "isCompleted": false },
+    { "step": "Edit video & add captions, lower thirds, and audio", "isCompleted": false },
+    { "step": "Prepare cover image & copy platform caption", "isCompleted": false }
   ]
 }`;
 
@@ -194,14 +206,17 @@ TASK TO EXECUTE:
 - Title: ${task.title}
 - Description: ${task.description}
 - Channel: ${task.channel} (${task.channelRole})
+- Target Audience Lane: [${taskLane?.laneId || "lane_1"}] ${taskLane?.title || "Target Audience"}
+- Core Buying Pain: ${taskLane?.primaryPain || "Target Pain"}
 - Task Type: ${task.taskType}
 - Priority: ${task.priority}
 - Strategic Objective: ${task.objective}
 - Why This Matters: ${task.reason}
 - Execution Approach Guidance: ${task.executionApproach}
 - Required Proof Asset: ${task.proofRequired || context.approvedMechanism.proofArtifact}
-- CTA / Destination: ${task.ctaDestination || context.funnelJourney?.conversionPath}
-- Estimated Effort: ${task.estimatedEffort || "2 hours"}`;
+- CTA / Destination: ${resolvedCtaDestination}
+- Destination URL: ${resolvedCtaUrl}
+- Estimated Effort: ${task.estimatedEffort || "60 mins"}`;
 
     try {
       const response = await aiChat({
@@ -230,25 +245,27 @@ TASK TO EXECUTE:
         channel: task.channel,
         channelRole: task.channelRole,
         targetFormat: parsed.targetFormat || `${task.channel} Production Asset`,
-        estimatedTotalDuration: parsed.estimatedTotalDuration || task.estimatedEffort || "3-5 mins",
-        aspectRatio: parsed.aspectRatio || (task.channel === "YOUTUBE" ? "16:9" : task.channel === "TIKTOK" ? "9:16" : "4:5"),
-        strategicIntent: parsed.strategicIntent || task.objective || "Establish authority and drive qualified pipeline.",
-        keyTakeaway: parsed.keyTakeaway || "Live market intelligence delivers verified accuracy that static tools cannot match.",
+        estimatedTotalDuration: parsed.estimatedTotalDuration || task.estimatedEffort || "45-60 secs",
+        aspectRatio: parsed.aspectRatio || (task.channel === "YOUTUBE" ? "16:9" : task.channel === "TIKTOK" || task.channel === "INSTAGRAM" ? "9:16" : "4:5"),
+        strategicIntent: parsed.strategicIntent || task.objective || `Drive ${taskLane?.title || "target buyers"} toward ${resolvedCtaDestination}.`,
+        keyTakeaway: parsed.keyTakeaway || context.approvedPromise || context.positioningSummary,
         scenes: Array.isArray(parsed.scenes) ? parsed.scenes : [],
         carouselSlides: Array.isArray(parsed.carouselSlides) ? parsed.carouselSlides : undefined,
-        platformPost: parsed.platformPost || {
-          postTitle: task.title,
-          caption: task.description,
-          hashtags: ["#B2BMarketing", "#AvyronAI"],
-          ctaLinkText: "Learn More",
-          ctaUrl: task.ctaDestination || "https://avyron.ai",
+        platformPost: {
+          postTitle: parsed.platformPost?.postTitle || task.title,
+          caption: parsed.platformPost?.caption || task.description,
+          hashtags: Array.isArray(parsed.platformPost?.hashtags) ? parsed.platformPost.hashtags : [],
+          firstComment: parsed.platformPost?.firstComment,
+          ctaLinkText: parsed.platformPost?.ctaLinkText || taskLane?.primaryCta || context.funnelJourney?.ctaPrimary || "Learn More",
+          ctaUrl: parsed.platformPost?.ctaUrl || resolvedCtaUrl || resolvedCtaDestination,
+          thumbnailHookText: parsed.platformPost?.thumbnailHookText,
         },
         teleprompterFullScript: parsed.teleprompterFullScript || (parsed.scenes ? parsed.scenes.map((s: any) => s.spokenScript).join("\n\n") : task.description),
         productionChecklist: Array.isArray(parsed.productionChecklist) ? parsed.productionChecklist : [
           { step: "Review & finalize script", isCompleted: true },
           { step: "Record primary scenes", isCompleted: false },
-          { step: "Record screen share demo", isCompleted: false },
-          { step: "Edit & export final video", isCompleted: false },
+          { step: "Capture product & keepsake showcase", isCompleted: false },
+          { step: "Edit & export final asset", isCompleted: false },
         ],
         generatedAt: new Date().toISOString(),
       };

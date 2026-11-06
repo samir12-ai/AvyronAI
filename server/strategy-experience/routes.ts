@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { resolveAccountId, AuthConfigurationError } from "../auth";
 import { assertCampaignBelongsTo, handleOwnershipError, AuthenticationRequiredError } from "../auth-helpers";
-import { StrategyExperienceService } from "./service";
+import { StrategyExperienceService, ProposalApplyError } from "./service";
 
 function handleAuthOrOwnershipError(error: any, res: Response): boolean {
   if (
@@ -211,14 +211,23 @@ export function registerStrategyExperienceRoutes(app: Express) {
     try {
       const accountId = resolveAccountId(req);
       const { proposalId } = req.params;
+      const options = req.body?.options || req.body || {};
 
-      const result = await StrategyExperienceService.approveProposal(proposalId, accountId, req.body?.options);
+      const result = await StrategyExperienceService.approveProposal(String(proposalId), accountId, options);
       return res.json(result);
     } catch (error: any) {
       if (handleAuthOrOwnershipError(error, res)) return;
+      if (error instanceof ProposalApplyError || error?.name === "ProposalApplyError" || typeof error?.statusCode === "number") {
+        return res.status(error.statusCode || 422).json({
+          error: error.code || "PROPOSAL_APPLY_REJECTED",
+          code: error.code || "PROPOSAL_APPLY_REJECTED",
+          message: error.message,
+          status: error.code === "PROPOSAL_STALE" ? "STALE" : "REJECTED",
+        });
+      }
       console.error("[StrategyExperience] Approve proposal error:", error.message);
       if (error.message?.includes("PROPOSAL_STALE")) {
-        return res.status(409).json({ error: error.message, status: "STALE" });
+        return res.status(409).json({ error: error.message, code: "PROPOSAL_STALE", status: "STALE" });
       }
       return res.status(500).json({ error: error.message || "Failed to approve proposal" });
     }

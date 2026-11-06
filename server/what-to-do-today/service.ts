@@ -7,11 +7,23 @@
 
 import { db } from "../db";
 import * as schema from "@shared/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, sql } from "drizzle-orm";
 import { buildExecutionPlanningContext } from "./context-builder";
 import { generateValidatedDailyPlan } from "./judge";
-import { TaskStatus, DailyPlanDraft } from "./contracts";
+import { TaskStatus, DailyPlanDraft, ExecutionPlanningContext } from "./contracts";
+import { resolveExecutionPlan } from "../orchestrator/execution-plan-resolver";
 import { logger } from "../logger";
+
+export type HydratedExecutionTask = schema.DailyExecutionTaskRow & {
+  channelMode?: string;
+  laneTitle?: string;
+  buyingTension?: string;
+  funnelStage?: string;
+  proofRequirement?: string;
+  conversionAction?: string;
+  destinationUrl?: string;
+  sourceStrategyVersion?: number;
+};
 
 export interface ExecutionDayPayload {
   executionDayId: string;
@@ -19,7 +31,9 @@ export interface ExecutionDayPayload {
   accountId: string;
   businessDate: string;
   strategyRootId: string;
-  strategyRootVersion: number;
+  strategyRootVersion: number | null;
+  rootBundleId?: string;
+  rootBundleVersion?: number;
   strategicPlanId: string;
   strategicPlanVersion: number;
   strategyName: string;
@@ -27,17 +41,24 @@ export interface ExecutionDayPayload {
   executionRationale: string;
   status: string;
   primaryChannel: string;
-  tasks: Array<schema.DailyExecutionTaskRow>;
+  primaryChannelMode?: string;
+  tasks: Array<HydratedExecutionTask>;
   tasksByPriority: {
-    mustDo: Array<schema.DailyExecutionTaskRow>;
-    shouldDo: Array<schema.DailyExecutionTaskRow>;
-    optional: Array<schema.DailyExecutionTaskRow>;
-    waitingBlocked: Array<schema.DailyExecutionTaskRow>;
-    completed: Array<schema.DailyExecutionTaskRow>;
+    mustDo: Array<HydratedExecutionTask>;
+    shouldDo: Array<HydratedExecutionTask>;
+    optional: Array<HydratedExecutionTask>;
+    waitingBlocked: Array<HydratedExecutionTask>;
+    completed: Array<HydratedExecutionTask>;
   };
   channelPlan: Array<{
     channel: string;
+    channelName?: string;
+    mode?: string;
+    channelMode?: string;
     role: string;
+    allocationPct?: number;
+    monthlyAmount?: number;
+    currency?: string;
     executionIntent: string;
     whyToday: string;
     currentTaskTitle?: string | null;
@@ -45,13 +66,18 @@ export interface ExecutionDayPayload {
     recentTaskCount?: number;
     recentCompletedTaskCount?: number;
   }>;
+  rejectedPaidChannels?: string[];
+  rejectedOrganicChannels?: string[];
   generatedAt: string;
 }
 
 export class WhatToDoTodayService {
+  private static inFlightGenerations = new Map<string, Promise<ExecutionDayPayload>>();
+
   /**
    * Retrieves existing execution day for the given date, or generates and persists a new one.
-   * STRICT IDEMPOTENCY: For (campaignId, businessDate), repeated calls return the same executionDayId.
+   * STRICT IDEMPOTENCY & LINEAGE PINNING: For (campaignId, businessDate, strategicPlanId, strategyRootId, rootBundleId),
+   * repeated calls return the same executionDayId; if the active strategy plan changed, stale days are superseded.
    */
   static async getOrCreateTodayPlan(
     campaignId: string,
@@ -60,134 +86,285 @@ export class WhatToDoTodayService {
     accountIdParam?: string
   ): Promise<ExecutionDayPayload> {
     const businessDate = businessDateInput || new Date().toISOString().split("T")[0];
+    const lockKey = `${campaignId}::${businessDate}`;
 
-    // 1. Check if execution day already exists for this date (or latest in Demo Mode)
-    if (!forceRegenerate || process.env.AVYRON_DEMO_MODE === "1") {
-      const conditions = [
-        eq(schema.executionDays.campaignId, campaignId),
-        eq(schema.executionDays.businessDate, businessDate),
-      ];
-      if (accountIdParam) {
-        conditions.push(eq(schema.executionDays.accountId, accountIdParam));
-      }
-      let [existingDay] = await db
-        .select()
-        .from(schema.executionDays)
-        .where(and(...conditions))
-        .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt))
-        .limit(1);
-
-      if (!existingDay && process.env.AVYRON_DEMO_MODE === "1") {
-        [existingDay] = await db
-          .select()
-          .from(schema.executionDays)
-          .where(eq(schema.executionDays.campaignId, campaignId))
-          .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt))
-          .limit(1);
-      }
-
-      if (existingDay) {
-        logger.info(`[WhatToDoToday] Returning existing execution day ${existingDay.id} for date ${businessDate}`);
-        return this.hydrateExecutionDayPayload(existingDay);
-      }
+    if (!forceRegenerate && this.inFlightGenerations.has(lockKey)) {
+      return this.inFlightGenerations.get(lockKey)!;
     }
 
-    // 2. Build Bounded Execution Planning Context
+    const runPromise = this._getOrCreateTodayPlanInternal(campaignId, businessDate, forceRegenerate, accountIdParam);
+    this.inFlightGenerations.set(lockKey, runPromise);
+    try {
+      return await runPromise;
+    } finally {
+      this.inFlightGenerations.delete(lockKey);
+    }
+  }
+
+  private static async _getOrCreateTodayPlanInternal(
+    campaignId: string,
+    businessDate: string,
+    forceRegenerate: boolean,
+    accountIdParam?: string
+  ): Promise<ExecutionDayPayload> {
+    // 1. Build Bounded Execution Planning Context from Designated Active Plan
     const context = await buildExecutionPlanningContext(campaignId, businessDate, accountIdParam);
+
+    // 2. Check existing execution_days rows for this date (or latest in Demo Mode)
+    const conditions = [
+      eq(schema.executionDays.campaignId, campaignId),
+      eq(schema.executionDays.businessDate, businessDate),
+    ];
+    if (accountIdParam) {
+      conditions.push(eq(schema.executionDays.accountId, accountIdParam));
+    }
+    let existingDays = await db
+      .select()
+      .from(schema.executionDays)
+      .where(and(...conditions))
+      .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt));
+
+    if (existingDays.length === 0 && process.env.AVYRON_DEMO_MODE === "1" && !forceRegenerate) {
+      existingDays = await db
+        .select()
+        .from(schema.executionDays)
+        .where(eq(schema.executionDays.campaignId, campaignId))
+        .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt))
+        .limit(1);
+    }
+
+    const approvedPlatformsSet = new Set(context.channelHierarchy.approvedChannels.map(c => c.platform));
+
+    const expectedDomain = (context.productUrl || context.funnelJourney?.destinationUrl || "")
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/$/, "")
+      .toLowerCase();
+    const expectedCtaLower = String(context.funnelJourney?.ctaPrimary || "").toLowerCase();
+
+    const isTaskSetAlignedWithStrategy = (dayTasks: schema.DailyExecutionTaskRow[]) => {
+      if (dayTasks.length === 0) return false;
+      const hasPrimaryChannelTask = dayTasks.some(t => t.channel === context.channelHierarchy.primaryChannel);
+      const hasUnapprovedChannelTask = dayTasks.some(t => !approvedPlatformsSet.has(t.channel as any));
+      const hasUngroundedCtaDestination = dayTasks.some(t => {
+        const destLower = String(t.ctaDestination || "").toLowerCase();
+        if (!destLower) return true;
+        if (expectedDomain && destLower.includes(expectedDomain)) return false;
+        if (expectedCtaLower && destLower.includes(expectedCtaLower)) return false;
+        return Boolean(expectedDomain || expectedCtaLower);
+      });
+      return hasPrimaryChannelTask && !hasUnapprovedChannelTask && !hasUngroundedCtaDestination;
+    };
+
+    if (!forceRegenerate && existingDays.length > 0) {
+      for (const candidateDay of existingDays) {
+        if (candidateDay.status === "SUPERSEDED" || candidateDay.status === "ARCHIVED") {
+          continue;
+        }
+        const lineageMatches =
+          candidateDay.strategicPlanId === context.strategicPlanId &&
+          candidateDay.strategyRootId === context.strategyRootId &&
+          candidateDay.rootBundleId === context.rootBundleId;
+
+        if (lineageMatches) {
+          const dayTasks = await db
+            .select()
+            .from(schema.dailyExecutionTasks)
+            .where(eq(schema.dailyExecutionTasks.executionDayId, candidateDay.id));
+
+          if (isTaskSetAlignedWithStrategy(dayTasks)) {
+            logger.info(`[WhatToDoToday] Returning lineage-verified execution day ${candidateDay.id} for date ${businessDate}`);
+            return this.hydrateExecutionDayPayload(candidateDay, context);
+          }
+        }
+      }
+    }
 
     // 3. Generate Validated Daily Plan (Generator -> Semantic Judge -> Targeted Repair)
     const { plan, judgeReport, attempts } = await generateValidatedDailyPlan(context);
     logger.info(`[WhatToDoToday] Validated plan created in ${attempts} attempt(s) with Judge score ${judgeReport.score}`);
 
-    // 4. Persist Execution Day
-    const [insertedDay] = await db
-      .insert(schema.executionDays)
-      .values({
-        accountId: context.accountId,
-        campaignId: context.campaignId,
-        businessDate: context.businessDate,
-        strategyRootId: context.strategyRootId,
-        rootBundleId: context.rootBundleId,
-        strategicPlanId: context.strategicPlanId,
-        dailyMission: plan.dailyMission,
-        executionRationale: plan.executionRationale,
-        status: "ACTIVE",
-        generationVersion: 1,
-      })
-      .returning();
+    // 4. Durable DB-level concurrency/idempotency lock + active plan version re-verification before commit
+    const committedDay = await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${campaignId}), hashtext(${businessDate}))`);
 
-    // 5. Persist Tasks
-    const taskValues = plan.tasks.map((t, idx) => ({
-      executionDayId: insertedDay.id,
-      campaignId: context.campaignId,
-      strategyRootId: context.strategyRootId,
-      laneId: t.laneId || null,
-      title: t.title,
-      description: t.description,
-      taskType: t.taskType,
-      priority: t.priority,
-      status: t.priority === "WAITING_BLOCKED" ? "BLOCKED" : "PLANNED",
-      channel: t.channel,
-      channelRole: t.channelRole,
-      objective: t.objective,
-      reason: t.reason,
-      expectedOutcome: t.expectedOutcome,
-      sourceAuthority: t.sourceAuthority,
-      sourceDecisionIds: t.sourceDecisionIds || [],
-      estimatedEffort: t.estimatedEffort,
-      sequenceOrder: idx + 1,
-      dependencies: t.dependencies || [],
-      executionApproach: t.executionApproach,
-      proofRequired: t.proofRequired,
-      ctaDestination: t.ctaDestination,
-    }));
-
-    if (taskValues.length > 0) {
-      await db.insert(schema.dailyExecutionTasks).values(taskValues);
-    }
-
-    // 6. Update Channel Coverage Rolling Memory
-    for (const cp of plan.channelPlan) {
-      const existingCoverage = await db
+      // Re-verify active designated plan version before committing tasks
+      const [currentActivePlan] = await tx
         .select()
-        .from(schema.executionChannelCoverage)
+        .from(schema.strategicPlans)
         .where(
           and(
-            eq(schema.executionChannelCoverage.campaignId, context.campaignId),
-            eq(schema.executionChannelCoverage.channel, cp.channel)
+            eq(schema.strategicPlans.campaignId, campaignId),
+            eq(schema.strategicPlans.isDesignatedActive, true),
+            eq(schema.strategicPlans.status, "APPROVED")
           )
         )
+        .orderBy(desc(schema.strategicPlans.version), desc(schema.strategicPlans.createdAt))
         .limit(1);
 
-      const hasActiveTask = plan.tasks.some(t => t.channel === cp.channel && t.priority !== "WAITING_BLOCKED");
+      if (
+        !currentActivePlan ||
+        currentActivePlan.id !== context.strategicPlanId ||
+        (currentActivePlan.version || 1) !== context.strategicPlanVersion
+      ) {
+        throw new Error(
+          `STALE_STRATEGY_GENERATION_ABORTED: Active plan changed during generation (expected ${context.strategicPlanId} v${context.strategicPlanVersion}, found ${currentActivePlan?.id || "none"} v${currentActivePlan?.version || 0}).`
+        );
+      }
 
-      if (existingCoverage.length > 0) {
-        await db
-          .update(schema.executionChannelCoverage)
-          .set({
+      // Re-query execution_days inside the transaction lock for cross-worker idempotency
+      const lockedDays = await tx
+        .select()
+        .from(schema.executionDays)
+        .where(and(...conditions))
+        .orderBy(desc(schema.executionDays.generationVersion), desc(schema.executionDays.createdAt));
+
+      if (!forceRegenerate && lockedDays.length > 0) {
+        for (const candidateDay of lockedDays) {
+          if (candidateDay.status === "SUPERSEDED" || candidateDay.status === "ARCHIVED") {
+            continue;
+          }
+          const lineageMatches =
+            candidateDay.strategicPlanId === context.strategicPlanId &&
+            candidateDay.strategyRootId === context.strategyRootId &&
+            candidateDay.rootBundleId === context.rootBundleId;
+
+          if (lineageMatches) {
+            const dayTasks = await tx
+              .select()
+              .from(schema.dailyExecutionTasks)
+              .where(eq(schema.dailyExecutionTasks.executionDayId, candidateDay.id));
+
+            if (isTaskSetAlignedWithStrategy(dayTasks)) {
+              logger.info(`[WhatToDoToday] Returning concurrent lineage-verified execution day ${candidateDay.id} for date ${businessDate}`);
+              return candidateDay;
+            }
+          }
+        }
+      }
+
+      // Supersede any stale/mismatched execution_days for this date while preserving DONE tasks
+      let nextGenVersion = 1;
+      for (const oldDay of lockedDays) {
+        if (oldDay.generationVersion >= nextGenVersion) {
+          nextGenVersion = oldDay.generationVersion + 1;
+        }
+        if (oldDay.status !== "SUPERSEDED") {
+          await tx
+            .update(schema.executionDays)
+            .set({ status: "SUPERSEDED", updatedAt: new Date() })
+            .where(eq(schema.executionDays.id, oldDay.id));
+
+          const oldTasks = await tx
+            .select({ id: schema.dailyExecutionTasks.id, status: schema.dailyExecutionTasks.status })
+            .from(schema.dailyExecutionTasks)
+            .where(eq(schema.dailyExecutionTasks.executionDayId, oldDay.id));
+
+          for (const ot of oldTasks) {
+            if (ot.status !== "DONE" && ot.status !== "COMPLETED") {
+              await tx
+                .update(schema.dailyExecutionTasks)
+                .set({ status: "STALE", updatedAt: new Date() })
+                .where(eq(schema.dailyExecutionTasks.id, ot.id));
+            }
+          }
+        }
+      }
+
+      // Persist Execution Day
+      const [insertedDay] = await tx
+        .insert(schema.executionDays)
+        .values({
+          accountId: context.accountId,
+          campaignId: context.campaignId,
+          businessDate: context.businessDate,
+          strategyRootId: context.strategyRootId,
+          rootBundleId: context.rootBundleId,
+          strategicPlanId: context.strategicPlanId,
+          dailyMission: plan.dailyMission,
+          executionRationale: plan.executionRationale,
+          status: "ACTIVE",
+          generationVersion: nextGenVersion,
+        })
+        .returning();
+
+      // Persist Tasks
+      const taskValues = plan.tasks.map((t, idx) => ({
+        executionDayId: insertedDay.id,
+        campaignId: context.campaignId,
+        strategyRootId: context.strategyRootId,
+        laneId: t.laneId || context.approvedLanes[0]?.laneId || null,
+        title: t.title,
+        description: t.description,
+        taskType: t.taskType,
+        priority: t.priority,
+        status: t.priority === "WAITING_BLOCKED" ? "BLOCKED" : "PLANNED",
+        channel: t.channel,
+        channelRole: t.channel === context.channelHierarchy.primaryChannel ? "PRIMARY" : "SUPPORTING",
+        objective: t.objective,
+        reason: t.reason,
+        expectedOutcome: t.expectedOutcome,
+        sourceAuthority: t.sourceAuthority,
+        sourceDecisionIds: t.sourceDecisionIds || [],
+        estimatedEffort: t.estimatedEffort,
+        sequenceOrder: idx + 1,
+        dependencies: t.dependencies || [],
+        executionApproach: t.executionApproach,
+        proofRequired: t.proofRequired,
+        ctaDestination: t.ctaDestination,
+      }));
+
+      if (taskValues.length > 0) {
+        await tx.insert(schema.dailyExecutionTasks).values(taskValues);
+      }
+
+      // Update Channel Coverage Rolling Memory (strictly for approved channels)
+      const existingCoverages = await tx
+        .select()
+        .from(schema.executionChannelCoverage)
+        .where(eq(schema.executionChannelCoverage.campaignId, context.campaignId));
+
+      for (const cov of existingCoverages) {
+        if (!approvedPlatformsSet.has(cov.channel as any)) {
+          await tx
+            .delete(schema.executionChannelCoverage)
+            .where(eq(schema.executionChannelCoverage.id, cov.id));
+        }
+      }
+
+      for (const cp of plan.channelPlan) {
+        const existingCoverage = existingCoverages.find(c => c.channel === cp.channel);
+        const hasActiveTask = plan.tasks.some(t => t.channel === cp.channel && t.priority !== "WAITING_BLOCKED");
+
+        if (existingCoverage) {
+          await tx
+            .update(schema.executionChannelCoverage)
+            .set({
+              strategicRole: cp.role,
+              lastExecutionDate: hasActiveTask ? businessDate : existingCoverage.lastExecutionDate,
+              recentTaskCount: existingCoverage.recentTaskCount + (hasActiveTask ? 1 : 0),
+              currentCoverageState: cp.coverageState,
+              executionDayId: insertedDay.id,
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.executionChannelCoverage.id, existingCoverage.id));
+        } else {
+          await tx.insert(schema.executionChannelCoverage).values({
+            campaignId: context.campaignId,
+            channel: cp.channel,
             strategicRole: cp.role,
-            lastExecutionDate: hasActiveTask ? businessDate : existingCoverage[0].lastExecutionDate,
-            recentTaskCount: existingCoverage[0].recentTaskCount + (hasActiveTask ? 1 : 0),
+            lastExecutionDate: hasActiveTask ? businessDate : null,
+            recentTaskCount: hasActiveTask ? 1 : 0,
+            recentCompletedTaskCount: 0,
             currentCoverageState: cp.coverageState,
             executionDayId: insertedDay.id,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.executionChannelCoverage.id, existingCoverage[0].id));
-      } else {
-        await db.insert(schema.executionChannelCoverage).values({
-          campaignId: context.campaignId,
-          channel: cp.channel,
-          strategicRole: cp.role,
-          lastExecutionDate: hasActiveTask ? businessDate : null,
-          recentTaskCount: hasActiveTask ? 1 : 0,
-          recentCompletedTaskCount: 0,
-          currentCoverageState: cp.coverageState,
-          executionDayId: insertedDay.id,
-        });
+          });
+        }
       }
-    }
 
-    return this.hydrateExecutionDayPayload(insertedDay);
+      return insertedDay;
+    });
+
+    return this.hydrateExecutionDayPayload(committedDay, context);
   }
 
   /**
@@ -240,18 +417,73 @@ export class WhatToDoTodayService {
   /**
    * Hydrates full ExecutionDayPayload with tasks and channel ecosystem.
    */
-  private static async hydrateExecutionDayPayload(day: schema.ExecutionDayRow): Promise<ExecutionDayPayload> {
-    const tasks = await db
+  private static async hydrateExecutionDayPayload(
+    day: schema.ExecutionDayRow,
+    contextParam?: ExecutionPlanningContext
+  ): Promise<ExecutionDayPayload> {
+    const context =
+      contextParam ||
+      (await buildExecutionPlanningContext(day.campaignId, day.businessDate, day.accountId));
+
+    const rawTasks = await db
       .select()
       .from(schema.dailyExecutionTasks)
       .where(eq(schema.dailyExecutionTasks.executionDayId, day.id))
       .orderBy(schema.dailyExecutionTasks.sequenceOrder);
 
+    const primaryChannel = context.channelHierarchy.primaryChannel;
+    const primaryChannelMode = context.channelHierarchy.primaryChannelMode;
+    const strategyName = context.strategyName;
+
+    const tasks: Array<HydratedExecutionTask> = rawTasks.map(t => {
+      const chDec =
+        context.channelHierarchy.approvedChannels.find(c => c.platform === t.channel) ||
+        context.channelHierarchy.approvedChannels[0];
+      const laneCtx =
+        context.approvedLanes.find(l => l.laneId === t.laneId) ||
+        context.approvedLanes[0];
+      const stageIdx = t.channel === primaryChannel ? Math.min(1, Math.max(0, (laneCtx?.funnelStages?.length || 1) - 1)) : 0;
+      const stageCtx = laneCtx?.funnelStages?.[stageIdx] || laneCtx?.funnelStages?.[0];
+
+      const lanePrimaryCta =
+        laneCtx?.primaryCta ||
+        stageCtx?.cta ||
+        context.funnelJourney?.ctaPrimary ||
+        "Start Your Free Song Trial";
+      const rawCtaDest = String(t.ctaDestination || "").trim();
+      const hydratedCtaDest =
+        !rawCtaDest
+          ? `${lanePrimaryCta}${context.productUrl ? ` (${context.productUrl})` : ""}`
+          : /^https?:\/\/\S+$/i.test(rawCtaDest)
+            ? `${lanePrimaryCta} (${rawCtaDest})`
+            : rawCtaDest;
+
+      return {
+        ...t,
+        ctaDestination: hydratedCtaDest,
+        channelMode: chDec?.mode || primaryChannelMode,
+        laneTitle: laneCtx?.title || (laneCtx as any)?.laneTitle || t.laneId || undefined,
+        buyingTension: laneCtx?.buyingTension || laneCtx?.primaryPain || undefined,
+        funnelStage: stageCtx?.stageName || "Consideration & Preview Validation",
+        proofRequirement:
+          t.proofRequired ||
+          (stageCtx as any)?.proofRequirement ||
+          laneCtx?.proofRequirements?.[0] ||
+          undefined,
+        conversionAction:
+          stageCtx?.conversionAction ||
+          laneCtx?.conversionAction ||
+          undefined,
+        destinationUrl: context.productUrl || t.ctaDestination || undefined,
+        sourceStrategyVersion: context.strategicPlanVersion,
+      };
+    });
+
     // Group tasks by customer-facing sections
-    const mustDo = tasks.filter(t => t.priority === "MUST_DO" && t.status !== "DONE");
-    const shouldDo = tasks.filter(t => t.priority === "SHOULD_DO" && t.status !== "DONE");
-    const optional = tasks.filter(t => t.priority === "OPTIONAL" && t.status !== "DONE");
-    const waitingBlocked = tasks.filter(t => t.priority === "WAITING_BLOCKED" || t.status === "BLOCKED");
+    const mustDo = tasks.filter(t => t.priority === "MUST_DO" && t.status !== "DONE" && t.status !== "STALE");
+    const shouldDo = tasks.filter(t => t.priority === "SHOULD_DO" && t.status !== "DONE" && t.status !== "STALE");
+    const optional = tasks.filter(t => t.priority === "OPTIONAL" && t.status !== "DONE" && t.status !== "STALE");
+    const waitingBlocked = tasks.filter(t => (t.priority === "WAITING_BLOCKED" || t.status === "BLOCKED") && t.status !== "STALE");
     const completed = tasks.filter(t => t.status === "DONE");
 
     // Fetch channel coverage
@@ -260,37 +492,31 @@ export class WhatToDoTodayService {
       .from(schema.executionChannelCoverage)
       .where(eq(schema.executionChannelCoverage.campaignId, day.campaignId));
 
-    // Resolve Strategy Root & Bundle version
-    const [root] = await db.select().from(schema.strategyRoots).where(eq(schema.strategyRoots.id, day.strategyRootId)).limit(1);
-    const [bundle] = await db.select().from(schema.rootBundles).where(eq(schema.rootBundles.id, day.rootBundleId)).limit(1);
-    const [plan] = await db.select().from(schema.strategicPlans).where(eq(schema.strategicPlans.id, day.strategicPlanId)).limit(1);
-
-    let mechName = "Market Intelligence Simplicity and Ease";
-    try {
-      const mech = typeof root?.approvedMechanism === "string" ? JSON.parse(root.approvedMechanism) : root?.approvedMechanism;
-      if (mech?.mechanismName) mechName = mech.mechanismName;
-    } catch {}
-
-    const primaryTask = tasks.find(t => t.channelRole === "PRIMARY");
-    const primaryChannel = primaryTask?.channel || "YOUTUBE";
-
-    const coreChannels = ["YOUTUBE", "INSTAGRAM", "TIKTOK", "FACEBOOK", "X"];
-    const channelPlan = coreChannels.map(ch => {
+    const channelPlan = context.channelHierarchy.approvedChannels.map(chDec => {
+      const ch = chDec.platform;
       const cov = coverages.find(c => c.channel === ch);
-      const chTask = tasks.find(t => t.channel === ch);
+      const chTask = tasks.find(t => t.channel === ch && t.status !== "STALE");
       const isPrimary = ch === primaryChannel;
 
       return {
         channel: ch,
+        channelName: chDec.channelName,
+        mode: chDec.mode,
+        channelMode: chDec.mode,
         role: isPrimary ? "PRIMARY" : "SUPPORTING",
-        executionIntent: isPrimary
-          ? "Primary proof anchor and authority demonstration"
-          : `Native supporting execution of ${mechName}`,
+        allocationPct: chDec.allocationPct,
+        monthlyAmount: chDec.monthlyAmount,
+        currency: chDec.currency,
+        executionIntent:
+          chDec.rationale ||
+          (isPrimary
+            ? `Primary ${chDec.mode.toLowerCase()} proof anchor and emotional storytelling hub (${chDec.allocationPct ?? 60}% effort share)`
+            : `Supporting ${chDec.mode.toLowerCase()} discovery and reach engine (${chDec.allocationPct ?? 40}% effort share)`),
         whyToday: chTask
-          ? (chTask.priority === "WAITING_BLOCKED" ? "Staged to run once primary proof asset is created" : "Active native task executing today")
+          ? (chTask.priority === "WAITING_BLOCKED" ? "Staged to run once primary proof asset is created" : `Active ${chDec.mode.toLowerCase()} task executing today`)
           : "Staged in coverage rotation",
         currentTaskTitle: chTask?.title || null,
-        coverageState: cov?.currentCoverageState || (chTask ? "ACTIVE" : "PENDING_PREREQUISITE"),
+        coverageState: cov?.currentCoverageState || (chTask ? "ACTIVE" : "ROTATION_DUE"),
         recentTaskCount: cov?.recentTaskCount || (chTask ? 1 : 0),
         recentCompletedTaskCount: cov?.recentCompletedTaskCount || 0,
       };
@@ -302,14 +528,17 @@ export class WhatToDoTodayService {
       accountId: day.accountId,
       businessDate: day.businessDate,
       strategyRootId: day.strategyRootId,
-      strategyRootVersion: bundle?.version || 56,
+      strategyRootVersion: context.strategyRootVersion,
+      rootBundleId: day.rootBundleId,
+      rootBundleVersion: context.rootBundleVersion,
       strategicPlanId: day.strategicPlanId,
-      strategicPlanVersion: plan?.version || 1,
-      strategyName: mechName,
+      strategicPlanVersion: context.strategicPlanVersion,
+      strategyName,
       dailyMission: day.dailyMission,
       executionRationale: day.executionRationale || "",
       status: day.status,
       primaryChannel,
+      primaryChannelMode,
       tasks,
       tasksByPriority: {
         mustDo,
@@ -319,6 +548,8 @@ export class WhatToDoTodayService {
         completed,
       },
       channelPlan,
+      rejectedPaidChannels: context.channelHierarchy.rejectedPaidChannels,
+      rejectedOrganicChannels: context.channelHierarchy.rejectedOrganicChannels,
       generatedAt: day.generatedAt ? day.generatedAt.toISOString() : new Date().toISOString(),
     };
   }

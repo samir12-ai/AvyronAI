@@ -152,7 +152,7 @@ export function buildGroundingContract(
 
   // --- SYNTHESIS GROUNDING (SYNTHESIS_NAMESPACE) ---
   lines.push(
-    "RULE S — SYNTHESIS GROUNDING: Your strategic contribution is the CONNECTION: explain concretely how a validated capability addresses the selected problem. You may be creative in the connection, but you may not change the meaning of either the problem or the capability, and you may not synthesize a new 'problem' by combining capability language with evidence fragments.",
+    "RULE S — SYNTHESIS GROUNDING: Your strategic contribution is the CONNECTION: explain concretely how a validated capability addresses the selected problem. You may be creative in the connection, but you may not change the meaning of either the problem or the capability, and you may not synthesize a new 'problem' by combining capability language with evidence fragments.\nRULE C — COMPETITOR COUNTEREXAMPLE & PRODUCT TRUTH BOUNDARY: Never generalize a complaint about one competitor into a universal claim about 'all competitors' or 'competitors force buyers to...' when competitor profiles or counterexamples show other competitors offer that feature (e.g., pre-payment previews or multimedia deliverables). Never invent unsupported guarantees not explicitly verified in Product Truth (such as permanent/lifetime link hosting, instant delivery, unlimited revisions, or unverified dollar savings).",
   );
 
   if (hasRefs) {
